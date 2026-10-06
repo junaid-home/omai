@@ -728,6 +728,7 @@ export function MessageTimeline(props: {
     },
     onError: (err) => {
       showToast({
+        variant: "error",
         title: language.t("common.requestFailed"),
         description: errorMessage(err),
       })
@@ -762,6 +763,7 @@ export function MessageTimeline(props: {
       )
       .catch((err: unknown) =>
         showToast({
+          variant: "error",
           title: language.t("common.requestFailed"),
           description: errorMessage(err),
         }),
@@ -874,6 +876,7 @@ export function MessageTimeline(props: {
       })
       .catch((err) => {
         showToast({
+          variant: "error",
           title: language.t("common.requestFailed"),
           description: errorMessage(err),
         })
@@ -893,6 +896,7 @@ export function MessageTimeline(props: {
       .then((x) => x.data)
       .catch((err) => {
         showToast({
+          variant: "error",
           title: language.t("session.delete.failed.title"),
           description: errorMessage(err),
         })

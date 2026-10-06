@@ -261,7 +261,7 @@ export function SessionToolsTab(props: SessionToolsTabProps = {}) {
       setState("copied", true)
       setTimeout(() => setState("copied", false), 2000)
     } catch {
-      showToast({ title: language.t("publish.copyUrl.failed") })
+      showToast({ variant: "error", title: language.t("publish.copyUrl.failed") })
     }
   }
 
@@ -421,10 +421,14 @@ export function SessionToolsTab(props: SessionToolsTabProps = {}) {
                       showToast({ title: language.t("publish.domain.removed", { domain }) })
                     } else {
                       const err = await response.json()
-                      showToast({ title: errorMessage(err) || language.t("publish.domain.remove.failed") })
+                      showToast({
+                        variant: "error",
+                        title: errorMessage(err) || language.t("publish.domain.remove.failed"),
+                      })
                     }
                   } catch (err: unknown) {
                     showToast({
+                      variant: "error",
                       title: err instanceof Error ? err.message : language.t("publish.domain.remove.failed"),
                     })
                   } finally {

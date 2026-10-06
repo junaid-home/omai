@@ -13,7 +13,9 @@ export function ToastRegion(props: { v2: boolean }) {
   return <Toast.Region />
 }
 
+// Error popups are never shown; failures remain visible in the console and inline UI only.
 export function showToast(options: ToastOptions | string) {
+  if (typeof options !== "string" && options.variant === "error") return -1
   if (!v2) return showLegacyToast(options)
   if (typeof options === "string") return showToastV2(options)
 

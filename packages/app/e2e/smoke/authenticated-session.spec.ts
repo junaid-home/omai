@@ -68,8 +68,9 @@ test("central signup keeps the original fields and sends a cleaned fragment invi
   expect(await page.evaluate(() => location.hash)).toBe("")
 })
 
-test("central save errors use the original toast and retry without losing the draft", async ({ page }) => {
+test("central save errors recover silently without losing the draft", async ({ page }) => {
   let unavailable = true
+  let failedWrites = 0
   const writes: string[] = []
   await mockOpenCodeServer(page, {
     mode: "central",
@@ -84,6 +85,7 @@ test("central save errors use the original toast and retry without losing the dr
   })
   await page.route("**/user-state", async (route) => {
     if (route.request().method() === "PUT" && route.request().postDataJSON().namespace === "drafts" && unavailable) {
+      failedWrites++
       await route.fulfill({ status: 503, headers: mockCorsHeaders(), body: "Unavailable" })
       return
     }
@@ -94,18 +96,21 @@ test("central save errors use the original toast and retry without losing the dr
   const prompt = page.getByRole("textbox", { name: "Prompt", exact: true })
   await expect(prompt).toBeVisible()
   await prompt.fill("Draft survives unavailable storage")
-  const toast = page.locator('[data-component="toast-v2"]').filter({ hasText: "Draft: Not saved" })
-  await expect(toast).toBeVisible()
-  await expect(page.getByLabel("Server save status")).toHaveCount(0)
+  await expect.poll(() => failedWrites > 0).toBe(true)
   await expect(prompt).toContainText("Draft survives unavailable storage")
+  await expect(page.getByLabel("Server save status")).toHaveCount(0)
+  await expect(page.locator('[data-component="toast-v2"]').filter({ hasText: "Not saved" })).toHaveCount(0)
   unavailable = false
-  await toast.getByRole("button", { name: "Retry saving" }).click()
-  await expect.poll(() => writes.some((value) => value.includes("Draft survives unavailable storage"))).toBe(true)
+  await expect
+    .poll(() => writes.some((value) => value.includes("Draft survives unavailable storage")), { timeout: 15_000 })
+    .toBe(true)
   await page.reload()
   await expect(prompt).toContainText("Draft survives unavailable storage")
 })
 
-test("central conflicts use the existing dialog and apply the explicitly chosen server version", async ({ page }) => {
+test("central conflicts resolve silently in favor of this tab", async ({ page }) => {
+  const attempts: { expectedRevision?: number; value?: string | null }[] = []
+  let conflicted = false
   await mockOpenCodeServer(page, {
     mode: "central",
     sessions: fixture.sessions,
@@ -118,11 +123,22 @@ test("central conflicts use the existing dialog and apply the explicitly chosen 
     const request = route.request()
     const body = request.method() === "PUT" ? request.postDataJSON() : undefined
     if (body?.namespace === "drafts") {
+      attempts.push(body)
+      if (!conflicted) {
+        conflicted = true
+        await route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          headers: mockCorsHeaders(),
+          body: JSON.stringify({ revision: 1, value: "Other browser draft" }),
+        })
+        return
+      }
       await route.fulfill({
-        status: 409,
+        status: 200,
         contentType: "application/json",
         headers: mockCorsHeaders(),
-        body: JSON.stringify({ revision: 1, value: body.value.replace("This browser draft", "Other browser draft") }),
+        body: JSON.stringify({ revision: 2, value: body.value }),
       })
       return
     }
@@ -133,16 +149,17 @@ test("central conflicts use the existing dialog and apply the explicitly chosen 
   const prompt = page.getByRole("textbox", { name: "Prompt", exact: true })
   await expect(prompt).toBeVisible()
   await prompt.fill("This browser draft")
-  await page.getByRole("button", { name: "Compare versions" }).click()
-  const dialog = page.getByRole("dialog")
-  await expect(dialog.getByLabel("This tab", { exact: true })).toHaveValue(/This browser draft/)
-  await expect(dialog.getByLabel("Saved on the server", { exact: true })).toHaveValue(/Other browser draft/)
-  await page.keyboard.press("Escape")
-  await expect(dialog).toHaveCount(0)
-  await page.getByRole("button", { name: "Compare versions" }).click()
-  await dialog.getByRole("button", { name: "Use server version" }).click()
-  await expect(prompt).toContainText("Other browser draft")
-  await expect(dialog).toHaveCount(0)
+  await expect.poll(() => conflicted).toBe(true)
+  await expect(
+    page.locator('[data-component="toast-v2"]').filter({ hasText: "Changed in another browser" }),
+  ).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Compare versions" })).toHaveCount(0)
+  await expect
+    .poll(() => attempts.some((body) => body.expectedRevision === 1 && body.value?.includes("This browser draft")), {
+      timeout: 15_000,
+    })
+    .toBe(true)
+  await expect(prompt).toContainText("This browser draft")
 })
 
 test("unverified bootstrap reuses the original error page without local persistence fallback", async ({ page }) => {

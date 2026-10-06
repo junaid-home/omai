@@ -226,10 +226,13 @@ export function PublishDialog() {
                       setState("customDomains", [])
                     } else {
                       const err = await response.json()
-                      showToast({ title: errorMessage(err) || language.t("publish.delete.failed") })
+                      showToast({ variant: "error", title: errorMessage(err) || language.t("publish.delete.failed") })
                     }
                   } catch (err: unknown) {
-                    showToast({ title: err instanceof Error ? err.message : language.t("publish.delete.failed") })
+                    showToast({
+                      variant: "error",
+                      title: err instanceof Error ? err.message : language.t("publish.delete.failed"),
+                    })
                   }
                 }}
               >
@@ -251,7 +254,7 @@ export function PublishDialog() {
       setState("copied", true)
       setTimeout(() => setState("copied", false), 2000)
     } catch {
-      showToast({ title: language.t("publish.copyUrl.failed") })
+      showToast({ variant: "error", title: language.t("publish.copyUrl.failed") })
     }
   }
 
@@ -328,10 +331,14 @@ export function PublishDialog() {
                       showToast({ title: language.t("publish.domain.removed", { domain }) })
                     } else {
                       const err = await response.json()
-                      showToast({ title: errorMessage(err) || language.t("publish.domain.remove.failed") })
+                      showToast({
+                        variant: "error",
+                        title: errorMessage(err) || language.t("publish.domain.remove.failed"),
+                      })
                     }
                   } catch (err: unknown) {
                     showToast({
+                      variant: "error",
                       title: err instanceof Error ? err.message : language.t("publish.domain.remove.failed"),
                     })
                   } finally {

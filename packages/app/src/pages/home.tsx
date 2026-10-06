@@ -611,6 +611,7 @@ export function NewHome() {
         ),
       onError: (error) =>
         showToast({
+          variant: "error",
           title: language.t("common.requestFailed"),
           description: errorMessage(error, language.t("common.requestFailed")),
         }),
@@ -1173,6 +1174,7 @@ function HomeProjectRow(props: {
     if (!platform.openPath) return
     platform.openPath(props.project.worktree).catch((err: unknown) =>
       showToast({
+        variant: "error",
         title: props.language.t("common.requestFailed"),
         description: errorMessage(err, props.language.t("common.requestFailed")),
       }),
