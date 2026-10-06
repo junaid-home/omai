@@ -1,0 +1,2 @@
+data: {"payload":{"id":"evt_10bf6878d001k6HimeSaUMq1ub","type":"server.connected","properties":{}}}
+

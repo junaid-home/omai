@@ -1,0 +1,12 @@
+# Dead file. This is a GKE Workload Identity ServiceAccount, but the production
+# cluster is Hetzner (storageClassName hcloud-volumes, hetzner.cloud LoadBalancer
+# annotations), no Deployment references serviceAccountName, and object storage
+# is S3 via omai-storage-credentials rather than GCS. Nothing applies this file.
+# Delete it, or port it to a Hetzner ServiceAccount if one is ever needed.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: opencode-gcs
+  namespace: omai
+  annotations:
+    iam.gke.io/gcp-service-account: opencode-gcs@maestro-498611.iam.gserviceaccount.com

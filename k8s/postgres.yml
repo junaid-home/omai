@@ -1,0 +1,127 @@
+# PostgreSQL for the production Hetzner cluster.
+#
+# This is required in production, not optional. packages/core/src/database/database.ts:92
+# calls connectionURLFromEnvironment() unconditionally and SQLite fallback is
+# disabled, and Database.node sits in the unconditional server layer group at
+# packages/opencode/src/server/routes/instance/httpapi/server.ts:272. A backend
+# without OPENCODE_DATABASE_URL exits before binding a port.
+#
+# Two roles are required by packages/core/README.md: a migrator that may create
+# and own the instance schema, and a restricted runtime role the server connects
+# as. PostgreSQLMigration.assertRuntimeRole rejects a runtime role that is a
+# superuser, CREATEDB, CREATEROLE, BYPASSRLS, a member of a privileged role,
+# owns the schema, or holds CREATE on it.
+#
+# The storage class is the Hetzner "hcloud-volumes" class used by k8s/pvc.yml.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: omai-postgres-data
+  namespace: omai
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: hcloud-volumes
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: omai-postgres-init
+  namespace: omai
+data:
+  # Passwords are duplicated from omai-postgres-credentials because
+  # /docker-entrypoint-initdb.d runs psql as the postgres superuser and cannot
+  # expand environment variables. Keep both files in sync when rotating.
+  roles.sql: |
+    CREATE ROLE omai_migrator LOGIN PASSWORD 'c7a16d570cf287549f1a8affa684b0e0e5697f00b388e4d3'
+      NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS INHERIT;
+    CREATE ROLE omai_runtime LOGIN PASSWORD '40b35f255ad2816a55b5099c2ffe0ef7931d8775d4ff1879'
+      NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOINHERIT;
+    GRANT CONNECT ON DATABASE omai TO omai_migrator, omai_runtime;
+    GRANT CREATE ON DATABASE omai TO omai_migrator;
+    REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: omai-postgres
+  namespace: omai
+  labels:
+    app: omai-postgres
+spec:
+  replicas: 1
+  strategy:
+    # Recreate so a restarted node never leaves two writers on one volume.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: omai-postgres
+  template:
+    metadata:
+      labels:
+        app: omai-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:18.6
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: "omai_pgadmin"
+            - name: POSTGRES_DB
+              value: "omai"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: omai-postgres-credentials
+                  key: POSTGRES_SUPERUSER_PASSWORD
+            # The official image refuses to initialize a non-empty PGDATA subdirectory.
+            - name: PGDATA
+              value: "/var/lib/postgresql/data/pgdata"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "omai_pgadmin", "-d", "omai"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "200m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: omai-postgres-data
+        - name: init
+          configMap:
+            name: omai-postgres-init
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: omai-postgres
+  namespace: omai
+  labels:
+    app: omai-postgres
+spec:
+  type: ClusterIP
+  selector:
+    app: omai-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+      protocol: TCP

@@ -1,0 +1,15 @@
+https://app.omai.ch/signup-secret-route#invite=DAMkmP2J18Bs7Lz0mlVPGoFXxzOA6N2mRhbfIOAmA6esIGdJ%2BT7YYLYw8R6Zu9%2B1
+
+APP URL -> app.omai.ch
+
+# User Details #
+USERNAME -> omnaich
+EMAIL -> admin@omai.ch
+PASS -> K9#mP2$vX8!q
+
+# DB Details #
+URL -> http://2.31.2.199:5050
+Email -> admin@app.omai.ch
+ADMIN_DASHBOARD_PASS -> 3S13sEROJYvqwVGzpjR3FL6acZrKnuCT
+DB_PASS -> c7a16d570cf287549f1a8affa684b0e0e5697f00b388e4d3
+

@@ -1,0 +1,123 @@
+.session-checkpoints-tab {
+  flex: 1;
+  min-height: 0;
+}
+
+.session-checkpoints-tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding-left: 1px;
+  padding-right: 12px;
+  margin-bottom: 140px;
+}
+
+.session-checkpoints-tab-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.session-checkpoints-tab-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.session-checkpoints-tab-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  margin: 0 -8px;
+  border-radius: 8px;
+  transition: background-color 120ms ease;
+  border: 1px solid transparent;
+  padding-bottom: 40px;
+}
+
+.session-checkpoints-tab-row:hover {
+  background-color: var(--v2-background-bg-hover);
+  border-color: var(--v2-border-border-base);
+}
+
+.session-checkpoints-tab-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.session-checkpoints-tab-row-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-strong, var(--v2-text-text-strong));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-checkpoints-tab-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  font-size: 11px;
+  color: var(--text-muted, var(--v2-text-text-muted));
+}
+
+.session-checkpoints-tab-chip {
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background-color: var(--v2-background-bg-layer-01);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.session-checkpoints-tab-file {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+}
+
+.session-checkpoints-tab-badge-add {
+  color: #16a34a;
+  background: rgba(22, 163, 74, 0.12);
+}
+
+.session-checkpoints-tab-badge-del {
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.12);
+}
+
+.session-checkpoints-tab-row-action {
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.session-checkpoints-tab-row:hover .session-checkpoints-tab-row-action,
+.session-checkpoints-tab-row:focus-within .session-checkpoints-tab-row-action {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .session-checkpoints-tab-row-action {
+    opacity: 1;
+  }
+}
+
+.session-checkpoints-tab-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 0;
+  text-align: center;
+}

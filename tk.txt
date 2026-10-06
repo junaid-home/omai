@@ -1,0 +1,10 @@
+HTTP/1.1 303 See Other
+Server: nginx/1.31.6
+Date: Mon, 05 Oct 2026 12:00:53 GMT
+Content-Length: 0
+Connection: keep-alive
+set-cookie: omai_preview_static_c15fa6d5-b926-4db7-aa64-4fb14eef5eda=0_Crhp0Zijsk-NmiapskSsPiW4P7NE0JFRS8u4hXkiA; Path=/static/c15fa6d5-b926-4db7-aa64-4fb14eef5eda/; HttpOnly; Secure; SameSite=Lax; Max-Age=899
+Location: /static/c15fa6d5-b926-4db7-aa64-4fb14eef5eda/
+Cache-Control: no-store
+Referrer-Policy: no-referrer
+

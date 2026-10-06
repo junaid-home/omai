@@ -1,0 +1,3 @@
+# Local-development only. This directory contains credentials and is never for a real cluster.
+*
+!.gitignore

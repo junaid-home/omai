@@ -1,0 +1,29 @@
+.session-tools-tab[data-component="tabs-v2"][data-variant="settings"][data-orientation="vertical"]
+  [data-slot="tabs-v2-list"] {
+  width: 176px;
+  min-width: 148px;
+  padding: 8px;
+}
+
+.session-tools-tab[data-component="tabs-v2"][data-variant="settings"][data-orientation="vertical"]
+  [data-slot="tabs-v2-trigger"] {
+  font-size: 13px;
+}
+
+.session-tools-tab [data-slot="tabs-v2-trigger-content"] {
+  min-width: 0;
+}
+
+.session-tools-tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  min-height: 0;
+}
+
+.session-tools-tab-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}

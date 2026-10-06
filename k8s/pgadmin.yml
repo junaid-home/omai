@@ -1,0 +1,281 @@
+# pgAdmin 4 for production database administration.
+#
+# This file is intentionally NOT applied by k8s/deploy.sh or by
+# .github/workflows/deploy-k8s.yml. A full superuser-capable database console
+# is not something that should appear on every automated deploy. Apply it by
+# hand when you need it and remove it when you are done:
+#
+#   kubectl -n omai apply -f k8s/pgadmin.yml
+#   kubectl -n omai get svc omai-pgadmin -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+#   # browse http://<that-ip>:5050, then:
+#   kubectl -n omai delete -f k8s/pgadmin.yml
+#
+# The password lives only in the omai-pgadmin Secret, which is deliberately
+# absent from this file so no credential is committed:
+#
+#   kubectl -n omai create secret generic omai-pgadmin \
+#     --from-literal=PGADMIN_DEFAULT_EMAIL=admin@app.omai.ch \
+#     --from-literal=PGADMIN_DEFAULT_PASSWORD="$(openssl rand -base64 36 | tr -d '\n/+=' | cut -c1-32)"
+#
+# The Service is a LoadBalancer (see the Service below for why, and for the
+# security trade-off that implies). A browser-reachable database console with
+# DDL rights on production is one of the highest-value targets an attacker can
+# go after, and pgAdmin's own auth is a single password with no second factor
+# and no source-IP restriction. Restrict the Hetzner LoadBalancer firewall to
+# your own egress addresses if this must stay reachable.
+#
+# Log in as omai_migrator, not omai_runtime. omai_runtime is deliberately
+# restricted: packages/core's PostgreSQLMigration.assertRuntimeRole rejects a
+# runtime role that is a superuser, CREATEDB, CREATEROLE, BYPASSRLS, a privileged
+# role member, schema owner, or a CREATE holder. omai_runtime can read and write
+# application rows but cannot create tables or run DDL, so it is the wrong login
+# for inspecting or changing schema. omai_migrator owns the instance schema.
+#
+# omai_pgadmin is the superuser. It is deliberately not wired in here. Use it
+# only to recover from a permissions problem, and rotate its password if it is
+# ever exposed.
+#
+# The container listens on 5050 rather than the image default of 80 because the
+# image runs as UID 5050 and cannot bind a privileged port without extra
+# capabilities.
+#
+# The omai-pgadmin Secret is NOT declared here on purpose. A public console
+# whose login password is committed to git is not a secret at all. Create it out
+# of band before applying this file, otherwise the Deployment cannot start:
+#
+#   kubectl -n omai create secret generic omai-pgadmin \
+#     --from-literal=PGADMIN_DEFAULT_EMAIL=admin@app.omai.ch \
+#     --from-literal=PGADMIN_DEFAULT_PASSWORD="$(openssl rand -base64 36 | tr -d '\n/+=' | cut -c1-32)"
+#
+# pgAdmin validates the email address and refuses to start on a reserved or
+# special-use TLD, so ".local" and ".internal" are not usable for the login.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: omai-pgadmin
+  namespace: omai
+  labels:
+    app: omai-pgadmin
+spec:
+  replicas: 1
+  strategy:
+    # /var/lib/pgadmin holds a SQLite session and config store. Two writers
+    # against one directory would corrupt it.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: omai-pgadmin
+  template:
+    metadata:
+      labels:
+        app: omai-pgadmin
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 5050
+        runAsGroup: 0
+        fsGroup: 0
+        seccompProfile:
+          type: RuntimeDefault
+      # Build the connection files before pgAdmin starts. A ConfigMap cannot
+      # interpolate the migrator password, so the .pgpass file is written here
+      # from the existing PostgreSQL Secret instead of duplicating the
+      # credential in a second Secret.
+      initContainers:
+        - name: build-connection-files
+          image: postgres:18.6
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            runAsGroup: 0
+            seccompProfile:
+              type: RuntimeDefault
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              # .pgpass is hostname:port:database:username:password
+              umask 077
+              printf '%s:%s:%s:%s:%s\n' \
+                "omai-postgres.omai.svc.cluster.local" \
+                "5432" \
+                "omai" \
+                "omai_migrator" \
+                "$MIGRATOR_PASSWORD" > /pgadmin-config/pgpass
+              # pgAdmin keeps server credentials in its own config database and
+              # prompts for anything it does not already have. It does not read
+              # PGPASS_FILE for a server imported this way, so the .pgpass file
+              # alone still yields a password prompt on connect.
+              #
+              # Interpolating the password here is safe: this file is written by
+              # the init container into an emptyDir at runtime, not by a
+              # ConfigMap, so the credential never lands in git or in a
+              # ConfigMap. MASTER_PASSWORD_REQUIRED is False, so pgAdmin stores
+              # it unencrypted in its SQLite config, which is an emptyDir and is
+              # discarded on restart; this init container rewrites it every time.
+              cat > /pgadmin-config/servers.json <<JSON
+              {
+                "Servers": {
+                  "1": {
+                    "Name": "omai-postgres",
+                    "Group": "Servers",
+                    "Host": "omai-postgres.omai.svc.cluster.local",
+                    "Port": 5432,
+                    "MaintenanceDB": "omai",
+                    "Username": "omai_migrator",
+                    "Password": "$MIGRATOR_PASSWORD",
+                    "SSLMode": "prefer"
+                  }
+                },
+                "ServersGroups": {},
+                "ServersDatabases": {}
+              }
+              JSON
+              # pgAdmin runs as UID 5050 and must own what it reads.
+              chown -R 5050:0 /pgadmin-config
+              chmod 600 /pgadmin-config/pgpass
+              chmod 644 /pgadmin-config/servers.json
+          env:
+            - name: MIGRATOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: omai-postgres-credentials
+                  key: MIGRATOR_PASSWORD
+          volumeMounts:
+            - name: pgadmin-config
+              mountPath: /pgadmin-config
+      containers:
+        - name: pgadmin
+          # Pinned, not :latest. The upstream image changes without notice and an
+          # unpinned dashboard would silently upgrade itself on restart.
+          image: dpage/pgadmin4:9.18
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 5050
+          env:
+            - name: PGADMIN_DEFAULT_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: omai-pgadmin
+                  key: PGADMIN_DEFAULT_EMAIL
+            - name: PGADMIN_DEFAULT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: omai-pgadmin
+                  key: PGADMIN_DEFAULT_PASSWORD
+            # The entrypoint builds gunicorn's --bind from PGADMIN_LISTEN_PORT,
+            # which defaults to 80 and is not affected by the pgAdmin config
+            # settings. PGADMIN_CONFIG_WEB_SERVER_PORT is written into
+            # config_distro.py but never reaches the bind address.
+            - name: PGADMIN_LISTEN_ADDRESS
+              value: "0.0.0.0"
+            - name: PGADMIN_LISTEN_PORT
+              value: "5050"
+            # The login password is the only gate on this dashboard, so a second
+            # master password would add ceremony without adding real protection.
+            # The real control is that the Service is ClusterIP-only.
+            - name: PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED
+              value: "False"
+            - name: PGADMIN_SERVER_JSON_FILE
+              value: /pgadmin-config/servers.json
+            - name: PGPASS_FILE
+              value: /pgadmin-config/pgpass
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                # Required to bind the privileged port 80 fallback paths and
+                # to run the image's su-exec/entrypoint logic.
+                - SETUID
+                - SETGID
+                - NET_BIND_SERVICE
+          volumeMounts:
+            # Mounted at a separate path rather than over /pgadmin4: /pgadmin4 is
+            # the installed application directory, and an emptyDir or ConfigMap
+            # mounted there would hide the app and break the container.
+            - name: pgadmin-config
+              mountPath: /pgadmin-config
+              readOnly: true
+            # emptyDir, not a PVC. The PVC in pvc.yml is for application state.
+            # Dashboard state must not be a durable store of database
+            # credentials that outlives the deployment.
+            - name: pgadmin-state
+              mountPath: /var/lib/pgadmin
+            # The image writes /run/pgadmin/pgadmin.sock and /certs and starts
+            # postfix; without these tmp mounts a read-only root would fail.
+            - name: pgadmin-run
+              mountPath: /run/pgadmin
+            - name: pgadmin-tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /login
+              port: 5050
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /login
+              port: 5050
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+      volumes:
+        - name: pgadmin-config
+          emptyDir: {}
+        - name: pgadmin-state
+          emptyDir: {}
+        - name: pgadmin-run
+          emptyDir: {}
+        - name: pgadmin-tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: omai-pgadmin
+  namespace: omai
+  labels:
+    app: omai-pgadmin
+  annotations:
+    # pgAdmin has no per-request authorization, no audit trail beyond its own
+    # config database, and a single shared password. Keep it off any ingress,
+    # ingress-controller, or load-balancer annotation sweep.
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    # Explicitly chosen by the operator for this cluster: pgAdmin is published
+    # on a dedicated Hetzner LoadBalancer so the console is reachable without a
+    # port-forward. This trades the ClusterIP-only default documented above for
+    # convenience, and it puts a DDL-capable console on a public IP whose only
+    # gate is one password.
+    #
+    # Do not add a public *hostname* for it. A raw IP has no certificate and so
+    # cannot be served over HTTPS; use it directly and accept the plaintext hop,
+    # or keep it on ClusterIP. If a hostname is ever needed, terminate TLS and
+    # add source-IP restriction in the same change.
+    load-balancer.hetzner.cloud/location: nbg1
+spec:
+  type: LoadBalancer
+  selector:
+    app: omai-pgadmin
+  ports:
+    - name: http
+      port: 5050
+      targetPort: 5050
+      protocol: TCP

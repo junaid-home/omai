@@ -1,0 +1,10 @@
+HTTP/1.1 303 See Other
+Server: nginx/1.31.6
+Date: Mon, 05 Oct 2026 12:16:06 GMT
+Content-Length: 0
+Connection: keep-alive
+set-cookie: omai_preview_45877=sqrYV7cYomWbQIyyeQvwyI2Jh4e5j-COVTQjon1zIBE; Path=/global/preview/proxy/45877/; HttpOnly; Secure; SameSite=Lax; Max-Age=899
+Location: /global/preview/proxy/45877/
+Cache-Control: no-store
+Referrer-Policy: no-referrer
+

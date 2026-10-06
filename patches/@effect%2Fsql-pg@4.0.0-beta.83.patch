@@ -1,0 +1,153 @@
+diff --git a/src/PgClient.ts b/src/PgClient.ts
+--- a/src/PgClient.ts
++++ b/src/PgClient.ts
+@@ -18,7 +18,6 @@
+ import * as Context from "effect/Context"
+ import * as Duration from "effect/Duration"
+ import * as Effect from "effect/Effect"
+-import * as Fiber from "effect/Fiber"
+ import * as Layer from "effect/Layer"
+ import * as Number from "effect/Number"
+ import * as Option from "effect/Option"
+@@ -354,52 +353,44 @@
+       client ? Effect.succeed(client) : reserveRaw
+     )
+ 
+-  const reserveRaw = Effect.callback<Pg.PoolClient, SqlError, Scope.Scope>((resume) => {
+-    const fiber = Fiber.getCurrent()!
+-    const scope = Context.getUnsafe(fiber.context, Scope.Scope)
+-    let cause: Error | undefined = undefined
+-    function onError(cause_: Error) {
+-      cause = cause_
+-    }
+-    pool.connect((err, client, release) => {
+-      if (err) {
+-        return resume(
+-          Effect.fail(
+-            new SqlError({
+-              reason: classifyError(
+-                err,
+-                "Failed to acquire connection for transaction",
+-                "acquireConnection"
+-              )
+-            })
+-          )
+-        )
+-      } else if (!client) {
+-        return resume(
+-          Effect.fail(
+-            new SqlError({
++  // Defer acquisition out of re-entrant interruption callbacks. Effect beta.83 can otherwise
++  // lose the transaction continuation after acquisition and never close its reserved scope.
++  // acquireRelease also makes checkout and finalizer registration atomic under cancellation.
++  const reserveRaw = Effect.andThen(
++    Effect.yieldNow,
++    Effect.acquireRelease(
++      Effect.callback<{ readonly client: Pg.PoolClient; readonly release: () => void }, SqlError>((resume) => {
++        let cause: Error | undefined = undefined
++        function onError(cause_: Error) {
++          cause = cause_
++        }
++        pool.connect((err, client, release) => {
++          if (err) {
++            return resume(Effect.fail(new SqlError({
++              reason: classifyError(err, "Failed to acquire connection for transaction", "acquireConnection")
++            })))
++          } else if (!client) {
++            return resume(Effect.fail(new SqlError({
+               reason: new ConnectionError({
+-                message: "Failed to acquire connection for transaction",
++                message: "Failed to acquire connection",
+                 cause: new Error("No client returned"),
+                 operation: "acquireConnection"
+               })
+-            })
+-          )
+-        )
+-      }
+-      client.on("error", onError)
+-      resume(Effect.as(
+-        Scope.addFinalizer(
+-          scope,
+-          Effect.sync(() => {
+-            client.off("error", onError)
+-            release(cause)
+-          })
+-        ),
+-        client
+-      ))
+-    })
+-  })
++            })))
++          }
++          client.on("error", onError)
++          resume(Effect.succeed({
++            client,
++            release: () => {
++              client.off("error", onError)
++              release(cause)
++            }
++          }))
++        })
++      }),
++      (checkout) => Effect.sync(checkout.release)
++    ).pipe(Effect.map((checkout) => checkout.client))
++  )
+   const reserve = Effect.map(reserveRaw, makeConection)
+ 
+   const onListenClientError = (_: Error) => {
+diff --git a/dist/PgClient.js b/dist/PgClient.js
+--- a/dist/PgClient.js
++++ b/dist/PgClient.js
+@@ -18,7 +18,6 @@
+ import * as Context from "effect/Context";
+ import * as Duration from "effect/Duration";
+ import * as Effect from "effect/Effect";
+-import * as Fiber from "effect/Fiber";
+ import * as Layer from "effect/Layer";
+ import * as Number from "effect/Number";
+ import * as Option from "effect/Option";
+@@ -210,9 +209,10 @@
+       });
+     });
+   }, client ? Effect.succeed(client) : reserveRaw);
+-  const reserveRaw = Effect.callback(resume => {
+-    const fiber = Fiber.getCurrent();
+-    const scope = Context.getUnsafe(fiber.context, Scope.Scope);
++  // Defer acquisition out of re-entrant interruption callbacks. Effect beta.83 can otherwise
++  // lose the transaction continuation after acquisition and never close its reserved scope.
++  // acquireRelease also makes checkout and finalizer registration atomic under cancellation.
++  const reserveRaw = Effect.andThen(Effect.yieldNow, Effect.acquireRelease(Effect.callback(resume => {
+     let cause = undefined;
+     function onError(cause_) {
+       cause = cause_;
+@@ -225,19 +225,22 @@
+       } else if (!client) {
+         return resume(Effect.fail(new SqlError({
+           reason: new ConnectionError({
+-            message: "Failed to acquire connection for transaction",
++            message: "Failed to acquire connection",
+             cause: new Error("No client returned"),
+             operation: "acquireConnection"
+           })
+         })));
+       }
+       client.on("error", onError);
+-      resume(Effect.as(Scope.addFinalizer(scope, Effect.sync(() => {
+-        client.off("error", onError);
+-        release(cause);
+-      })), client));
+-    });
+-  });
++      resume(Effect.succeed({
++        client,
++        release: () => {
++          client.off("error", onError);
++          release(cause);
++        }
++      }));
++    });
++  }), checkout => Effect.sync(checkout.release)).pipe(Effect.map(checkout => checkout.client)));
+   const reserve = Effect.map(reserveRaw, makeConection);
+   const onListenClientError = _ => {};
+   const listenAcquirer = yield* RcRef.make({

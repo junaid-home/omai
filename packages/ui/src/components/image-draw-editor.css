@@ -1,0 +1,175 @@
+[data-component="image-draw-editor"] {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(calc(100vw - 64px), 1200px);
+  height: min(calc(100vh - 64px), 800px);
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 20px;
+  background: var(--surface-raised-stronger-non-alpha);
+  box-shadow: var(--shadow-lg-border-base);
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+[data-slot="image-draw-editor-header"] {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border-weak-base);
+  flex-shrink: 0;
+}
+
+[data-slot="image-draw-editor-title"] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-strong);
+  min-width: 0;
+  justify-self: start;
+}
+
+[data-slot="image-draw-editor-header-actions"] {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  justify-self: end;
+}
+
+[data-slot="image-draw-editor-tools"] {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-self: center;
+}
+
+[data-slot="image-draw-editor-toolbar"] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 8px 14px;
+  flex-shrink: 0;
+  pointer-events: auto;
+}
+
+[data-slot="image-draw-editor-canvas-wrap"] {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 20px;
+}
+
+[data-slot="image-draw-editor-frame"] {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+[data-slot="image-draw-editor-img"] {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 12px;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+[data-slot="image-draw-editor-canvas"] {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 12px;
+  touch-action: none;
+  pointer-events: auto;
+}
+
+[data-slot="image-draw-editor-colors"] {
+  display: flex;
+  gap: 6px;
+}
+
+[data-slot="image-draw-editor-swatch"] {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  padding: 0;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    transform 0.1s;
+}
+
+[data-slot="image-draw-editor-swatch"]:hover {
+  transform: scale(1.15);
+}
+
+[data-slot="image-draw-editor-swatch"][data-active] {
+  border-color: var(--text-strong);
+  transform: scale(1.15);
+}
+
+[data-slot="image-draw-editor-size"] {
+  width: 60px;
+  accent-color: #3b82f6;
+  cursor: pointer;
+}
+
+[data-slot="image-draw-editor-brush"] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+[data-slot="image-draw-editor-size-label"] {
+  font-size: 12px;
+  color: var(--text-weak);
+  font-variant-numeric: tabular-nums;
+}
+
+[data-slot="image-draw-editor-btn"] {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 10px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-strong);
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+[data-slot="image-draw-editor-btn"]:hover {
+  background: var(--surface-raised-strong);
+}
+
+[data-slot="image-draw-editor-btn"]:focus-visible {
+  outline: none;
+}
+
+[data-slot="image-draw-editor-btn"]:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

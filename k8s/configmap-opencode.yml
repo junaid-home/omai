@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: omai-opencode-config
+  namespace: omai
+data:
+  opencode.jsonc: |
+    {
+      "share": {
+        "url": "https://app.omai.ch",
+        "mode": "manual"
+      },
+      "permission": "allow",
+      "mcp": {
+        "fal-ai": {
+          "url": "https://mcp.fal.ai/mcp",
+          "type": "remote",
+          "headers": {
+            "Authorization": "Bearer 2d571f38-1841-48c5-adeb-2291483c6fe8:1473cb6a936e0adc9386b450d9d07e23"
+          },
+          "enabled": true
+        }
+      }
+    }

@@ -1,0 +1,289 @@
+# omai-opencode for the production Hetzner cluster.
+#
+# What changed relative to the previous production manifest, and why. The old
+# manifest could not start the server at all; each point below is a hard startup
+# or request-path requirement, not a preference.
+#
+# - PostgreSQL is now mandatory. connectionURLFromEnvironment() at
+#   packages/core/src/database/database.ts:92 throws when OPENCODE_DATABASE_URL
+#   is absent and SQLite fallback is disabled. Database.node is in the
+#   unconditional server layer group at
+#   packages/opencode/src/server/routes/instance/httpapi/server.ts:272, so
+#   OPENCODE_DATABASE_URL, OPENCODE_DATABASE_SCHEMA and OPENCODE_INSTANCE_ID are
+#   all required. See k8s/postgres.yml.
+# - Authentication is central. central() at packages/core/src/authentication.ts:33
+#   flips to true as soon as OPENCODE_DATABASE_URL is set, and
+#   server.listen() then calls validateListener(), which rejects any non-loopback
+#   hostname unless central is true. Central additionally requires an HTTPS
+#   OPENCODE_PUBLIC_URL (authentication.ts:74) and OPENCODE_JWT_SECRET
+#   (packages/opencode/src/auth/jwt.ts:21).
+# - Storage is central. Project creation needs a workspace root and
+#   CentralStorage.workspaceRoot() returns undefined in local mode, which makes
+#   the UI refuse with "The central workspace root is unavailable". Central mode
+#   verifies OPENCODE_STORAGE_ROOT through /proc/self/mountinfo and requires a
+#   .opencode-volume.json marker naming the same OPENCODE_STORAGE_ID, so
+#   omai-projects must be mounted at exactly /mnt/omai-central with no subPath
+#   and seeded by the initContainer below.
+# - Central mode forbids OPENCODE_CONFIG_DIR/OPENCODE_CONFIG and relocates
+#   Global.Path.config to $OPENCODE_STORAGE_ROOT/config, so opencode.jsonc is
+#   copied there rather than into ~/.config/opencode.
+# - Preview requires a dedicated origin. packages/opencode/src/preview/http.ts:16
+#   throws unless OPENCODE_PREVIEW_URL is set, and :29 requires HTTPS on a
+#   hostname distinct from the app origin. The listener stays on loopback inside
+#   the pod and k8s/configmap-nginx.yml proxies the preview host to it.
+#
+# TLS terminates at Cloudflare, not in this cluster. omai-app is a LoadBalancer on
+# port 80 and the nginx config forwards $http_x_forwarded_proto, so the public
+# origins below must be the Cloudflare-proxied hostnames.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: omai-opencode
+  namespace: omai
+  labels:
+    app: omai-opencode
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  strategy:
+    # Recreate, never RollingUpdate: packages/core/README.md allows only one
+    # complete runtime to hold the instance database advisory lock at a time.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: omai-opencode
+  template:
+    metadata:
+      labels:
+        app: omai-opencode
+    spec:
+      # Pin the container hostname. Without this it defaults to the pod name,
+      # which Kubernetes derives as omai-opencode-<replicaset-hash>-<suffix>.
+      # Shared links and preview cookies must not vary between replicas.
+      hostname: omai
+      # Seed the central storage volume before the runtime verifies it.
+      # verify() requires the marker to be a regular file with nlink 1, so it is
+      # written once as a fresh file and never appended to. Runs as root because
+      # the main container is USER runner, which cannot write into a fresh PVC
+      # root.
+      initContainers:
+        - name: init-central-storage
+          image: jj123dev/omai-opencode:k8s-20261005-1735
+          imagePullPolicy: Always
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              mkdir -p /mnt/omai-central/workspaces /mnt/omai-central/tmp
+              # Mirrors CentralStorage.provision(): create-only marker, mode 0444.
+              if [ ! -f /mnt/omai-central/.opencode-volume.json ]; then
+                printf '{"version":1,"id":"omai_k8s_central"}\n' > /mnt/omai-central/.opencode-volume.json
+              fi
+              chmod 0444 /mnt/omai-central/.opencode-volume.json
+              chown -R runner:runner /mnt/omai-central
+              stat -c '%n %s bytes links=%h' /mnt/omai-central/.opencode-volume.json
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: omai-projects
+              mountPath: /mnt/omai-central
+      containers:
+        - name: omai-opencode
+          image: jj123dev/omai-opencode:k8s-20261005-1735
+          imagePullPolicy: Always
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              # Central mode relocates Global.Path.config to
+              # $OPENCODE_STORAGE_ROOT/config, so ~/.config/opencode is never read.
+              mkdir -p /mnt/omai-central/config
+              cp /tmp/opencode-config/opencode.jsonc /mnt/omai-central/config/opencode.jsonc
+              exec /usr/local/bin/entrypoint.sh
+          ports:
+            - name: http
+              containerPort: 4096
+            - name: preview
+              containerPort: 4097
+          env:
+            - name: NODE_ENV
+              value: production
+            # entrypoint.sh expands this at runtime into the --cors origin list.
+            # It must be the browser-facing hostname, not the Service DNS name:
+            # the browser sends Origin: https://app.omai.ch, so that is the only
+            # value that produces a matching CORS allow-origin entry.
+            - name: OPENCODE_HOST
+              value: "app.omai.ch"
+            - name: OPENCODE_SERVER_PORT
+              value: "4096"
+            - name: OPENCODE_FRONTEND_PORT
+              value: "80"
+            - name: OPENCODE_SERVER_PROTOCOL
+              value: http
+            - name: OPENCODE_DOCKER
+              value: "1"
+            - name: OPENCODE_UI_UPSTREAM
+              value: "http://omai-app.omai.svc.cluster.local:80"
+
+            - name: OPENCODE_STORAGE_MODE
+              value: central
+            # Must be absolute, non-root, and the exact mount point that appears
+            # in /proc/self/mountinfo.
+            - name: OPENCODE_STORAGE_ROOT
+              value: /mnt/omai-central
+            # Must match /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/ and equal the "id"
+            # inside .opencode-volume.json, or verify() rejects the volume.
+            - name: OPENCODE_STORAGE_ID
+              value: omai_k8s_central
+            # global.ts builds temp state as $TMPDIR/omai/$OPENCODE_STORAGE_ID and
+            # mkdirs it as the runner user; the image's /tmp is root-owned, so point
+            # TMPDIR at the volume instead of granting a writable /tmp.
+            - name: TMPDIR
+              value: /mnt/omai-central/tmp
+
+            - name: OPENCODE_DATABASE_URL
+              value: "postgresql://omai_runtime:40b35f255ad2816a55b5099c2ffe0ef7931d8775d4ff1879@omai-postgres.omai.svc.cluster.local:5432/omai"
+            - name: OPENCODE_DATABASE_SCHEMA
+              value: "opencode"
+            - name: OPENCODE_DATABASE_POOL_SIZE
+              value: "8"
+            - name: OPENCODE_INSTANCE_ID
+              value: omai_k8s_central
+
+            - name: OPENCODE_AUTH_MODE
+              value: central
+            # Public origins. Must stay HTTPS and the two hostnames must differ;
+            # preview/http.ts compares them and rejects a shared host.
+            - name: OPENCODE_PUBLIC_URL
+              value: "https://app.omai.ch"
+            # One level of subdomain only: the zone's Cloudflare edge certificate
+            # covers *.omai.ch, so preview.app.omai.ch fails the TLS handshake.
+            - name: OPENCODE_PREVIEW_URL
+              value: "https://preview.omai.ch"
+            - name: OPENCODE_PREVIEW_PORT
+              value: "4097"
+
+            - name: OPENCODE_DATA_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: omai-instance-secrets
+                  key: OPENCODE_DATA_KEY
+            - name: OPENCODE_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: omai-instance-secrets
+                  key: OPENCODE_JWT_SECRET
+            - name: OPENCODE_REGISTRATION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: omai-instance-secrets
+                  key: OPENCODE_REGISTRATION_SECRET
+
+            # Object storage for uploaded files and session file parts. This is
+            # separate from central workspace storage and is not gated by it.
+            - name: OPENCODE_STORAGE_ADAPTER
+              value: s3
+            - name: OPENCODE_STORAGE_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: omai-storage-credentials
+                  key: OPENCODE_STORAGE_ENDPOINT
+            - name: OPENCODE_STORAGE_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: omai-storage-credentials
+                  key: OPENCODE_STORAGE_BUCKET
+            - name: OPENCODE_STORAGE_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: omai-storage-credentials
+                  key: OPENCODE_STORAGE_ACCESS_KEY_ID
+            - name: OPENCODE_STORAGE_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: omai-storage-credentials
+                  key: OPENCODE_STORAGE_SECRET_ACCESS_KEY
+            - name: OPENCODE_STORAGE_REGION
+              valueFrom:
+                secretKeyRef:
+                  name: omai-storage-credentials
+                  key: OPENCODE_STORAGE_REGION
+            - name: CLOUDFLARE_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: omai-cloudflare-credentials
+                  key: CLOUDFLARE_API_TOKEN
+            - name: CLOUDFLARE_ACCOUNT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: omai-cloudflare-credentials
+                  key: CLOUDFLARE_ACCOUNT_ID
+
+            - name: BUN_JSC_forceRAMSize
+              value: "4831838208"
+          resources:
+            requests:
+              memory: "4Gi"
+              cpu: "500m"
+            limits:
+              memory: "6Gi"
+              cpu: "1800m"
+          volumeMounts:
+            # omai-data is intentionally not mounted: central mode moves
+            # Global.Path.data to $OPENCODE_STORAGE_ROOT/data, so
+            # ~/.local/share/opencode is never read.
+            - name: omai-projects
+              mountPath: /mnt/omai-central
+            - name: opencode-config
+              mountPath: /tmp/opencode-config
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /global/health
+              port: 4096
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 15
+            failureThreshold: 5
+          livenessProbe:
+            httpGet:
+              path: /global/health
+              port: 4096
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 60
+            failureThreshold: 4
+      volumes:
+        - name: omai-data
+          persistentVolumeClaim:
+            claimName: omai-data
+        - name: omai-projects
+          persistentVolumeClaim:
+            claimName: omai-projects
+        - name: opencode-config
+          configMap:
+            name: omai-opencode-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: omai-opencode
+  namespace: omai
+  labels:
+    app: omai-opencode
+spec:
+  type: ClusterIP
+  selector:
+    app: omai-opencode
+  ports:
+    - name: http
+      port: 4096
+      targetPort: 4096
+      protocol: TCP
+    # The preview origin is a separate listener (OPENCODE_PREVIEW_PORT). Without
+    # this port the ClusterIP drops 4097 and the preview host 504s even though
+    # the pod is listening.
+    - name: preview
+      port: 4097
+      targetPort: 4097
+      protocol: TCP

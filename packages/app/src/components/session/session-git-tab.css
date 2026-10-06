@@ -1,0 +1,386 @@
+.session-git-tab {
+  flex: 1;
+  min-height: 0;
+}
+.session-git-tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding-left: 1px;
+  padding-right: 12px;
+  padding-bottom: 40px;
+}
+.session-git-tab-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.session-git-tab-group + .session-git-tab-group {
+  margin-top: 2px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-weak-base, var(--v2-border-border-weak));
+}
+.session-git-tab-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+.session-git-tab-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 8px;
+  margin: 0 -8px;
+  border-radius: 6px;
+  font-size: 13px;
+  transition: background-color 120ms ease;
+}
+.session-git-tab-row:hover {
+  background-color: var(--v2-background-bg-hover);
+}
+.session-git-tab-row-action {
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.session-git-tab-row:hover .session-git-tab-row-action,
+.session-git-tab-row:focus-within .session-git-tab-row-action {
+  opacity: 1;
+}
+.session-git-tab-row-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.session-git-tab-row:hover .session-git-tab-row-actions,
+.session-git-tab-row:focus-within .session-git-tab-row-actions {
+  opacity: 1;
+}
+@media (hover: none) {
+  .session-git-tab-row-action,
+  .session-git-tab-row-actions {
+    opacity: 1;
+  }
+}
+.session-git-tab-chip {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background-color: var(--v2-background-bg-layer-01);
+  color: var(--text-muted, var(--v2-text-text-muted));
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.session-git-tab-chip-active {
+  background-color: var(--v2-background-bg-emphasis);
+  color: var(--text-strong, var(--v2-text-text-strong));
+}
+.session-git-tab-branch {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+.session-git-tab-remote-name {
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-strong, var(--v2-text-text-strong));
+}
+.session-git-tab-remote-url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--text-muted, var(--v2-text-text-muted));
+}
+.session-git-tab-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background-color: var(--v2-background-bg-layer-01);
+}
+.session-git-tab-file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+.session-git-tab-status {
+  flex: 0 0 12px;
+  text-align: center;
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  font-size: 11px;
+  font-weight: 600;
+}
+.session-git-tab-status-added {
+  color: var(--text-on-success-base, #22c55e);
+}
+.session-git-tab-status-modified {
+  color: var(--text-on-warning-base, #f59e0b);
+}
+.session-git-tab-status-deleted {
+  color: var(--text-on-critical-base, #ef4444);
+}
+.session-git-tab-diff {
+  flex-shrink: 0;
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.session-git-tab-branch-button {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+}
+.session-git-tab-branch-button:not(:disabled):hover {
+  color: var(--text-strong, var(--v2-text-text-strong));
+}
+.session-git-tab-branch-button:disabled {
+  cursor: default;
+}
+.session-git-tab-hash {
+  flex-shrink: 0;
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--text-muted, var(--v2-text-text-muted));
+}
+.session-git-tab-timeline {
+  display: flex;
+  flex-direction: column;
+  margin-top: 2px;
+}
+.session-git-tab-timeline-item {
+  position: relative;
+  display: flex;
+  gap: 14px;
+  padding: 7px 0;
+}
+.session-git-tab-timeline-item::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background-color: var(--border-weak-base, var(--v2-border-border-weak));
+}
+.session-git-tab-timeline-item:first-child::before {
+  top: 14px;
+}
+.session-git-tab-timeline-item:last-child::before {
+  bottom: calc(100% - 14px);
+}
+.session-git-tab-timeline-item:only-child::before {
+  display: none;
+}
+.session-git-tab-timeline-dot {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  border-radius: 9999px;
+  background-color: var(--border-strong-base, var(--v2-border-border-strong));
+  box-shadow: 0 0 0 3px var(--v2-background-bg-base);
+}
+.session-git-tab-timeline-item:first-child .session-git-tab-timeline-dot {
+  background-color: var(--text-strong, var(--v2-text-text-strong));
+}
+.session-git-tab-timeline-body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+.session-git-tab-timeline-subject {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-strong, var(--v2-text-text-strong));
+}
+.session-git-tab-timeline-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted, var(--v2-text-text-muted));
+}
+.session-git-tab-timeline-body-text {
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted, var(--v2-text-text-muted));
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.session-git-tab-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted, var(--v2-text-text-muted));
+}
+.session-git-tab-hint {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+}
+.session-git-tab-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 20px 0;
+  border-top: 1px solid var(--border-weak-base, var(--v2-border-border-weak));
+  border-bottom: 1px solid var(--border-weak-base, var(--v2-border-border-weak));
+  color: var(--text-muted, var(--v2-text-text-muted));
+}
+.session-git-tab-composer {
+  display: flex;
+  flex-direction: column;
+  margin-top: 6px;
+  border-radius: 8px;
+  background-color: var(--v2-background-bg-base);
+  outline: 1px solid var(--border-weak-base, var(--v2-border-border-weak));
+  outline-offset: 0;
+  transition: outline-color 85ms ease-out;
+}
+.session-git-tab-composer:focus-within {
+  outline-color: var(--v2-border-border-focus);
+}
+.session-git-tab-composer [data-component="textarea-v2"] {
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  border-radius: 8px 8px 0 0;
+}
+.session-git-tab-composer [data-component="textarea-v2"] [data-slot="textarea-v2-textarea"] {
+  min-height: 56px;
+  padding: 9px 10px;
+  resize: none;
+}
+.session-git-tab-composer-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 8px 7px 10px;
+  border-top: 1px solid var(--border-weak-base, var(--v2-border-border-weak));
+}
+.session-git-tab-hint-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-faint, var(--v2-text-text-faint));
+}
+.session-git-tab-spinner {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  border: 2px solid var(--border-strong-base, var(--v2-border-border-strong));
+  border-top-color: transparent;
+  animation: session-git-tab-spin 700ms linear infinite;
+}
+@keyframes session-git-tab-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.session-git-tab-create-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+.session-git-tab-create-row [data-component="text-input-v2"] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.session-git-tab-create-row [data-component="text-input-v2"] [data-slot="text-input-v2-input"] {
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+.session-git-tab-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.session-git-tab-field-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-strong, var(--text-strong));
+}
+.session-git-tab-field-static {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
+  background-color: var(--v2-background-bg-layer-01);
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  font-size: 13px;
+  color: var(--text-muted, var(--v2-text-text-muted));
+}
+.session-git-tab-field-error {
+  font-size: 12px;
+  color: var(--v2-state-fg-danger);
+}
+.session-git-tab-field [data-component="text-input-v2"] {
+  width: 100%;
+}
+.session-git-tab-field [data-component="text-input-v2"] [data-slot="text-input-v2-input"] {
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+.session-git-tab-danger:not(:disabled):hover {
+  color: var(--v2-state-fg-danger);
+}
+.session-git-tab-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  color: var(--text-muted, var(--v2-text-text-muted));
+}
+.session-git-tab-icon-button:not(:disabled):hover {
+  background-color: var(--v2-background-bg-hover);
+  color: var(--text-strong, var(--v2-text-text-strong));
+}
+.session-git-tab-icon-button:disabled {
+  opacity: 0.5;
+}
