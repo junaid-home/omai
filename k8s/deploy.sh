@@ -2,8 +2,8 @@
 set -euo pipefail
 
 REGISTRY="jj123dev"
-BACKEND_IMAGE="${REGISTRY}/omai-opencode:latest"
-FRONTEND_IMAGE="${REGISTRY}/omai-app:latest"
+BACKEND_IMAGE="${REGISTRY}/omai-opencode:pgsql"
+FRONTEND_IMAGE="${REGISTRY}/omai-app:pgsql"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 

@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: omai-app
-          image: jj123dev/omai-app:k8s-20261005-1735
+          image: jj123dev/omai-app:pgsql
           imagePullPolicy: Always
           ports:
             - containerPort: 80

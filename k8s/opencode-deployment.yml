@@ -68,7 +68,7 @@ spec:
       # root.
       initContainers:
         - name: init-central-storage
-          image: jj123dev/omai-opencode:k8s-20261005-1735
+          image: jj123dev/omai-opencode:pgsql
           imagePullPolicy: Always
           command: ["/bin/sh", "-c"]
           args:
@@ -89,7 +89,7 @@ spec:
               mountPath: /mnt/omai-central
       containers:
         - name: omai-opencode
-          image: jj123dev/omai-opencode:k8s-20261005-1735
+          image: jj123dev/omai-opencode:pgsql
           imagePullPolicy: Always
           command: ["/bin/sh", "-c"]
           args:

@@ -1,13 +1,8 @@
-name: Deploy to Kubernetes
+name: Build and push Docker images
 
 on:
   workflow_dispatch:
     inputs:
-      rebuild:
-        description: "Rebuild and push Docker images"
-        required: true
-        type: boolean
-        default: true
       bust_cache:
         description: "Bust Docker build cache"
         required: false
@@ -16,7 +11,6 @@ on:
 
 jobs:
   build:
-    if: ${{ inputs.rebuild }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -50,7 +44,7 @@ jobs:
           file: ./Dockerfile.opencode
           push: true
           platforms: linux/amd64
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/omai-opencode:latest
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/omai-opencode:pgsql
           provenance: false
           # entrypoint.sh bakes --cors origins from these at build time, so an
           # omitted ARG silently produces the literal origins "http://" and
@@ -69,7 +63,7 @@ jobs:
           file: ./Dockerfile.app
           push: true
           platforms: linux/amd64
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/omai-app:latest
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/omai-app:pgsql
           provenance: false
           build-args: |
             VITE_OPENCODE_SERVER_HOST=
@@ -77,71 +71,3 @@ jobs:
             VITE_OPENCODE_SERVER_PROTOCOL=http
           cache-from: type=gha,scope=frontend-${{ steps.cache.outputs.scope }}
           cache-to: type=gha,scope=frontend-${{ steps.cache.outputs.scope }},mode=max
-
-  deploy:
-    needs: build
-    if: ${{ always() && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
-
-      - name: Set kubeconfig
-        run: |
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
-          chmod 600 ~/.kube/config
-
-      - name: Apply K8s manifests
-        env:
-          DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
-        run: |
-          kubectl apply -f k8s/namespace.yml
-          kubectl apply -f k8s/pvc.yml
-          kubectl apply -f k8s/secret-instance.yml
-          kubectl apply -f k8s/secret-storage.yml
-          # Referenced by secretKeyRef in omai-opencode. Omitting it leaves the
-          # pod in CreateContainerConfigError.
-          kubectl apply -f k8s/secret-cloudflare.yml
-          # Applied before the backend: omai-opencode exits at startup without
-          # OPENCODE_DATABASE_URL, so its rollout cannot succeed first.
-          kubectl apply -f k8s/postgres.yml
-          kubectl apply -f k8s/configmap-nginx.yml
-          kubectl apply -f k8s/configmap-opencode.yml
-          # Rewrite both image references, including the initContainer that
-          # seeds the central storage volume marker.
-          sed "s|jj123dev/omai-opencode|${DOCKER_USER}/omai-opencode|g" k8s/opencode-deployment.yml | kubectl apply -f -
-          sed "s|jj123dev/omai-app|${DOCKER_USER}/omai-app|g" k8s/app-deployment.yml | kubectl apply -f -
-
-      - name: Wait for database rollout
-        run: kubectl -n omai rollout status deployment/omai-postgres --timeout=300s
-
-      - name: Wait for backend rollout
-        run: kubectl -n omai rollout status deployment/omai-opencode --timeout=300s
-
-      - name: Wait for frontend rollout
-        run: kubectl -n omai rollout status deployment/omai-app --timeout=300s
-
-      - name: Get LoadBalancer IP
-        run: |
-          echo "Waiting for LoadBalancer IP..."
-          for i in $(seq 1 60); do
-            EXTERNAL_IP=$(kubectl -n omai get svc omai-app -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
-            if [ -n "$EXTERNAL_IP" ] && [ "$EXTERNAL_IP" != "" ]; then
-              echo ""
-              echo "Deployment complete!"
-              echo "Frontend: http://${EXTERNAL_IP}"
-              echo "Backend:  http://${EXTERNAL_IP}/global/health"
-              exit 0
-            fi
-            echo -n "."
-            sleep 5
-          done
-          echo ""
-          echo "Deployed! LoadBalancer IP not yet assigned."
-          echo "Check with: kubectl -n omai get svc omai-app"
