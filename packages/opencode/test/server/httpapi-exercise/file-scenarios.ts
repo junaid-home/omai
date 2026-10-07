@@ -7,6 +7,7 @@ const png = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=",
   "base64",
 )
+const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
 const encoded = (directory: string) => Buffer.from(directory).toString("base64url")
 
 export const fileScenarios = [
@@ -201,4 +202,37 @@ export const fileScenarios = [
         check(Buffer.from(saved).equals(png), "thumbnail write must preserve PNG bytes")
       }),
     ),
+  http.protected
+    .post("/preview/thumbnail/{encodedDir}/capture", "omai.media.thumbnail.capture")
+    .seeded((ctx) =>
+      Effect.promise(() =>
+        Bun.write(
+          path.join(ctx.directory!, ".OMAI+/preview", "3b25f0c1-8d3e-4a17-9f6b-1c2d3e4f5a6b.html"),
+          '<!doctype html><meta charset="utf-8"><title>Capture</title>' +
+            "<style>html,body{margin:0;background:#0f172a;color:#fff;font:40px/600px sans-serif;text-align:center}</style>" +
+            "<body>OMAI +</body>",
+        ),
+      ),
+    )
+    .at((ctx) => ({ path: `/preview/thumbnail/${encoded(ctx.directory!)}/capture`, headers: ctx.headers() }))
+    .jsonEffect(200, (body, ctx) =>
+      Effect.gen(function* () {
+        object(body)
+        check(body.success === true, "thumbnail capture should succeed")
+        const saved = yield* Effect.promise(() =>
+          Bun.file(path.join(ctx.directory!, ".OMAI+/thumbnails/preview.png")).arrayBuffer(),
+        )
+        const data = Buffer.from(saved)
+        check(data.subarray(0, 8).equals(pngSignature), "thumbnail capture must store a headless chromium screenshot")
+        check(data.byteLength > 1024, "thumbnail capture must store a rendered page, not an empty file")
+      }),
+    ),
+  http.protected
+    .post("/preview/thumbnail/{encodedDir}/capture", "omai.media.thumbnail.capture.unavailable")
+    .at((ctx) => ({ path: `/preview/thumbnail/${encoded(ctx.directory!)}/capture`, headers: ctx.headers() }))
+    .json(409, (body) => {
+      object(body)
+      check(body.success === false, "capture without a preview must fail")
+      check(typeof body.error === "string" && body.error.length > 0, "capture must explain why it failed")
+    }),
 ]

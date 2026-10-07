@@ -13,6 +13,10 @@ import type {
   Auth as Auth3,
   AuthConfigErrors,
   AuthConfigResponses,
+  AuthGoogleCallbackErrors,
+  AuthGoogleCallbackResponses,
+  AuthGoogleErrors,
+  AuthGoogleResponses,
   AuthLoginErrors,
   AuthLoginResponses,
   AuthLogoutErrors,
@@ -185,6 +189,8 @@ import type {
   McpStatusResponses,
   MediaImageErrors,
   MediaImageResponses,
+  MediaThumbnailCaptureErrors,
+  MediaThumbnailCaptureResponses,
   MediaThumbnailGetErrors,
   MediaThumbnailGetResponses,
   MediaThumbnailPutErrors,
@@ -685,6 +691,30 @@ export class Auth extends HeyApiClient {
   public config<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
     return (options?.client ?? this.client).get<AuthConfigResponses, AuthConfigErrors, ThrowOnError>({
       url: "/auth/config",
+      ...options,
+    })
+  }
+
+  /**
+   * Start Google sign-in
+   *
+   * Redirects the browser to Google's OAuth consent screen.
+   */
+  public google<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<AuthGoogleResponses, AuthGoogleErrors, ThrowOnError>({
+      url: "/auth/google",
+      ...options,
+    })
+  }
+
+  /**
+   * Google sign-in callback
+   *
+   * Handles Google's OAuth redirect, verifies the account, and signs the user in.
+   */
+  public googleCallback<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<AuthGoogleCallbackResponses, AuthGoogleCallbackErrors, ThrowOnError>({
+      url: "/auth/google/callback",
       ...options,
     })
   }
@@ -1865,6 +1895,24 @@ export class Media extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  public thumbnailCapture<ThrowOnError extends boolean = false>(
+    parameters: {
+      encodedDir: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "encodedDir" }] }])
+    return (options?.client ?? this.client).post<
+      MediaThumbnailCaptureResponses,
+      MediaThumbnailCaptureErrors,
+      ThrowOnError
+    >({
+      url: "/preview/thumbnail/{encodedDir}/capture",
+      ...options,
+      ...params,
     })
   }
 }

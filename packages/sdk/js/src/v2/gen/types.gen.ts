@@ -7833,10 +7833,57 @@ export type AuthConfigResponses = {
   200: {
     mode: "central" | "local"
     workspaceRoot?: string
+    google: boolean
   }
 }
 
 export type AuthConfigResponse = AuthConfigResponses[keyof AuthConfigResponses]
+
+export type AuthGoogleData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/auth/google"
+}
+
+export type AuthGoogleErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type AuthGoogleError = AuthGoogleErrors[keyof AuthGoogleErrors]
+
+export type AuthGoogleResponses = {
+  /**
+   * <No Content>
+   */
+  200: unknown
+}
+
+export type AuthGoogleCallbackData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/auth/google/callback"
+}
+
+export type AuthGoogleCallbackErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type AuthGoogleCallbackError = AuthGoogleCallbackErrors[keyof AuthGoogleCallbackErrors]
+
+export type AuthGoogleCallbackResponses = {
+  /**
+   * <No Content>
+   */
+  200: unknown
+}
 
 export type AuthLogoutData = {
   body?: never
@@ -8003,6 +8050,35 @@ export type MediaThumbnailPutResponses = {
 }
 
 export type MediaThumbnailPutResponse = MediaThumbnailPutResponses[keyof MediaThumbnailPutResponses]
+
+export type MediaThumbnailCaptureData = {
+  body?: never
+  path: {
+    encodedDir: string
+  }
+  query?: never
+  url: "/preview/thumbnail/{encodedDir}/capture"
+}
+
+export type MediaThumbnailCaptureErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type MediaThumbnailCaptureError = MediaThumbnailCaptureErrors[keyof MediaThumbnailCaptureErrors]
+
+export type MediaThumbnailCaptureResponses = {
+  /**
+   * Success
+   */
+  200: {
+    success: boolean
+  }
+}
+
+export type MediaThumbnailCaptureResponse = MediaThumbnailCaptureResponses[keyof MediaThumbnailCaptureResponses]
 
 export type UserStateGetData = {
   body?: never

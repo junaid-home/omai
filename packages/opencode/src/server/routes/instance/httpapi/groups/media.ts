@@ -20,5 +20,9 @@ export const MediaApi = HttpApi.make("media").add(
       payload: Schema.Struct({ png: Schema.String }),
       success: Schema.Struct({ success: Schema.Boolean }),
     }),
+    HttpApiEndpoint.post("thumbnailCapture", "/preview/thumbnail/:encodedDir/capture", {
+      params: Schema.Struct({ encodedDir: Schema.String }),
+      success: Schema.Struct({ success: Schema.Boolean }),
+    }),
   ),
 )
