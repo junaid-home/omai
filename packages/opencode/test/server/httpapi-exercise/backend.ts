@@ -1,5 +1,6 @@
 import { ConfigProvider, Effect, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
+import { routerConfig } from "../../../src/server/routes/instance/httpapi/router-config"
 import { parse } from "./assertions"
 import { runtime, type Runtime } from "./runtime"
 import type { ActiveScenario, BackendApp, CallResult, CaptureMode, Method, RequestSpec, SeededContext } from "./types"
@@ -76,7 +77,7 @@ function app(modules: Runtime, options: CallOptions) {
         ),
       ),
     ),
-    { disableLogger: true, memoMap: modules.memoMap },
+    { disableLogger: true, memoMap: modules.memoMap, routerConfig },
   )
   return (appCache[cacheKey] = {
     dispose: web.dispose,
