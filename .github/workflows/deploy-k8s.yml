@@ -1,6 +1,12 @@
 name: Build and push Docker images
 
 on:
+  push:
+    branches: [dev]
+    paths:
+      - "Dockerfile.*"
+      - "entrypoint.sh"
+      - ".github/workflows/deploy-k8s.yml"
   workflow_dispatch:
     inputs:
       bust_cache:
