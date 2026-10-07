@@ -39,6 +39,8 @@ export function publicRequest(method: string, pathname: string) {
   if (
     [
       "/auth/config",
+      "/auth/google",
+      "/auth/google/callback",
       "/global/health",
       "/global/live",
       "/",

@@ -33,6 +33,8 @@ const AuthPaths = {
   signup: "/auth/signup",
   login: "/auth/login",
   me: "/auth/me",
+  google: "/auth/google",
+  googleCallback: "/auth/google/callback",
 } as const
 
 export const AuthApi = HttpApi.make("auth").add(
@@ -62,8 +64,23 @@ export const AuthApi = HttpApi.make("auth").add(
         success: Schema.Struct({
           mode: Schema.Literals(["central", "local"]),
           workspaceRoot: Schema.optional(Schema.String),
+          google: Schema.Boolean,
         }),
       }),
+      HttpApiEndpoint.get("google", AuthPaths.google, { success: Schema.Void }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "auth.google",
+          summary: "Start Google sign-in",
+          description: "Redirects the browser to Google's OAuth consent screen.",
+        }),
+      ),
+      HttpApiEndpoint.get("googleCallback", AuthPaths.googleCallback, { success: Schema.Void }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "auth.googleCallback",
+          summary: "Google sign-in callback",
+          description: "Handles Google's OAuth redirect, verifies the account, and signs the user in.",
+        }),
+      ),
       HttpApiEndpoint.post("logout", "/auth/logout", { success: Schema.Boolean }),
       HttpApiEndpoint.get("me", AuthPaths.me, {
         success: described(AuthUserResult, "Current user"),

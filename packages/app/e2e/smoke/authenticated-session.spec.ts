@@ -261,3 +261,55 @@ test("unauthenticated central startup renders login without durable state writes
   expect(writes).toEqual([])
   expect(errors).toEqual([])
 })
+
+test("google sign-in is visible even when the server reports no credentials", async ({ page }) => {
+  await mockOpenCodeServer(page, {
+    mode: "central",
+    authenticated: false,
+    sessions: fixture.sessions,
+    provider: fixture.provider,
+    directory: fixture.directory,
+    project: fixture.project,
+    pageMessages: () => ({ items: [] }),
+  })
+  await page.goto("/login")
+  await expect(page.getByLabel("Username or email")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Continue with Google" })).toBeVisible()
+})
+
+test("google sign-in starts the authorization flow", async ({ page }) => {
+  let started = false
+  await mockOpenCodeServer(page, {
+    mode: "central",
+    authenticated: false,
+    sessions: fixture.sessions,
+    provider: fixture.provider,
+    directory: fixture.directory,
+    project: fixture.project,
+    pageMessages: () => ({ items: [] }),
+  })
+  await page.route("**/auth/google", async (route) => {
+    started = true
+    await route.fulfill({ status: 200, contentType: "text/html", body: "<html><body>Google consent</body></html>" })
+  })
+  await page.goto("/login")
+  const google = page.getByRole("button", { name: "Continue with Google" })
+  await expect(google).toBeVisible()
+  await google.click()
+  await expect.poll(() => started).toBe(true)
+})
+
+test("google callback errors render inline on the login page", async ({ page }) => {
+  await mockOpenCodeServer(page, {
+    mode: "central",
+    authenticated: false,
+    sessions: fixture.sessions,
+    provider: fixture.provider,
+    directory: fixture.directory,
+    project: fixture.project,
+    pageMessages: () => ({ items: [] }),
+  })
+  await page.goto("/login?error=google_state")
+  await expect(page.getByText("Google sign-in expired. Please try again.")).toBeVisible()
+  await expect(page).toHaveURL(/\/login$/)
+})

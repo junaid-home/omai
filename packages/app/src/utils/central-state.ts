@@ -330,6 +330,7 @@ type Runtime = {
   mode: "local" | "central"
   url?: string
   workspaceRoot?: string
+  google?: boolean
   user?: AuthUser
   client?: CentralState
 }
@@ -341,7 +342,11 @@ export const centralRuntime = {
   configure(input: Runtime) {
     runtime.client?.dispose()
     anonymous.clear()
-    Object.assign(runtime, { url: undefined, workspaceRoot: undefined, user: undefined, client: undefined }, input)
+    Object.assign(
+      runtime,
+      { url: undefined, workspaceRoot: undefined, google: undefined, user: undefined, client: undefined },
+      input,
+    )
   },
   anonymousStorage(address: StateAddress) {
     const key = JSON.stringify(address)
@@ -385,13 +390,14 @@ export async function bootstrapCentralState(input: { url: string; fetch: typeof 
     "workspaceRoot" in config && typeof config.workspaceRoot === "string"
       ? config.workspaceRoot.replace(/\/+$/, "")
       : undefined
+  const google = "google" in config && config.google === true
   const session = await requestFetch(`${base}/auth/me`, {
     credentials: "include",
     cache: "no-store",
     signal: AbortSignal.timeout(15_000),
   })
   if (session.status === 401) {
-    centralRuntime.configure({ mode: "central", url: base, workspaceRoot })
+    centralRuntime.configure({ mode: "central", url: base, workspaceRoot, google })
     return
   }
   if (!session.ok) throw new Error("Your server session could not be verified. Reconnect to continue.")
@@ -413,6 +419,7 @@ export async function bootstrapCentralState(input: { url: string; fetch: typeof 
     mode: "central",
     url: base,
     workspaceRoot,
+    google,
     user: identity,
     client: createCentralState({ url: base, userID: identity.id, fetch: requestFetch }),
   })

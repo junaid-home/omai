@@ -29,6 +29,12 @@ export default defineConfig(({ mode }) => {
       allowedHosts: true,
       port: 3000,
       proxy: {
+        // The Google OAuth callback returns to the page origin, so /auth/*
+        // (including /auth/google/callback) must reach the backend in dev.
+        "/auth": {
+          target: serverOrigin,
+          changeOrigin: true,
+        },
         // Local image files referenced in markdown render via the dev origin.
         "/file/image": {
           target: serverOrigin,

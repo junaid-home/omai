@@ -1203,6 +1203,13 @@ export const dict = {
   "auth.login.noAccount": "Don't have an account?",
   "auth.login.signup": "Sign up",
   "auth.login.error.required": "Please enter your username/email and password",
+  "auth.login.error.google_denied": "Google sign-in was cancelled.",
+  "auth.login.error.google_state": "Google sign-in expired. Please try again.",
+  "auth.login.error.google_exchange": "Could not sign in with Google. Please try again.",
+  "auth.login.error.google_email": "Your Google account email is not verified.",
+  "auth.login.error.google_unavailable": "Google sign-in is not available.",
+  "auth.login.or": "or",
+  "auth.login.continueWithGoogle": "Continue with Google",
   "auth.login.stealthMode": "STEALTH MODE",
 
   "auth.signup.title": "Create account",

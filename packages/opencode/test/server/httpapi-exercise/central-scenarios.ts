@@ -11,11 +11,38 @@ export const centralScenarios = [
     .json(200, (body) => {
       object(body)
       check(body.mode === "central", "bootstrap must identify hosted authentication")
+      check(typeof body.google === "boolean", "bootstrap must report Google sign-in availability")
       check(
-        Object.keys(body).every((key) => key === "mode" || key === "workspaceRoot"),
+        Object.keys(body).every((key) => key === "mode" || key === "workspaceRoot" || key === "google"),
         "bootstrap must not expose secrets",
       )
     }),
+  http.public
+    .get("/auth/google", "central.auth.google")
+    .central()
+    .global()
+    .at((ctx) => ({ path: "/auth/google", headers: ctx.headers() }))
+    .status(302, (_ctx, result) =>
+      Effect.sync(() => {
+        check(
+          result.headers.get("location") === "/login?error=google_unavailable",
+          "start without configured credentials must redirect to the login error",
+        )
+      }),
+    ),
+  http.public
+    .get("/auth/google/callback", "central.auth.googleCallback")
+    .central()
+    .global()
+    .at((ctx) => ({ path: "/auth/google/callback?state=missing&code=placeholder", headers: ctx.headers() }))
+    .status(302, (_ctx, result) =>
+      Effect.sync(() => {
+        check(
+          result.headers.get("location") === "/login?error=google_state",
+          "callback without the matching state cookie must be rejected",
+        )
+      }),
+    ),
   http.public
     .post("/auth/signup", "central.auth.signup")
     .central()

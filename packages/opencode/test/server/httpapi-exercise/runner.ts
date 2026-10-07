@@ -67,11 +67,15 @@ function withAuthentication<A, E, R>(scenario: ActiveScenario, effect: Effect.Ef
     OPENCODE_JWT_SECRET: crypto.randomUUID() + crypto.randomUUID(),
     OPENCODE_REGISTRATION_SECRET: crypto.randomUUID() + crypto.randomUUID(),
   }
+  // The process .env may carry real Google credentials; central scenarios assert
+  // the unconfigured behavior, so the exercise backend must never see them.
+  const googleKeys = ["OPENCODE_GOOGLE_CLIENT_ID", "OPENCODE_GOOGLE_CLIENT_SECRET"]
   return Effect.acquireUseRelease(
     Effect.promise(async () => {
       await disposeApps()
-      const previous = new Map(Object.keys(environment).map((key) => [key, process.env[key]]))
+      const previous = new Map([...Object.keys(environment), ...googleKeys].map((key) => [key, process.env[key]]))
       Object.assign(process.env, environment)
+      for (const key of googleKeys) delete process.env[key]
       return previous
     }),
     () => effect,

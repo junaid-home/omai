@@ -178,6 +178,16 @@ spec:
                 secretKeyRef:
                   name: omai-instance-secrets
                   key: OPENCODE_REGISTRATION_SECRET
+            - name: OPENCODE_GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: omai-instance-secrets
+                  key: OPENCODE_GOOGLE_CLIENT_ID
+            - name: OPENCODE_GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: omai-instance-secrets
+                  key: OPENCODE_GOOGLE_CLIENT_SECRET
 
             # Object storage for uploaded files and session file parts. This is
             # separate from central workspace storage and is not gated by it.

@@ -12,7 +12,8 @@ import { RootHttpApi } from "../api"
 import { AuthLoginInput, AuthSignupInput } from "../groups/auth"
 import { generateToken, TOKEN_LIFETIME_MS } from "@/auth/jwt"
 import { hashPassword, verifyPassword } from "@/user"
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto"
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
+import { createRemoteJWKSet, jwtVerify } from "jose"
 
 function error(message: string, status: number) {
   return HttpServerResponse.jsonUnsafe({ error: message }, { status, headers: { "Cache-Control": "no-store" } })
@@ -42,6 +43,41 @@ function invitation(value: string | undefined) {
   return timingSafeEqual(createHash("sha256").update(expected).digest(), createHash("sha256").update(value).digest())
 }
 
+export const GOOGLE_STATE_COOKIE = "omai_google_state"
+const GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+const googleJwks = createRemoteJWKSet(new URL("https://www.googleapis.com/oauth2/v3/certs"))
+
+/** Google sign-in is offered whenever credentials and a public origin are configured. */
+export function googleCredentials() {
+  const clientID = Authentication.secret("OPENCODE_GOOGLE_CLIENT_ID")
+  const clientSecret = Authentication.secret("OPENCODE_GOOGLE_CLIENT_SECRET")
+  const origin = Authentication.publicOrigin()
+  if (!clientID || !clientSecret || !origin) return undefined
+  return { clientID, clientSecret, origin }
+}
+
+/** Derives a signup-conforming username from an email local part, unique-candidate safe. */
+export function googleUsernameBase(email: string) {
+  let base = (email.split("@")[0] ?? "").replace(/[^a-zA-Z0-9_-]/g, "")
+  if (!/^[a-zA-Z0-9]/.test(base)) base = `u${base}`
+  if (base.length < 3) base += randomBytes(4).toString("hex")
+  return base.slice(0, 24)
+}
+
+function stateCookie(nonce: string) {
+  return `${GOOGLE_STATE_COOKIE}=${nonce}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600${Authentication.central() ? "; Secure" : ""}`
+}
+
+function stateMatches(state: string, nonce: string) {
+  if (!nonce || state.length !== nonce.length) return false
+  return timingSafeEqual(Buffer.from(state), Buffer.from(nonce))
+}
+
+function loginRedirect(code: string) {
+  return HttpServerResponse.redirect(`/login?error=${code}`)
+}
+
 export const authHandlers = HttpApiBuilder.group(RootHttpApi, "auth", (handlers) =>
   Effect.gen(function* () {
     const { db } = yield* Database.Service
@@ -59,7 +95,11 @@ export const authHandlers = HttpApiBuilder.group(RootHttpApi, "auth", (handlers)
       return true
     }
 
-    const issue = Effect.fn("Auth.issue")(function* (user: { id: string; username: string; email: string }) {
+    const issueSession = Effect.fn("Auth.issueSession")(function* (user: {
+      id: string
+      username: string
+      email: string
+    }) {
       const now = Date.now()
       const sessionID = randomUUID()
       const token = yield* Effect.promise(() =>
@@ -74,12 +114,46 @@ export const authHandlers = HttpApiBuilder.group(RootHttpApi, "auth", (handlers)
           time_expires: now + TOKEN_LIFETIME_MS,
         })
         .pipe(Effect.orDie)
+      return { token, user, cookie: sessionCookie(token, TOKEN_LIFETIME_MS / 1000) }
+    })
+
+    const issue = Effect.fn("Auth.issue")(function* (user: { id: string; username: string; email: string }) {
+      const session = yield* issueSession(user)
       return HttpServerResponse.jsonUnsafe(
-        { token, user },
-        {
-          headers: { "Set-Cookie": sessionCookie(token, TOKEN_LIFETIME_MS / 1000), "Cache-Control": "no-store" },
-        },
+        { token: session.token, user: session.user },
+        { headers: { "Set-Cookie": session.cookie, "Cache-Control": "no-store" } },
       )
+    })
+
+    const googleUser = Effect.fn("Auth.googleUser")(function* (email: string) {
+      const byEmail = () => db.select().from(UserTable).where(eq(UserTable.email, email)).limit(1).pipe(Effect.orDie)
+      const existing = yield* byEmail()
+      if (existing[0]) return existing[0]
+      const base = googleUsernameBase(email)
+      const password = yield* hashSlots.withPermit(Effect.promise(() => hashPassword(randomBytes(32).toString("hex"))))
+      const now = Date.now()
+      // onConflictDoNothing swallows both email and username conflicts, so retry by
+      // picking the next username candidate and re-checking the email on every pass.
+      for (let attempt = 0; attempt < 50; attempt++) {
+        const username = attempt === 0 ? base : `${base}-${attempt}`
+        const created = yield* db
+          .insert(UserTable)
+          .values({
+            id: randomUUID(),
+            username,
+            email,
+            password_hash: password,
+            time_created: now,
+            time_updated: now,
+          })
+          .onConflictDoNothing()
+          .returning({ id: UserTable.id })
+          .pipe(Effect.orDie)
+        if (created.length === 1) return { id: created[0].id, username, email }
+        const raced = yield* byEmail()
+        if (raced[0]) return raced[0]
+      }
+      return undefined
     })
 
     return handlers
@@ -87,6 +161,82 @@ export const authHandlers = HttpApiBuilder.group(RootHttpApi, "auth", (handlers)
         Effect.succeed({
           mode: Authentication.central() ? ("central" as const) : ("local" as const),
           workspaceRoot: CentralStorage.workspaceRoot(),
+          google: googleCredentials() !== undefined,
+        }),
+      )
+      .handleRaw(
+        "google",
+        Effect.fn("Auth.google")(function* () {
+          const credentials = googleCredentials()
+          if (!credentials || !allowed("google:start", 60)) return loginRedirect("google_unavailable")
+          const nonce = randomBytes(32).toString("hex")
+          const url = new URL(GOOGLE_AUTHORIZE_URL)
+          url.searchParams.set("client_id", credentials.clientID)
+          url.searchParams.set("redirect_uri", `${credentials.origin}/auth/google/callback`)
+          url.searchParams.set("response_type", "code")
+          url.searchParams.set("scope", "openid email")
+          url.searchParams.set("state", nonce)
+          url.searchParams.set("prompt", "select_account")
+          return HttpServerResponse.redirect(url, { headers: { "Set-Cookie": stateCookie(nonce) } })
+        }),
+      )
+      .handleRaw(
+        "googleCallback",
+        Effect.fn("Auth.googleCallback")(function* () {
+          const request = yield* HttpServerRequest.HttpServerRequest
+          const url = new URL(request.url, "http://localhost")
+          const state = url.searchParams.get("state")
+          const nonce = request.cookies[GOOGLE_STATE_COOKIE]
+          if (!state || !nonce || !stateMatches(state, nonce)) return loginRedirect("google_state")
+          const credentials = googleCredentials()
+          if (!credentials || !allowed("google:callback", 60)) return loginRedirect("google_unavailable")
+          const providerError = url.searchParams.get("error")
+          if (providerError)
+            return loginRedirect(providerError === "access_denied" ? "google_denied" : "google_exchange")
+          const code = url.searchParams.get("code")
+          if (!code || code.length > 4096) return loginRedirect("google_exchange")
+          const token = yield* Effect.tryPromise(() =>
+            fetch(GOOGLE_TOKEN_URL, {
+              method: "POST",
+              headers: { "content-type": "application/x-www-form-urlencoded" },
+              body: new URLSearchParams({
+                code,
+                client_id: credentials.clientID,
+                client_secret: credentials.clientSecret,
+                redirect_uri: `${credentials.origin}/auth/google/callback`,
+                grant_type: "authorization_code",
+              }),
+              signal: AbortSignal.timeout(15_000),
+            }),
+          ).pipe(Effect.option)
+          if (Option.isNone(token) || !token.value.ok) return loginRedirect("google_exchange")
+          const body = yield* Effect.tryPromise(() => token.value.json()).pipe(Effect.option)
+          if (Option.isNone(body)) return loginRedirect("google_exchange")
+          const decoded = Schema.decodeUnknownOption(Schema.Struct({ id_token: Schema.optional(Schema.String) }))(
+            body.value,
+          )
+          if (Option.isNone(decoded)) return loginRedirect("google_exchange")
+          const idToken = decoded.value.id_token
+          if (!idToken) return loginRedirect("google_exchange")
+          const verified = yield* Effect.tryPromise(() =>
+            jwtVerify(idToken, googleJwks, {
+              issuer: ["https://accounts.google.com", "accounts.google.com"],
+              audience: credentials.clientID,
+            }),
+          ).pipe(Effect.option)
+          if (Option.isNone(verified)) return loginRedirect("google_exchange")
+          const claims = verified.value.payload
+          if (
+            claims.email_verified !== true ||
+            typeof claims.email !== "string" ||
+            claims.email.length > 254 ||
+            !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(claims.email)
+          )
+            return loginRedirect("google_email")
+          const user = yield* googleUser(claims.email.trim().toLowerCase())
+          if (!user) return loginRedirect("google_unavailable")
+          const session = yield* issueSession(user)
+          return HttpServerResponse.redirect("/", { headers: { "Set-Cookie": session.cookie } })
         }),
       )
       .handleRaw(

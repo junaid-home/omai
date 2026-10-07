@@ -30,6 +30,10 @@ it.live(
         "OPENCODE_PREVIEW_PORT",
         "OPENCODE_JWT_SECRET",
         "OPENCODE_REGISTRATION_SECRET",
+        "OPENCODE_GOOGLE_CLIENT_ID",
+        "OPENCODE_GOOGLE_CLIENT_SECRET",
+        "OPENCODE_GOOGLE_CLIENT_ID_FILE",
+        "OPENCODE_GOOGLE_CLIENT_SECRET_FILE",
         "OPENCODE_DISABLE_DEFAULT_PLUGINS",
       ]
       yield* Effect.acquireRelease(
@@ -50,6 +54,11 @@ it.live(
       process.env.OPENCODE_JWT_SECRET = crypto.randomUUID() + crypto.randomUUID()
       process.env.OPENCODE_REGISTRATION_SECRET = crypto.randomUUID() + crypto.randomUUID()
       process.env.OPENCODE_DISABLE_DEFAULT_PLUGINS = "1"
+      // Google sign-in stays disabled for this run even if the shell has credentials.
+      delete process.env.OPENCODE_GOOGLE_CLIENT_ID
+      delete process.env.OPENCODE_GOOGLE_CLIENT_SECRET
+      delete process.env.OPENCODE_GOOGLE_CLIENT_ID_FILE
+      delete process.env.OPENCODE_GOOGLE_CLIENT_SECRET_FILE
       const project = yield* Effect.acquireRelease(
         Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "omai-listen-"))),
         (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })),
@@ -75,7 +84,18 @@ it.live(
       const configuration = yield* call("/auth/config")
       expect(configuration.status).toBe(200)
       // This test uses local storage; Effect encodes the absent workspace root as null.
-      expect(yield* Effect.promise(() => configuration.json())).toEqual({ mode: "central", workspaceRoot: null })
+      expect(yield* Effect.promise(() => configuration.json())).toEqual({
+        mode: "central",
+        workspaceRoot: null,
+        google: false,
+      })
+      // Google sign-in is declared but disabled without OPENCODE_GOOGLE_CLIENT_* credentials.
+      const googleStart = yield* call("/auth/google")
+      expect(googleStart.status).toBe(302)
+      expect(googleStart.headers.get("location")).toBe("/login?error=google_unavailable")
+      const googleCallback = yield* call("/auth/google/callback?state=abc123&code=placeholder")
+      expect(googleCallback.status).toBe(302)
+      expect(googleCallback.headers.get("location")).toBe("/login?error=google_state")
       const health = yield* call("/global/health")
       expect(health.status).toBe(200)
       expect(yield* Effect.promise(() => health.json())).toEqual({ healthy: true, version: expect.any(String) })

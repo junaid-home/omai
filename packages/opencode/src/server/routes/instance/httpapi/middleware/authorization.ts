@@ -126,7 +126,17 @@ export const authorizationLayer = Layer.effect(
         Effect.gen(function* () {
           const request = yield* HttpServerRequest.HttpServerRequest
           const pathname = new URL(request.url, "http://localhost").pathname
-          if (["/auth/login", "/auth/signup", "/auth/config", "/global/health", "/global/live"].includes(pathname))
+          if (
+            [
+              "/auth/login",
+              "/auth/signup",
+              "/auth/config",
+              "/auth/google",
+              "/auth/google/callback",
+              "/global/health",
+              "/global/live",
+            ].includes(pathname)
+          )
             return yield* effect
           const principal = yield* Authentication.Current
           if (!principal) return yield* new HttpApiError.Unauthorized({})
