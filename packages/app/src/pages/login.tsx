@@ -2,11 +2,10 @@ import { createSignal, onMount } from "solid-js"
 import { useNavigate } from "@solidjs/router"
 import { Button } from "@opencode-ai/ui/button"
 import { TextField } from "@opencode-ai/ui/text-field"
-import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
+import { AuthHead, AuthSurface } from "@/components/auth-surface"
 import { useAuth } from "@/context/auth"
 import { useLanguage } from "@/context/language"
 import { centralRuntime } from "@/utils/central-state"
-import { BrandLogo } from "@/components/brand-logo"
 
 export default function LoginPage() {
   const auth = useAuth()
@@ -48,60 +47,70 @@ export default function LoginPage() {
   }
 
   return (
-    <div class="min-h-screen flex items-center justify-center bg-background-base relative overflow-hidden">
-      <div class="absolute inset-0 backdrop-blur-xl bg-background-base/80" />
-      <div class="relative z-10 w-full max-w-sm mx-auto px-6">
-        <div class="flex flex-col items-center gap-6 mb-8">
-          <BrandLogo size="large" />
-          <div class="text-18-semibold text-text-strong">{language.t("auth.login.title")}</div>
-          <div class="text-14-regular text-text-weak">{language.t("auth.login.subtitle")}</div>
+    <AuthSurface>
+      <AuthHead title={language.t("auth.login.title")} subtitle={language.t("auth.login.subtitle")} />
+
+      {error() && (
+        <div role="alert" class="auth-error">
+          {error()}
         </div>
-        <form onSubmit={handleSubmit} class="flex flex-col gap-4">
-          <TextField
-            label={language.t("auth.login.username.label")}
-            placeholder={language.t("auth.login.username.placeholder")}
-            value={identifier()}
-            onChange={(v) => {
-              setIdentifier(v)
-              setError("")
-            }}
-            validationState={error() ? "invalid" : undefined}
-            error={error()}
-          />
-          <TextField
-            label={language.t("auth.login.password.label")}
-            type="password"
-            placeholder="••••••••"
-            value={password()}
-            onChange={(v) => {
-              setPassword(v)
-              setError("")
-            }}
-            validationState={error() ? "invalid" : undefined}
-          />
-          <Button type="submit" variant="primary" size="large" disabled={loading()}>
-            {loading() ? language.t("auth.login.submitting") : language.t("auth.login.submit")}
-          </Button>
-        </form>
-        <div class="flex items-center gap-3 my-5" aria-hidden="true">
-          <div class="h-px flex-1 bg-v2-border-border-muted" />
-          <span class="text-12-regular text-text-weak">{language.t("auth.login.or")}</span>
-          <div class="h-px flex-1 bg-v2-border-border-muted" />
-        </div>
-        <Button variant="secondary" size="large" class="w-full" onClick={signInWithGoogle}>
-          <span class="flex items-center justify-center gap-2">
-            <ProviderIcon id="google" class="size-4 shrink-0" />
-            {language.t("auth.login.continueWithGoogle")}
-          </span>
-        </Button>
-        <div class="mt-6 text-center text-14-regular text-text-weak">
-          {/* {language.t("auth.login.noAccount")}{" "}
-          <a href="/signup" class="text-accent-base hover:underline cursor-pointer">{language.t("auth.login.signup")}</a> */}
-          {/* {language.t("auth.login.stealthMode")} */}
-          STEALTH MODE
-        </div>
+      )}
+
+      <Button variant="secondary" size="large" class="w-full" onClick={signInWithGoogle}>
+        <span class="flex w-full items-center justify-center gap-2.5">
+          <svg viewBox="0 0 48 48" aria-hidden="true" class="size-4 shrink-0">
+            <path
+              fill="#EA4335"
+              d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
+            />
+            <path
+              fill="#4285F4"
+              d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
+            />
+            <path
+              fill="#FBBC05"
+              d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
+            />
+            <path
+              fill="#34A853"
+              d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
+            />
+          </svg>
+          {language.t("auth.login.continueWithGoogle")}
+        </span>
+      </Button>
+
+      <div class="auth-divider" aria-hidden="true">
+        <span class="auth-divider-line" />
+        <span class="auth-divider-label">{language.t("auth.login.or")}</span>
+        <span class="auth-divider-line" />
       </div>
-    </div>
+
+      <form onSubmit={handleSubmit} class="flex flex-col gap-3">
+        <TextField
+          label={language.t("auth.login.username.label")}
+          placeholder={language.t("auth.login.username.placeholder")}
+          value={identifier()}
+          onChange={(v) => {
+            setIdentifier(v)
+            setError("")
+          }}
+        />
+        <TextField
+          label={language.t("auth.login.password.label")}
+          type="password"
+          placeholder="••••••••"
+          value={password()}
+          onChange={(v) => {
+            setPassword(v)
+            setError("")
+          }}
+        />
+        <Button type="submit" variant="primary" size="large" class="mt-1" disabled={loading()}>
+          {loading() ? language.t("auth.login.submitting") : language.t("auth.login.submit")}
+        </Button>
+      </form>
+    </AuthSurface>
   )
 }
 
