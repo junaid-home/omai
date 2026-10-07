@@ -27,6 +27,7 @@ import { GlobalUpgradeInput } from "../groups/global"
 import { mkdir } from "fs/promises"
 import path from "path"
 import { startDevServer, stopDevServer, getDevServerStatus, touchDevServer } from "@/preview/server"
+import { captureAndStoreThumbnail } from "@/preview/capture"
 import { auditPreview } from "@/preview/lighthouse"
 import { ProjectArchive } from "@/server/project-archive"
 
@@ -304,6 +305,9 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
               { success: false, error: "Dev server failed to start" },
               { status: 400 },
             )
+          // Capture the thumbnail immediately when the webserver starts: it is captured when
+          // missing or stale and skipped when the existing one is still fresh.
+          void captureAndStoreThumbnail(safePath.value).catch(() => {})
           const hostname = process.env.OPENCODE_HOST || status.hostname || "localhost"
           const proto = ctx.request.headers["x-forwarded-proto"] ?? "http"
           const scheme = proto === "wss" ? "https" : proto

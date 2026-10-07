@@ -3,11 +3,10 @@ import { Effect, Option, Schema, Stream } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { constants } from "node:fs"
-import { open, mkdir, rename, rm, writeFile } from "node:fs/promises"
-import { randomUUID } from "node:crypto"
+import { open } from "node:fs/promises"
 import path from "node:path"
 import { decodeDirectory } from "@/preview/thumbnail"
-import { capturePreview, MAX_CAPTURE_BYTES, PreviewUnavailableError } from "@/preview/capture"
+import { captureAndStoreThumbnail, pngSignature, PreviewUnavailableError, writeThumbnail } from "@/preview/capture"
 import { RootHttpApi } from "../api"
 
 const images: Record<string, string> = {
@@ -30,19 +29,7 @@ const videos: Record<string, string> = {
   mov: "video/quicktime",
   m4v: "video/mp4",
 }
-const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
 const ThumbnailBody = Schema.Struct({ png: Schema.String })
-
-async function writeThumbnail(target: string, data: Buffer) {
-  await mkdir(path.dirname(target), { recursive: true })
-  const temporary = `${target}.${randomUUID()}.tmp`
-  try {
-    await writeFile(temporary, data, { flag: "wx", mode: 0o600 })
-    await rename(temporary, target)
-  } finally {
-    await rm(temporary, { force: true })
-  }
-}
 
 function json(body: Record<string, unknown>, status: number) {
   return HttpServerResponse.jsonUnsafe(body, { status, headers: { "Cache-Control": "no-store" } })
@@ -116,13 +103,11 @@ export const mediaHandlers = HttpApiBuilder.group(RootHttpApi, "media", (handler
           try: () => CentralStorage.resolveWorkspace(directory),
           catch: (cause) => cause,
         })
-        const png = yield* Effect.tryPromise({ try: () => capturePreview(safe), catch: (cause) => cause })
-        if (png.byteLength > MAX_CAPTURE_BYTES || !png.subarray(0, 8).equals(pngSignature))
-          return json({ success: false, error: "The preview screenshot was invalid." }, 500)
-        const target = yield* Effect.tryPromise(() =>
-          CentralStorage.resolveWorkspace(path.join(safe, ".OMAI+", "thumbnails", "preview.png")),
-        )
-        yield* Effect.tryPromise(() => writeThumbnail(target, png))
+        const stored = yield* Effect.tryPromise({
+          try: () => captureAndStoreThumbnail(safe),
+          catch: (cause) => cause,
+        })
+        if (stored === "skipped") return json({ success: true, skipped: true }, 200)
         return HttpServerResponse.jsonUnsafe({ success: true }, { headers: { "Cache-Control": "no-store" } })
       }).pipe(
         Effect.catch((error) =>

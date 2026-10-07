@@ -1,6 +1,7 @@
 import { spawn } from "child_process"
 import { existsSync } from "node:fs"
-import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
+import { randomUUID } from "node:crypto"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
@@ -17,7 +18,7 @@ const READY_BUDGET_MS = 8_000
 const VIRTUAL_TIME_BUDGET_MS = 6_000
 export const MAX_CAPTURE_BYTES = 4 * 1024 * 1024
 const STDERR_LIMIT = 8 << 10
-const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
+export const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
 
 const CHROME_CANDIDATES = [
   "/usr/bin/chromium",
@@ -99,10 +100,18 @@ async function captureAttempt(url: string, screenshot: string): Promise<Buffer> 
   )
 }
 
-const captures = new Map<string, Promise<Buffer>>()
+const captures = new Map<string, Promise<Buffer | null>>()
+const failures = new Map<string, number>()
 
-/** One capture per project at a time; concurrent requests share the in-flight screenshot. */
-export function capturePreview(directory: string): Promise<Buffer> {
+const THUMBNAIL_FRESH_MS = 60_000
+const FAILURE_COOLDOWN_MS = 45_000
+
+/**
+ * One capture per project at a time; concurrent requests share the in-flight screenshot.
+ * Returns null when there is nothing to do: the thumbnail is fresh, the static snapshot is
+ * unchanged since the last capture, or the directory is inside its post-failure cooldown.
+ */
+export function capturePreview(directory: string): Promise<Buffer | null> {
   const pending = captures.get(directory)
   if (pending) return pending
   const task = captureFor(directory).finally(() => captures.delete(directory))
@@ -110,16 +119,74 @@ export function capturePreview(directory: string): Promise<Buffer> {
   return task
 }
 
-async function captureFor(directory: string): Promise<Buffer> {
+async function captureFor(directory: string): Promise<Buffer | null> {
+  const cooled = failures.get(directory)
+  if (cooled && Date.now() - cooled < FAILURE_COOLDOWN_MS) return null
+
   const status = getDevServerStatus(directory)
   if (status.running && status.port) {
+    if (await freshThumbnail(directory)) return null
     const url = `http://127.0.0.1:${status.port}/`
-    await waitForPreview(url)
-    return captureUrl(url)
+    return attempt(directory, async () => {
+      await waitForPreview(url)
+      return captureUrl(url)
+    })
   }
+
   const snapshot = await latestSnapshot(directory)
-  if (snapshot) return captureUrl(pathToFileURL(snapshot).href)
-  throw new PreviewUnavailableError("No preview is running for this project.")
+  if (!snapshot) throw recordFailure(directory, new PreviewUnavailableError("No preview is running for this project."))
+  const thumbnail = await stat(path.join(directory, ".OMAI+", "thumbnails", "preview.png")).catch(() => null)
+  if (thumbnail?.isFile()) {
+    if (Date.now() - thumbnail.mtimeMs < THUMBNAIL_FRESH_MS) return null
+    const snapshotInfo = await stat(snapshot).catch(() => null)
+    if (snapshotInfo && snapshotInfo.mtimeMs <= thumbnail.mtimeMs) return null
+  }
+  return attempt(directory, () => captureUrl(pathToFileURL(snapshot).href))
+}
+
+async function freshThumbnail(directory: string): Promise<boolean> {
+  const info = await stat(path.join(directory, ".OMAI+", "thumbnails", "preview.png")).catch(() => null)
+  return Boolean(info?.isFile() && Date.now() - info.mtimeMs < THUMBNAIL_FRESH_MS)
+}
+
+function attempt(directory: string, capture: () => Promise<Buffer>): Promise<Buffer> {
+  return capture().then(
+    (png) => {
+      failures.delete(directory)
+      return png
+    },
+    (error) => Promise.reject(recordFailure(directory, error)),
+  )
+}
+
+function recordFailure(directory: string, error: unknown): unknown {
+  if (failures.size > 256) failures.clear()
+  failures.set(directory, Date.now())
+  return error
+}
+
+/**
+ * Captures the preview and persists it as `.OMAI+/thumbnails/preview.png`, creating the
+ * thumbnails folder when needed. Returns "skipped" when there was nothing fresh to store.
+ */
+export async function captureAndStoreThumbnail(directory: string): Promise<"written" | "skipped"> {
+  const png = await capturePreview(directory)
+  if (png === null) return "skipped"
+  if (png.byteLength > MAX_CAPTURE_BYTES || !png.subarray(0, 8).equals(pngSignature))
+    throw new Error("The preview screenshot was invalid.")
+  await writeThumbnail(path.join(directory, ".OMAI+", "thumbnails", "preview.png"), png)
+  return "written"
+}
+
+export async function writeThumbnail(target: string, data: Buffer) {
+  await mkdir(path.dirname(target), { recursive: true })
+  const temporary = `${target}.${randomUUID()}.tmp`
+  try {
+    await writeFile(temporary, data, { flag: "wx", mode: 0o600 })
+    await rename(temporary, target)
+  } finally {
+    await rm(temporary, { force: true })
+  }
 }
 
 /** Screenshots are only stored once the preview answers, so a booting dev server never becomes a blank thumbnail. */
