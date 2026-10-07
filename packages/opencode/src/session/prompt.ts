@@ -242,24 +242,33 @@ const layer = Layer.effect(
       const msgs = onlySubtasks
         ? [{ role: "user" as const, content: subtasks.map((p) => p.prompt).join("\n") }]
         : yield* MessageV2.toModelMessagesEffect(context, mdl)
-      const text = yield* llm
-        .stream({
-          agent: ag,
-          user: firstInfo,
-          system: [],
-          small: true,
-          tools: {},
-          model: mdl,
-          sessionID: input.session.id,
-          retries: 2,
-          messages: [{ role: "user", content: "Generate a title for this conversation:\n" }, ...msgs],
-        })
-        .pipe(
-          Stream.filter(LLMEvent.is.textDelta),
-          Stream.map((e) => e.text),
-          Stream.mkString,
-          Effect.orDie,
-        )
+      const streamTitle = Effect.fnUntraced(function* (small: boolean, model: Provider.Model) {
+        return yield* llm
+          .stream({
+            agent: ag,
+            user: firstInfo,
+            system: [],
+            small,
+            tools: {},
+            model,
+            sessionID: input.session.id,
+            retries: 2,
+            messages: [{ role: "user", content: "Generate a title for this conversation:\n" }, ...msgs],
+          })
+          .pipe(
+            Stream.filter(LLMEvent.is.textDelta),
+            Stream.map((e) => e.text),
+            Stream.mkString,
+          )
+      })
+      // Prefer the cheap small model, but fall back to the session's main model when it is
+      // unavailable or rejected, so the title is generated even if the small model is broken.
+      const fallback = yield* provider.getModel(input.providerID, input.modelID).pipe(Effect.option)
+      const text = yield* streamTitle(true, mdl).pipe(
+        Effect.catchCause(() =>
+          fallback._tag === "None" ? streamTitle(true, mdl) : streamTitle(false, fallback.value),
+        ),
+      )
       const cleaned = text
         .replace(/<think>[\s\S]*?<\/think>\s*/g, "")
         .split("\n")
@@ -1202,7 +1211,15 @@ const layer = Layer.effect(
                 modelID: lastUser.model.modelID,
                 providerID: lastUser.model.providerID,
                 history: msgs,
-              }).pipe(Effect.ignore, Effect.forkIn(scope))
+              }).pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logError("session title generation failed", {
+                    "session.id": sessionID,
+                    error: Cause.squash(cause),
+                  }),
+                ),
+                Effect.forkIn(scope),
+              )
 
             const model = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
             const task = tasks.pop()
