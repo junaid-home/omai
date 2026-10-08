@@ -29,7 +29,6 @@ import { PromptGitStatus, PromptWorkspaceSelector } from "@/components/prompt-wo
 import { useTitlebarRightMount } from "@/components/titlebar"
 import { useCommand } from "@/context/command"
 import { useProviders } from "@/hooks/use-providers"
-import { useSettingsCommand } from "@/components/settings-dialog"
 import { Persist, persisted } from "@/utils/persist"
 import createPresence from "solid-presence"
 import { useLocal } from "@/context/local"
@@ -60,7 +59,6 @@ export default function NewSessionPage() {
       void dialog.show(() => <DialogConnectProvider directory={() => sdk().directory} />)
     })
   }
-  useSettingsCommand()
   const route = useSessionKey()
   const [searchParams, setSearchParams] = useSearchParams<{ draftId?: string; prompt?: string }>()
   const local = useLocal()

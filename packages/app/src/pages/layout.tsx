@@ -18,6 +18,7 @@ import { Spinner } from "@opencode-ai/ui/spinner"
 import { useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { BrandLogo } from "@/components/brand-logo"
+import { useSettingsCommand } from "@/components/settings-dialog"
 import { sessionTitle } from "@/utils/session-title"
 import { Button } from "@opencode-ai/ui/button"
 import { ResizeHandle } from "@opencode-ai/ui/resize-handle"
@@ -33,6 +34,11 @@ function decode64Dir(value: string): string {
   } catch {
     return ""
   }
+}
+
+function SettingsCommandFallback() {
+  useSettingsCommand()
+  return null
 }
 
 export default function Layout(props: ParentProps) {
@@ -229,6 +235,13 @@ export default function Layout(props: ParentProps) {
         "padding-bottom": "env(safe-area-inset-bottom, 0px)",
       }}
     >
+      {/* Settings command is registered by the session route itself when a session
+          is open (it needs the target-server context). Register a fallback for the
+          pages that have no session-scoped registration, such as Projects. */}
+      <Show when={!params.id}>
+        <SettingsCommandFallback />
+      </Show>
+
       {/* Full screen loading overlay */}
       <Show when={dirResolving[0]() || lastProjectLoading() || global.sessionLoading.value}>
         <div class="absolute inset-0 z-50 bg-background-base flex items-center justify-center">
