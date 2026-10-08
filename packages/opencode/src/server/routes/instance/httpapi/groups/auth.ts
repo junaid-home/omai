@@ -1,6 +1,7 @@
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
 import { described } from "./metadata"
+import { Role, SettingsPermissionsSchema } from "@opencode-ai/core/user/permissions"
 
 export const AuthSignupInput = Schema.Struct({
   username: Schema.String,
@@ -27,6 +28,8 @@ const AuthUserResult = Schema.Struct({
   id: Schema.String,
   username: Schema.String,
   email: Schema.String,
+  role: Role,
+  settingsPermissions: SettingsPermissionsSchema,
 })
 
 const AuthPaths = {

@@ -10,6 +10,7 @@ import { usePermission } from "@/context/permission"
 import { usePrompt } from "@/context/prompt"
 import { useSDK } from "@/context/sdk"
 import { useSettings } from "@/context/settings"
+import { useSettingsPermission } from "@/context/settings-permission"
 import { useSync } from "@/context/sync"
 import { useTerminal } from "@/context/terminal"
 import { showToast } from "@/utils/toast"
@@ -45,6 +46,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   const prompt = usePrompt()
   const sdk = useSDK()
   const settings = useSettings()
+  const settingsPermission = useSettingsPermission()
   const sync = useSync()
   const terminal = useTerminal()
   const layout = useLayout()
@@ -494,7 +496,10 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       title: language.t("command.terminal.toggle"),
       keybind: "ctrl+`",
       slash: "terminal",
+      hidden: !settingsPermission.can("terminal"),
+      disabled: !settingsPermission.can("terminal"),
       onSelect: () => {
+        if (!settingsPermission.can("terminal")) return
         if (view().terminal.opened()) {
           terminal.cancelFocus()
           view().terminal.close()
@@ -514,7 +519,10 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       id: "fileTree.toggle",
       title: language.t("command.fileTree.toggle"),
       keybind: "mod+\\",
+      hidden: !settingsPermission.can("fileTree"),
+      disabled: !settingsPermission.can("fileTree"),
       onSelect: () => {
+        if (!settingsPermission.can("fileTree")) return
         if (!settings.general.showFileTree()) settings.general.setShowFileTree(true)
         layout.fileTree.toggle()
       },
@@ -541,6 +549,8 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       title: language.t("command.terminal.new"),
       description: language.t("command.terminal.new.description"),
       keybind: "ctrl+alt+t",
+      hidden: !settingsPermission.can("terminal"),
+      disabled: !settingsPermission.can("terminal"),
       onSelect: openTerminal,
     }),
   ]

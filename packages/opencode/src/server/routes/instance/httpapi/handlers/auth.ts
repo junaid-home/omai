@@ -7,10 +7,12 @@ import { Authentication } from "@opencode-ai/core/authentication"
 import { AuthSessionTable } from "@opencode-ai/core/auth-session/sql"
 import { Database } from "@opencode-ai/core/database/database"
 import { UserTable } from "@opencode-ai/core/user/sql"
+import { effectiveSettingsPermissions, type Role } from "@opencode-ai/core/user/permissions"
 import { requestToken, sameOrigin, sessionCookie } from "@opencode-ai/server/authentication"
 import { RootHttpApi } from "../api"
 import { AuthLoginInput, AuthSignupInput } from "../groups/auth"
 import { generateToken, TOKEN_LIFETIME_MS } from "@/auth/jwt"
+import { effectiveRole } from "@/auth/role"
 import { hashPassword, verifyPassword } from "@/user"
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
 import { createRemoteJWKSet, jwtVerify } from "jose"
@@ -114,7 +116,21 @@ export const authHandlers = HttpApiBuilder.group(RootHttpApi, "auth", (handlers)
           time_expires: now + TOKEN_LIFETIME_MS,
         })
         .pipe(Effect.orDie)
-      return { token, user, cookie: sessionCookie(token, TOKEN_LIFETIME_MS / 1000) }
+      const rows = yield* db
+        .select({ role: UserTable.role, settings_permissions: UserTable.settings_permissions })
+        .from(UserTable)
+        .where(eq(UserTable.id, user.id))
+        .limit(1)
+        .pipe(Effect.orDie)
+      const role = effectiveRole(user.username, (rows[0]?.role ?? null) as Role | null)
+      const publicUser = {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        role,
+        settingsPermissions: effectiveSettingsPermissions(rows[0]?.settings_permissions ?? null, role === "admin"),
+      }
+      return { token, user: publicUser, cookie: sessionCookie(token, TOKEN_LIFETIME_MS / 1000) }
     })
 
     const issue = Effect.fn("Auth.issue")(function* (user: { id: string; username: string; email: string }) {
@@ -132,6 +148,7 @@ export const authHandlers = HttpApiBuilder.group(RootHttpApi, "auth", (handlers)
       const base = googleUsernameBase(email)
       const password = yield* hashSlots.withPermit(Effect.promise(() => hashPassword(randomBytes(32).toString("hex"))))
       const now = Date.now()
+      const hasUsers = (yield* db.select({ id: UserTable.id }).from(UserTable).limit(1).pipe(Effect.orDie)).length > 0
       // onConflictDoNothing swallows both email and username conflicts, so retry by
       // picking the next username candidate and re-checking the email on every pass.
       for (let attempt = 0; attempt < 50; attempt++) {
@@ -143,6 +160,7 @@ export const authHandlers = HttpApiBuilder.group(RootHttpApi, "auth", (handlers)
             username,
             email,
             password_hash: password,
+            role: hasUsers ? "member" : "admin",
             time_created: now,
             time_updated: now,
           })
@@ -262,9 +280,16 @@ export const authHandlers = HttpApiBuilder.group(RootHttpApi, "auth", (handlers)
           const password = yield* Effect.promise(() => hashPassword(input.password)).pipe(hashSlots.withPermit)
           const user = { id: randomUUID(), username: input.username, email }
           const now = Date.now()
+          const hasUsers = (yield* db.select({ id: UserTable.id }).from(UserTable).limit(1).pipe(Effect.orDie)).length > 0
           const created = yield* db
             .insert(UserTable)
-            .values({ ...user, password_hash: password, time_created: now, time_updated: now })
+            .values({
+              ...user,
+              password_hash: password,
+              role: hasUsers ? "member" : "admin",
+              time_created: now,
+              time_updated: now,
+            })
             .onConflictDoNothing()
             .returning({ id: UserTable.id })
             .pipe(Effect.orDie)
@@ -315,7 +340,13 @@ export const authHandlers = HttpApiBuilder.group(RootHttpApi, "auth", (handlers)
           const principal = yield* authentication.authenticate(token.token)
           if (!principal) return error("Invalid or expired session", 401)
           return HttpServerResponse.jsonUnsafe(
-            { id: principal.userID, username: principal.username, email: principal.email },
+            {
+              id: principal.userID,
+              username: principal.username,
+              email: principal.email,
+              role: principal.role,
+              settingsPermissions: principal.settingsPermissions,
+            },
             { headers: { "Cache-Control": "no-store" } },
           )
         }),

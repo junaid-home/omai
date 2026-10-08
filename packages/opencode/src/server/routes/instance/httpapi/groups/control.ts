@@ -2,6 +2,7 @@ import { Auth } from "@/auth"
 
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
+import { ForbiddenError } from "../errors"
 import { described } from "./metadata"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 
@@ -40,7 +41,7 @@ export const ControlApi = HttpApi.make("control").add(
         params: AuthParams,
         payload: Auth.Info,
         success: described(Schema.Boolean, "Successfully set authentication credentials"),
-        error: HttpApiError.BadRequest,
+        error: [HttpApiError.BadRequest, ForbiddenError],
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "auth.set",
@@ -51,7 +52,7 @@ export const ControlApi = HttpApi.make("control").add(
       HttpApiEndpoint.delete("authRemove", ControlPaths.auth, {
         params: AuthParams,
         success: described(Schema.Boolean, "Successfully removed authentication credentials"),
-        error: HttpApiError.BadRequest,
+        error: [HttpApiError.BadRequest, ForbiddenError],
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "auth.remove",

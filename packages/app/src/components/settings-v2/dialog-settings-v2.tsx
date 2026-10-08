@@ -1,9 +1,10 @@
-import { Component, createSignal, startTransition } from "solid-js"
+import { Component, createEffect, createSignal, startTransition } from "solid-js"
 import { Dialog } from "@opencode-ai/ui/v2/dialog-v2"
 import { TabsV2 } from "@opencode-ai/ui/v2/tabs-v2"
 import { Icon } from "@opencode-ai/ui/icon"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
+import { useSettingsPermission } from "@/context/settings-permission"
 import { SettingsGeneralV2 } from "./general"
 import { SettingsKeybinds } from "../settings-keybinds"
 import { SettingsProvidersV2 } from "./providers"
@@ -14,6 +15,7 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { SettingsMcp } from "../settings-mcp"
 import { SettingsLsp } from "../settings-lsp"
 import { SettingsPlugins } from "../settings-plugins"
+import { SettingsAdminV2 } from "./admin"
 
 export const DialogSettings: Component<{
   sessionID?: string
@@ -22,11 +24,23 @@ export const DialogSettings: Component<{
   const language = useLanguage()
   const platform = usePlatform()
   const dialog = useDialog()
+  const settings = useSettingsPermission()
   const [tab, setTab] = createSignal(props.defaultValue ?? "general")
 
   const showProviders = () => {
     void dialog.show(() => <DialogSettings sessionID={props.sessionID} defaultValue="providers" />)
   }
+
+  const available = () => [
+    ...(["general", "shortcuts", "servers", "providers", "models", "mcp"] as const).filter((name) =>
+      name === "general" ? settings.can("general") : settings.can(name),
+    ),
+    ...(settings.isAdmin() ? (["admin"] as const) : []),
+  ]
+
+  createEffect(() => {
+    if (!available().includes(tab() as "general")) setTab("general")
+  })
 
   return (
     <Dialog size="x-large" variant="settings" class="settings-v2-dialog">
@@ -44,37 +58,53 @@ export const DialogSettings: Component<{
                 <div class="flex flex-col gap-1.5">
                   <TabsV2.SectionTitle>{language.t("settings.section.desktop")}</TabsV2.SectionTitle>
                   <div class="flex flex-col gap-1.5 w-full">
-                    <TabsV2.Trigger value="general">
-                      <Icon name="sliders" />
-                      {language.t("settings.tab.general")}
-                    </TabsV2.Trigger>
-                    <TabsV2.Trigger value="shortcuts">
-                      <Icon name="keyboard" />
-                      {language.t("settings.tab.shortcuts")}
-                    </TabsV2.Trigger>
+                    {settings.can("general") && (
+                      <TabsV2.Trigger value="general">
+                        <Icon name="sliders" />
+                        {language.t("settings.tab.general")}
+                      </TabsV2.Trigger>
+                    )}
+                    {settings.can("shortcuts") && (
+                      <TabsV2.Trigger value="shortcuts">
+                        <Icon name="keyboard" />
+                        {language.t("settings.tab.shortcuts")}
+                      </TabsV2.Trigger>
+                    )}
                   </div>
                 </div>
 
-                <div class="flex flex-col gap-1.5">
-                  <TabsV2.SectionTitle>{language.t("settings.section.server")}</TabsV2.SectionTitle>
-                  <div class="flex flex-col gap-1.5 w-full">
-                    <TabsV2.Trigger value="servers">
-                      <Icon name="server" />
-                      {language.t("status.popover.tab.servers")}
-                    </TabsV2.Trigger>
-                    <TabsV2.Trigger value="providers">
-                      <Icon name="providers" />
-                      {language.t("settings.providers.title")}
-                    </TabsV2.Trigger>
-                    <TabsV2.Trigger value="models">
-                      <Icon name="models" />
-                      {language.t("settings.models.title")}
-                    </TabsV2.Trigger>
-                    <TabsV2.Trigger value="mcp">
-                      <Icon name="mcp" />
-                      MCP
-                    </TabsV2.Trigger>
-                    {/* <TabsV2.Trigger value="lsp">
+                {(settings.can("servers") ||
+                  settings.can("providers") ||
+                  settings.can("models") ||
+                  settings.can("mcp")) && (
+                  <div class="flex flex-col gap-1.5">
+                    <TabsV2.SectionTitle>{language.t("settings.section.server")}</TabsV2.SectionTitle>
+                    <div class="flex flex-col gap-1.5 w-full">
+                      {settings.can("servers") && (
+                        <TabsV2.Trigger value="servers">
+                          <Icon name="server" />
+                          {language.t("status.popover.tab.servers")}
+                        </TabsV2.Trigger>
+                      )}
+                      {settings.can("providers") && (
+                        <TabsV2.Trigger value="providers">
+                          <Icon name="providers" />
+                          {language.t("settings.providers.title")}
+                        </TabsV2.Trigger>
+                      )}
+                      {settings.can("models") && (
+                        <TabsV2.Trigger value="models">
+                          <Icon name="models" />
+                          {language.t("settings.models.title")}
+                        </TabsV2.Trigger>
+                      )}
+                      {settings.can("mcp") && (
+                        <TabsV2.Trigger value="mcp">
+                          <Icon name="mcp" />
+                          MCP
+                        </TabsV2.Trigger>
+                      )}
+                      {/* <TabsV2.Trigger value="lsp">
                       <Icon name="code" />
                       LSP
                     </TabsV2.Trigger>
@@ -82,8 +112,20 @@ export const DialogSettings: Component<{
                       <Icon name="status" />
                       {language.t("status.popover.tab.plugins")}
                     </TabsV2.Trigger> */}
+                    </div>
                   </div>
-                </div>
+                )}
+
+                {settings.isAdmin() && (
+                  <div class="flex flex-col gap-1.5">
+                    <div class="flex flex-col gap-1.5 w-full">
+                      <TabsV2.Trigger value="admin">
+                        <Icon name="shield" />
+                        {language.t("settings.admin.title")}
+                      </TabsV2.Trigger>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             <div class="settings-v2-nav-footer">
@@ -110,6 +152,11 @@ export const DialogSettings: Component<{
         <TabsV2.Content value="mcp" class="settings-v2-panel">
           <SettingsMcp sessionID={props.sessionID} />
         </TabsV2.Content>
+        {settings.isAdmin() && (
+          <TabsV2.Content value="admin" class="settings-v2-panel">
+            <SettingsAdminV2 />
+          </TabsV2.Content>
+        )}
         {/* <TabsV2.Content value="lsp" class="settings-v2-panel">
           <SettingsLsp />
         </TabsV2.Content>

@@ -324,7 +324,41 @@ export function createCentralState(input: {
 }
 
 export type CentralState = ReturnType<typeof createCentralState>
-export type AuthUser = { id: string; username: string; email: string }
+export type SettingsPermissionKey =
+  | "mcp"
+  | "models"
+  | "providers"
+  | "servers"
+  | "shortcuts"
+  | "general"
+  | "terminal"
+  | "fileTree"
+export type AuthUser = {
+  id: string
+  username: string
+  email: string
+  role: "admin" | "member"
+  settingsPermissions: Record<SettingsPermissionKey, boolean>
+}
+
+export function fullSettingsPermissions(): Record<SettingsPermissionKey, boolean> {
+  return {
+    mcp: true,
+    models: true,
+    providers: true,
+    servers: true,
+    shortcuts: true,
+    general: true,
+    terminal: true,
+    fileTree: true,
+  }
+}
+
+function isSettingsPermissions(value: unknown): value is Record<SettingsPermissionKey, boolean> {
+  if (!value || typeof value !== "object") return false
+  const keys = ["mcp", "models", "providers", "servers", "shortcuts", "general", "terminal", "fileTree"]
+  return keys.every((key) => typeof (value as Record<string, unknown>)[key] === "boolean")
+}
 
 type Runtime = {
   mode: "local" | "central"
@@ -410,11 +444,18 @@ export async function bootstrapCentralState(input: { url: string; fetch: typeof 
     !("username" in user) ||
     typeof user.username !== "string" ||
     !("email" in user) ||
-    typeof user.email !== "string"
+    typeof user.email !== "string" ||
+    !("role" in user) ||
+    (user.role !== "admin" && user.role !== "member") ||
+    !("settingsPermissions" in user)
   ) {
     throw new Error("The server returned an invalid user session.")
   }
-  const identity: AuthUser = { id: user.id, username: user.username, email: user.email }
+  const role: AuthUser["role"] = user.role
+  const settingsPermissions = isSettingsPermissions(user.settingsPermissions)
+    ? user.settingsPermissions
+    : fullSettingsPermissions()
+  const identity: AuthUser = { id: user.id, username: user.username, email: user.email, role, settingsPermissions }
   centralRuntime.configure({
     mode: "central",
     url: base,

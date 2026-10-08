@@ -2,7 +2,7 @@ import { MCP } from "@/mcp"
 import { ConfigMCPV1 } from "@opencode-ai/core/v1/config/mcp"
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
-import { McpServerNotFoundError } from "../errors"
+import { ForbiddenError, McpServerNotFoundError } from "../errors"
 import { Authorization } from "../middleware/authorization"
 import { InstanceContextMiddleware } from "../middleware/instance-context"
 import { WorkspaceRoutingMiddleware, WorkspaceRoutingQuery } from "../middleware/workspace-routing"
@@ -57,7 +57,7 @@ export const McpApi = HttpApi.make("mcp")
           query: WorkspaceRoutingQuery,
           payload: AddPayload,
           success: described(StatusMap, "MCP server added successfully"),
-          error: HttpApiError.BadRequest,
+          error: [HttpApiError.BadRequest, ForbiddenError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "mcp.add",
@@ -69,7 +69,7 @@ export const McpApi = HttpApi.make("mcp")
           params: { name: Schema.String },
           query: WorkspaceRoutingQuery,
           success: described(AuthStartResponse, "OAuth flow started"),
-          error: [UnsupportedOAuthError, McpServerNotFoundError],
+          error: [UnsupportedOAuthError, McpServerNotFoundError, ForbiddenError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "mcp.auth.start",
@@ -82,7 +82,7 @@ export const McpApi = HttpApi.make("mcp")
           query: WorkspaceRoutingQuery,
           payload: AuthCallbackPayload,
           success: described(MCP.Status, "OAuth authentication completed"),
-          error: [HttpApiError.BadRequest, McpServerNotFoundError],
+          error: [HttpApiError.BadRequest, McpServerNotFoundError, ForbiddenError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "mcp.auth.callback",
@@ -95,7 +95,7 @@ export const McpApi = HttpApi.make("mcp")
           params: { name: Schema.String },
           query: WorkspaceRoutingQuery,
           success: described(MCP.Status, "OAuth authentication completed"),
-          error: [UnsupportedOAuthError, McpServerNotFoundError],
+          error: [UnsupportedOAuthError, McpServerNotFoundError, ForbiddenError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "mcp.auth.authenticate",
@@ -107,7 +107,7 @@ export const McpApi = HttpApi.make("mcp")
           params: { name: Schema.String },
           query: WorkspaceRoutingQuery,
           success: described(AuthRemoveResponse, "OAuth credentials removed"),
-          error: McpServerNotFoundError,
+          error: [McpServerNotFoundError, ForbiddenError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "mcp.auth.remove",
@@ -119,7 +119,7 @@ export const McpApi = HttpApi.make("mcp")
           params: { name: Schema.String },
           query: WorkspaceRoutingQuery,
           success: described(Schema.Boolean, "MCP server connected successfully"),
-          error: McpServerNotFoundError,
+          error: [McpServerNotFoundError, ForbiddenError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "mcp.connect",
@@ -130,7 +130,7 @@ export const McpApi = HttpApi.make("mcp")
           params: { name: Schema.String },
           query: WorkspaceRoutingQuery,
           success: described(Schema.Boolean, "MCP server disconnected successfully"),
-          error: McpServerNotFoundError,
+          error: [McpServerNotFoundError, ForbiddenError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "mcp.disconnect",
@@ -141,7 +141,7 @@ export const McpApi = HttpApi.make("mcp")
           params: { name: Schema.String },
           query: WorkspaceRoutingQuery,
           success: described(Schema.Boolean, "MCP server removed successfully"),
-          error: McpServerNotFoundError,
+          error: [McpServerNotFoundError, ForbiddenError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "mcp.remove",

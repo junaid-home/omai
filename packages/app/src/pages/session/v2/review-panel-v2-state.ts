@@ -8,7 +8,7 @@ import { createSignal } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Persist, persisted } from "@/utils/persist"
 
-export function createReviewPanelV2State() {
+export function createReviewPanelV2State(allowed: () => boolean = () => true) {
   const [store, setStore, , ready] = persisted(
     Persist.global("review-panel-v2"),
     createStore({
@@ -22,7 +22,7 @@ export function createReviewPanelV2State() {
   const [filter, setFilter] = createSignal("")
 
   return {
-    sidebarOpened: () => store.sidebarOpened,
+    sidebarOpened: () => allowed() && store.sidebarOpened,
     sidebarWidth: () => store.sidebarWidth,
     sidebarTransition: ready,
     filter,
@@ -34,7 +34,10 @@ export function createReviewPanelV2State() {
         "sidebarWidth",
         Math.min(SESSION_REVIEW_V2_SIDEBAR_WIDTH_MAX, Math.max(SESSION_REVIEW_V2_SIDEBAR_WIDTH_MIN, width)),
       ),
-    toggleSidebar: () => setStore("sidebarOpened", (opened) => !opened),
+    toggleSidebar: () => {
+      if (!allowed()) return
+      setStore("sidebarOpened", (opened) => !opened)
+    },
   }
 }
 

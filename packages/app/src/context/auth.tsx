@@ -113,3 +113,8 @@ export function useAuth(): AuthContextValue {
   if (!ctx) throw new Error("useAuth must be used within AuthProvider")
   return ctx
 }
+
+/** Auth context when available, otherwise null (e.g. isolated component previews). */
+export function useAuthOptional(): AuthContextValue | null {
+  return useContext(AuthContext) ?? null
+}

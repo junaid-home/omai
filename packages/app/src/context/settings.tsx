@@ -3,6 +3,8 @@ import { createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { persisted } from "@/utils/persist"
 import { usePlatform } from "@/context/platform"
+import { useAuthOptional } from "@/context/auth"
+import type { SettingsPermissionKey } from "@/utils/central-state"
 
 export interface NotificationSettings {
   agent: boolean
@@ -224,6 +226,7 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
   gate: false,
   init: () => {
     const platform = usePlatform()
+    const auth = useAuthOptional()
     const [store, setStore, _, ready] = persisted("settings.v3", createStore<Settings>(defaultSettings))
     const [launch, setLaunch, , launchReady] = persisted(
       "app-version.v1",
@@ -270,7 +273,9 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         layoutTransitionEligible() ? legacyNewLayoutDesignsDefault : newLayoutDesignsDefault,
       )
     })
-    const visible = (preference: () => boolean) => createMemo(() => !newLayoutDesigns() || preference())
+    const allowed = (scope: SettingsPermissionKey) => auth?.user()?.settingsPermissions?.[scope] ?? true
+    const visible = (preference: () => boolean, scope?: SettingsPermissionKey) =>
+      createMemo(() => (scope ? allowed(scope) : true) && (!newLayoutDesigns() || preference()))
 
     if (sunset && !oldInterfaceRetired()) {
       const timeout = { current: undefined as ReturnType<typeof setTimeout> | undefined }
@@ -450,7 +455,7 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         },
       },
       visibility: {
-        fileTree: visible(showFileTree),
+        fileTree: visible(showFileTree, "fileTree"),
         search: visible(showSearch),
         status: visible(showStatus),
         customAgents: visible(showCustomAgents),

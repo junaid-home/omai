@@ -7,8 +7,11 @@ import { FSUtil } from "@opencode-ai/core/fs-util"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Authentication } from "@opencode-ai/core/authentication"
+import type { SettingsScope } from "@opencode-ai/core/user/permissions"
+import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 import { sql } from "drizzle-orm"
 import { Config } from "@/config/config"
+import { requireSettingsScope } from "../middleware/settings-permission"
 import { GlobalBus, type GlobalEvent as GlobalBusEvent } from "@/bus/global"
 import { EffectBridge } from "@/effect/bridge"
 import { EventV2 } from "@opencode-ai/core/event"
@@ -90,6 +93,13 @@ function eventResponse() {
   })
 }
 
+function configUpdateScope(config: ConfigV1.Info): SettingsScope | undefined {
+  if (config.mcp !== undefined) return "mcp"
+  if (config.provider !== undefined || config.disabled_providers !== undefined) return "providers"
+  if (config.shell !== undefined) return "terminal"
+  return "general"
+}
+
 export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handlers) =>
   Effect.gen(function* () {
     const previews = yield* PreviewCapability.Service
@@ -122,6 +132,8 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     })
 
     const configUpdate = Effect.fn("GlobalHttpApi.configUpdate")(function* (ctx) {
+      const scope = configUpdateScope(ctx.payload)
+      if (scope) yield* requireSettingsScope(scope)
       const result = yield* config.updateGlobal(ctx.payload)
       if (result.changed) bridge.fork(disposeAllInstancesAndEmitGlobalDisposed({ swallowErrors: true }))
       return result.info

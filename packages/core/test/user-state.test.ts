@@ -1,8 +1,10 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test"
 import { Effect, Layer, ManagedRuntime } from "effect"
+
 import { Authentication } from "../src/authentication"
 import { Database } from "../src/database/database"
 import { UserState } from "../src/user-state"
+import { fullSettingsPermissions } from "../src/user/permissions"
 import { UserTable } from "../src/user/sql"
 
 const principal = (name: string): Authentication.Principal => ({
@@ -11,6 +13,8 @@ const principal = (name: string): Authentication.Principal => ({
   instanceID: process.env.OPENCODE_INSTANCE_ID ?? "user-state-test",
   username: `state-${name}-${crypto.randomUUID()}`,
   email: `${name}-${crypto.randomUUID()}@example.invalid`,
+  role: "member",
+  settingsPermissions: fullSettingsPermissions(),
 })
 
 const alice = principal("alice")

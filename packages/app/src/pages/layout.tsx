@@ -6,6 +6,7 @@ import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
 import { useAuth } from "@/context/auth"
 import { useLayout } from "@/context/layout"
 import { useSettings } from "@/context/settings"
+import { useSettingsPermission } from "@/context/settings-permission"
 import { useGlobal } from "@/context/global"
 import { useServer } from "@/context/server"
 import { useServerSync } from "@/context/server-sync"
@@ -46,6 +47,7 @@ export default function Layout(props: ParentProps) {
   const serverSync = useServerSync()
   const auth = useAuth()
   const settings = useSettings()
+  const permission = useSettingsPermission()
   setNavigate(navigate)
 
   const sessionKey = createMemo(() => `${params.dir}${params.id ? "/" + params.id : ""}`)
@@ -309,21 +311,23 @@ export default function Layout(props: ParentProps) {
                       aria-label={language.t("command.project.open")}
                     />
                   </TooltipKeybind>
-                  <TooltipKeybind
-                    placement="right"
-                    title={language.t("command.terminal.toggle")}
-                    keybind={command.keybind("terminal.toggle")}
-                  >
-                    <IconButton
-                      icon={sessionView().terminal.opened() ? "terminal-active" : "terminal"}
-                      variant="ghost"
-                      size="large"
-                      onClick={() => sessionView().terminal.toggle()}
-                      aria-label={language.t("command.terminal.toggle")}
-                      aria-expanded={sessionView().terminal.opened()}
-                      aria-controls="terminal-panel"
-                    />
-                  </TooltipKeybind>
+                  <Show when={permission.can("terminal")}>
+                    <TooltipKeybind
+                      placement="right"
+                      title={language.t("command.terminal.toggle")}
+                      keybind={command.keybind("terminal.toggle")}
+                    >
+                      <IconButton
+                        icon={sessionView().terminal.opened() ? "terminal-active" : "terminal"}
+                        variant="ghost"
+                        size="large"
+                        onClick={() => sessionView().terminal.toggle()}
+                        aria-label={language.t("command.terminal.toggle")}
+                        aria-expanded={sessionView().terminal.opened()}
+                        aria-controls="terminal-panel"
+                      />
+                    </TooltipKeybind>
+                  </Show>
                   <TooltipKeybind
                     placement="right"
                     title={language.t("command.review.toggle")}
@@ -339,24 +343,26 @@ export default function Layout(props: ParentProps) {
                       aria-controls="review-panel"
                     />
                   </TooltipKeybind>
-                  <TooltipKeybind
-                    placement="right"
-                    title={language.t("command.fileTree.toggle")}
-                    keybind={command.keybind("fileTree.toggle")}
-                  >
-                    <IconButton
-                      icon={layout.fileTree.opened() ? "file-tree-active" : "file-tree"}
-                      variant="ghost"
-                      size="large"
-                      onClick={() => {
-                        if (!settings.general.showFileTree()) settings.general.setShowFileTree(true)
-                        layout.fileTree.toggle()
-                      }}
-                      aria-label={language.t("command.fileTree.toggle")}
-                      aria-expanded={layout.fileTree.opened()}
-                      aria-controls="file-tree-panel"
-                    />
-                  </TooltipKeybind>
+                  <Show when={permission.can("fileTree")}>
+                    <TooltipKeybind
+                      placement="right"
+                      title={language.t("command.fileTree.toggle")}
+                      keybind={command.keybind("fileTree.toggle")}
+                    >
+                      <IconButton
+                        icon={layout.fileTree.opened() ? "file-tree-active" : "file-tree"}
+                        variant="ghost"
+                        size="large"
+                        onClick={() => {
+                          if (!settings.general.showFileTree()) settings.general.setShowFileTree(true)
+                          layout.fileTree.toggle()
+                        }}
+                        aria-label={language.t("command.fileTree.toggle")}
+                        aria-expanded={layout.fileTree.opened()}
+                        aria-controls="file-tree-panel"
+                      />
+                    </TooltipKeybind>
+                  </Show>
                   <Show when={currentDir()}>
                     <Tooltip placement="right" value={language.t("command.session.previous")}>
                       <IconButton

@@ -8,7 +8,17 @@ import { schemaName } from "../schema.sql"
 import { baseline } from "./baseline"
 
 // Append new migrations after deployment. Checksums make edits to applied SQL a startup/migration error.
-const migrations = [{ id: "0001_central_postgresql", source: baseline }].map((migration) => ({
+const migrations = [
+  { id: "0001_central_postgresql", source: baseline },
+  {
+    id: "0002_user_role_settings_permissions",
+    source: `
+ALTER TABLE "__OPENCODE_SCHEMA__"."user" ADD COLUMN IF NOT EXISTS "role" text NOT NULL DEFAULT 'member';
+--> statement-breakpoint
+ALTER TABLE "__OPENCODE_SCHEMA__"."user" ADD COLUMN IF NOT EXISTS "settings_permissions" jsonb;
+`,
+  },
+].map((migration) => ({
   ...migration,
   checksum: createHash("sha256").update(migration.source).digest("hex"),
 }))

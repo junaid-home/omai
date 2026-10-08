@@ -33,6 +33,7 @@ import { GlobalApi } from "./groups/global"
 import { UserStateApi } from "./groups/user-state"
 import { MediaApi } from "./groups/media"
 import { AuthApi } from "./groups/auth"
+import { AdminApi } from "./groups/admin"
 import { PublishApi } from "./groups/publish"
 import { GitApi } from "./groups/git"
 import { Authorization } from "./middleware/authorization"
@@ -62,6 +63,7 @@ export const RootHttpApi = HttpApi.make("opencode-root")
   .addHttpApi(ControlPlaneApi)
   .addHttpApi(GlobalApi)
   .addHttpApi(AuthApi)
+  .addHttpApi(AdminApi)
   .addHttpApi(MediaApi)
   .addHttpApi(UserStateApi)
   .middleware(SchemaErrorMiddleware)

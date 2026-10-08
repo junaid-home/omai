@@ -59,10 +59,23 @@ export function publicRequest(method: string, pathname: string) {
 /** Transport boundary for the combined legacy/v2 server, including raw media and preview routes. */
 export const middleware = HttpRouter.middleware(
   Effect.gen(function* () {
-    if (!Authentication.central()) return (effect) => effect
+    const service = yield* Effect.serviceOption(Authentication.Service)
+    if (!Authentication.central()) {
+      // Local installs allow anonymous access, but a present session cookie still
+      // resolves a principal so role-gated admin endpoints can authorize.
+      if (Option.isNone(service)) return (effect) => effect
+      return (effect) =>
+        Effect.gen(function* () {
+          const request = yield* HttpServerRequest.HttpServerRequest
+          const token = requestToken(request.headers)
+          if (!token) return yield* effect
+          const principal = yield* service.value.authenticate(token.token)
+          if (!principal) return yield* effect
+          return yield* effect.pipe(Effect.provideService(Authentication.Current, principal))
+        })
+    }
     Authentication.instanceID()
     Authentication.publicOrigin()
-    const service = yield* Effect.serviceOption(Authentication.Service)
     return (effect) =>
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest

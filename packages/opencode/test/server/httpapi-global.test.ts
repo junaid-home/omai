@@ -4,6 +4,7 @@ import { AuthSession } from "../../src/auth/session"
 import { UserState } from "@opencode-ai/core/user-state"
 import { mediaHandlers } from "../../src/server/routes/instance/httpapi/handlers/media"
 import { userStateHandlers } from "../../src/server/routes/instance/httpapi/handlers/user-state"
+import { adminHandlers } from "../../src/server/routes/instance/httpapi/handlers/admin"
 import { NodeHttpServer } from "@effect/platform-node"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { describe, expect } from "bun:test"
@@ -42,6 +43,7 @@ const apiLayer = HttpRouter.serve(
       authHandlers,
       mediaHandlers,
       userStateHandlers,
+      adminHandlers,
     ]),
     Layer.provide([authorizationLayer, schemaErrorLayer]),
     // Raw HttpApi routes expose an opaque handler context at the request boundary.

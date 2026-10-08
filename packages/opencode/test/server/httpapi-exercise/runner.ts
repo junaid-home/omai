@@ -66,6 +66,10 @@ function withAuthentication<A, E, R>(scenario: ActiveScenario, effect: Effect.Ef
     OPENCODE_PREVIEW_URL: "https://preview.example.test",
     OPENCODE_JWT_SECRET: crypto.randomUUID() + crypto.randomUUID(),
     OPENCODE_REGISTRATION_SECRET: crypto.randomUUID() + crypto.randomUUID(),
+    // Admin scenarios sign these fixed usernames up and rely on the env override
+    // rather than first-user bootstrap, which depends on suite ordering.
+    OPENCODE_ADMIN_USERNAME:
+      "httpapi_admin_list,httpapi_admin_create,httpapi_admin_update,httpapi_admin_remove,httpapi_admin_scope",
   }
   // The process .env may carry real Google credentials; central scenarios assert
   // the unconfigured behavior, so the exercise backend must never see them.

@@ -3,6 +3,7 @@ import { Authentication } from "@opencode-ai/core/authentication"
 import { CentralStorage } from "@opencode-ai/core/storage/central"
 import { UserState } from "@opencode-ai/core/user-state"
 import { userStateHandlers } from "./handlers/user-state"
+import { adminHandlers } from "./handlers/admin"
 import { AuthSession } from "@/auth/session"
 import { AuthenticationHttp } from "@opencode-ai/server/authentication"
 import { mediaHandlers } from "./handlers/media"
@@ -171,6 +172,7 @@ const rootApiRoutes = HttpApiBuilder.layer(RootHttpApi).pipe(
     controlPlaneHandlers,
     globalHandlers,
     authHandlers,
+    adminHandlers,
     mediaHandlers,
     userStateHandlers,
   ]),

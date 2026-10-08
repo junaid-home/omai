@@ -6,6 +6,7 @@ import "@opencode-ai/core/account"
 import "@/server/event"
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
+import { ForbiddenError } from "../errors"
 import { described } from "./metadata"
 
 const GlobalHealth = Schema.Struct({
@@ -156,7 +157,7 @@ export const GlobalApi = HttpApi.make("global").add(
       HttpApiEndpoint.patch("configUpdate", GlobalPaths.config, {
         payload: ConfigV1.Info,
         success: described(ConfigV1.Info, "Successfully updated global config"),
-        error: HttpApiError.BadRequest,
+        error: [HttpApiError.BadRequest, ForbiddenError],
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "global.config.update",

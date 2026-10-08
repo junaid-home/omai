@@ -3,6 +3,7 @@ import { Effect, Schema } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { McpServerNotFoundError } from "../errors"
+import { requireSettingsScope } from "../middleware/settings-permission"
 import { AddPayload, AuthCallbackPayload, StatusMap, UnsupportedOAuthError } from "../groups/mcp"
 
 export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handlers) =>
@@ -14,12 +15,14 @@ export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handler
     })
 
     const add = Effect.fn("McpHttpApi.add")(function* (ctx: { payload: typeof AddPayload.Type }) {
+      yield* requireSettingsScope("mcp")
       return yield* Schema.decodeUnknownEffect(StatusMap)(
         (yield* mcp.add(ctx.payload.name, ctx.payload.config)).status,
       ).pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
     })
 
     const authStart = Effect.fn("McpHttpApi.authStart")(function* (ctx: { params: { name: string } }) {
+      yield* requireSettingsScope("mcp")
       return yield* Effect.gen(function* () {
         if (!(yield* mcp.supportsOAuth(ctx.params.name))) {
           return yield* new UnsupportedOAuthError({ error: `MCP server ${ctx.params.name} does not support OAuth` })
@@ -36,6 +39,7 @@ export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handler
       params: { name: string }
       payload: typeof AuthCallbackPayload.Type
     }) {
+      yield* requireSettingsScope("mcp")
       return yield* mcp
         .finishAuth(ctx.params.name, ctx.payload.code)
         .pipe(
@@ -48,6 +52,7 @@ export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handler
     })
 
     const authAuthenticate = Effect.fn("McpHttpApi.authAuthenticate")(function* (ctx: { params: { name: string } }) {
+      yield* requireSettingsScope("mcp")
       return yield* Effect.gen(function* () {
         if (!(yield* mcp.supportsOAuth(ctx.params.name))) {
           return yield* new UnsupportedOAuthError({ error: `MCP server ${ctx.params.name} does not support OAuth` })
@@ -61,6 +66,7 @@ export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handler
     })
 
     const authRemove = Effect.fn("McpHttpApi.authRemove")(function* (ctx: { params: { name: string } }) {
+      yield* requireSettingsScope("mcp")
       const status = yield* mcp.status()
       if (!(ctx.params.name in status))
         return yield* new McpServerNotFoundError({
@@ -72,6 +78,7 @@ export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handler
     })
 
     const connect = Effect.fn("McpHttpApi.connect")(function* (ctx: { params: { name: string } }) {
+      yield* requireSettingsScope("mcp")
       yield* mcp
         .connect(ctx.params.name)
         .pipe(
@@ -85,6 +92,7 @@ export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handler
     })
 
     const disconnect = Effect.fn("McpHttpApi.disconnect")(function* (ctx: { params: { name: string } }) {
+      yield* requireSettingsScope("mcp")
       yield* mcp
         .disconnect(ctx.params.name)
         .pipe(
@@ -98,6 +106,7 @@ export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handler
     })
 
     const remove = Effect.fn("McpHttpApi.remove")(function* (ctx: { params: { name: string } }) {
+      yield* requireSettingsScope("mcp")
       yield* mcp
         .remove(ctx.params.name)
         .pipe(

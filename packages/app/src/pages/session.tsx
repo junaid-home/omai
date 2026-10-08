@@ -61,6 +61,7 @@ import { SDKProvider, useSDK } from "@/context/sdk"
 import { useServerSDK } from "@/context/server-sdk"
 import { ServerConnection, serverName, useServer } from "@/context/server"
 import { useSettings } from "@/context/settings"
+import { useSettingsPermission } from "@/context/settings-permission"
 import { useSync } from "@/context/sync"
 import { useTabs } from "@/context/tabs"
 import { TerminalProvider, useTerminal } from "@/context/terminal"
@@ -398,6 +399,7 @@ export default function Page() {
   const serverSDK = useServerSDK()
   const server = useServer()
   const settings = useSettings()
+  const permission = useSettingsPermission()
   const platform = usePlatform()
   const prompt = usePrompt()
   const comments = useComments()
@@ -492,7 +494,7 @@ export default function Page() {
   const size = createSizing()
   const desktopReviewOpen = createMemo(() => isDesktop() && view().reviewPanel.opened())
   const desktopV2ReviewOpen = createMemo(() => newSessionDesign() && desktopReviewOpen() && !!params.id)
-  const terminalOpen = createMemo(() => view().terminal.opened())
+  const terminalOpen = createMemo(() => permission.can("terminal") && view().terminal.opened())
   const desktopTerminalOpen = createMemo(() => isDesktop() && terminalOpen())
   const desktopInlineTerminalOnlyOpen = createMemo(
     () => newSessionDesign() && desktopTerminalOpen() && !desktopV2ReviewOpen(),
@@ -1566,7 +1568,7 @@ export default function Page() {
     </Show>
   )
 
-  const reviewV2State = createReviewPanelV2State()
+  const reviewV2State = createReviewPanelV2State(() => permission.can("fileTree"))
 
   // Getters defer reactive reads to the consuming scope. Eager reads here ran inside
   // the side panel's Show children and remounted the whole review panel on unrelated
@@ -2752,13 +2754,17 @@ export default function Page() {
                           diffVersion={vcsQuery.dataUpdatedAt}
                           loadDiff={loadReviewDiff}
                           expandUnchanged={reviewV2State.expandMode() === "expand"}
-                          reviewSidebarToggle={(disabled) => (
-                            <SessionReviewV2SidebarToggle
-                              opened={reviewV2State.sidebarOpened()}
-                              disabled={disabled}
-                              onToggle={reviewV2State.toggleSidebar}
-                            />
-                          )}
+                          reviewSidebarToggle={
+                            permission.can("fileTree")
+                              ? (disabled) => (
+                                  <SessionReviewV2SidebarToggle
+                                    opened={reviewV2State.sidebarOpened()}
+                                    disabled={disabled}
+                                    onToggle={reviewV2State.toggleSidebar}
+                                  />
+                                )
+                              : undefined
+                          }
                           panelSizeToggle={
                             isDesktop() && (desktopV2ReviewOpen() || desktopFileTreeOpen()) ? (
                               <button
@@ -2779,7 +2785,7 @@ export default function Page() {
                               </button>
                             ) : undefined
                           }
-                          fileBrowserState={reviewV2State}
+                          fileBrowserState={permission.can("fileTree") ? reviewV2State : undefined}
                           fileTabSource={(tab) => fileTabSources[tab]}
                           setFileTabSource={setFileTabSource}
                           activeDiff={activeReviewFile()}
@@ -2836,7 +2842,7 @@ export default function Page() {
           </Show>
         </div>
 
-        <Show when={!newSessionDesign()}>
+        <Show when={!newSessionDesign() && permission.can("terminal")}>
           <TerminalPanel />
         </Show>
       </SessionRouteFrame>

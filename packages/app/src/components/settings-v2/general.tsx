@@ -11,6 +11,7 @@ import { usePermission } from "@/context/permission"
 import { usePlatform } from "@/context/platform"
 import { useServerSync } from "@/context/server-sync"
 import { useServerSDK } from "@/context/server-sdk"
+import { useSettingsPermission } from "@/context/settings-permission"
 import { useUpdaterAction } from "../updater-action"
 import {
   monoDefault,
@@ -90,6 +91,7 @@ export const SettingsGeneralV2: Component<{
   const platform = usePlatform()
   const dialog = useDialog()
   const settings = useSettings()
+  const settingsPermission = useSettingsPermission()
   const serverSync = useServerSync()
   const serverSdk = useServerSDK()
   const mobile = createMediaQuery("(max-width: 767px)")
@@ -275,26 +277,28 @@ export const SettingsGeneralV2: Component<{
           </div>
         </SettingsRowV2>
 
-        <SettingsRowV2
-          title={language.t("settings.general.row.shell.title")}
-          description={language.t("settings.general.row.shell.description")}
-        >
-          <SelectV2
-            appearance="inline"
-            data-action="settings-shell"
-            options={shellOptions()}
-            current={shellOptions().find((o) => o.value === currentShell()) ?? autoOption}
-            placement="bottom-end"
-            gutter={6}
-            value={(o) => o.id}
-            label={(o) => o.label}
-            onSelect={(option) => {
-              if (!option) return
-              if (option.value === currentShell()) return
-              serverSync().updateConfig({ shell: option.value })
-            }}
-          />
-        </SettingsRowV2>
+        {settingsPermission.can("terminal") && (
+          <SettingsRowV2
+            title={language.t("settings.general.row.shell.title")}
+            description={language.t("settings.general.row.shell.description")}
+          >
+            <SelectV2
+              appearance="inline"
+              data-action="settings-shell"
+              options={shellOptions()}
+              current={shellOptions().find((o) => o.value === currentShell()) ?? autoOption}
+              placement="bottom-end"
+              gutter={6}
+              value={(o) => o.id}
+              label={(o) => o.label}
+              onSelect={(option) => {
+                if (!option) return
+                if (option.value === currentShell()) return
+                serverSync().updateConfig({ shell: option.value })
+              }}
+            />
+          </SettingsRowV2>
+        )}
 
         <SettingsRowV2
           title={language.t("settings.general.row.reasoningSummaries.title")}
@@ -354,17 +358,19 @@ export const SettingsGeneralV2: Component<{
       <h3 class="settings-v2-section-title">{language.t("settings.general.section.advanced")}</h3>
 
       <SettingsListV2>
-        <SettingsRowV2
-          title={language.t("settings.general.row.showFileTree.title")}
-          description={language.t("settings.general.row.showFileTree.description")}
-        >
-          <div data-action="settings-show-file-tree">
-            <Switch
-              checked={settings.general.showFileTree()}
-              onChange={(checked) => settings.general.setShowFileTree(checked)}
-            />
-          </div>
-        </SettingsRowV2>
+        {settingsPermission.can("fileTree") && (
+          <SettingsRowV2
+            title={language.t("settings.general.row.showFileTree.title")}
+            description={language.t("settings.general.row.showFileTree.description")}
+          >
+            <div data-action="settings-show-file-tree">
+              <Switch
+                checked={settings.general.showFileTree()}
+                onChange={(checked) => settings.general.setShowFileTree(checked)}
+              />
+            </div>
+          </SettingsRowV2>
+        )}
 
         <SettingsRowV2
           title={language.t("settings.general.row.showSearch.title")}
@@ -510,27 +516,29 @@ export const SettingsGeneralV2: Component<{
           </div>
         </SettingsRowV2>
 
-        <SettingsRowV2
-          title={language.t("settings.general.row.terminalFont.title")}
-          description={language.t("settings.general.row.terminalFont.description")}
-        >
-          <div class="w-full sm:w-[220px]">
-            <TextInputV2
-              data-action="settings-terminal-font"
-              type="text"
-              appearance="base"
-              value={terminal()}
-              onInput={(event) => settings.appearance.setTerminalFont(event.currentTarget.value)}
-              placeholder={terminalDefault}
-              spellcheck={false}
-              autocorrect="off"
-              autocomplete="off"
-              autocapitalize="off"
-              aria-label={language.t("settings.general.row.terminalFont.title")}
-              style={{ "font-family": terminalFontFamily(settings.appearance.terminalFont()) }}
-            />
-          </div>
-        </SettingsRowV2>
+        {settingsPermission.can("terminal") && (
+          <SettingsRowV2
+            title={language.t("settings.general.row.terminalFont.title")}
+            description={language.t("settings.general.row.terminalFont.description")}
+          >
+            <div class="w-full sm:w-[220px]">
+              <TextInputV2
+                data-action="settings-terminal-font"
+                type="text"
+                appearance="base"
+                value={terminal()}
+                onInput={(event) => settings.appearance.setTerminalFont(event.currentTarget.value)}
+                placeholder={terminalDefault}
+                spellcheck={false}
+                autocorrect="off"
+                autocomplete="off"
+                autocapitalize="off"
+                aria-label={language.t("settings.general.row.terminalFont.title")}
+                style={{ "font-family": terminalFontFamily(settings.appearance.terminalFont()) }}
+              />
+            </div>
+          </SettingsRowV2>
+        )}
       </SettingsListV2>
     </div>
   )

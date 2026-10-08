@@ -1,5 +1,6 @@
 import { NodeHttpServer } from "@effect/platform-node"
 import { Authentication } from "@opencode-ai/core/authentication"
+import { fullSettingsPermissions } from "@opencode-ai/core/user/permissions"
 import { Database } from "@opencode-ai/core/database/database"
 import { UserState } from "@opencode-ai/core/user-state"
 import { UserTable } from "@opencode-ai/core/user/sql"
@@ -17,7 +18,7 @@ import {
 import { testEffect } from "../lib/effect"
 
 const users: Record<string, Authentication.Principal> = Object.fromEntries(
-  ["alice", "bob"].map((name) => [
+  ["alice", "bob"].map((name): [string, Authentication.Principal] => [
     name,
     {
       userID: crypto.randomUUID(),
@@ -25,6 +26,8 @@ const users: Record<string, Authentication.Principal> = Object.fromEntries(
       username: `state-${name}-${crypto.randomUUID()}`,
       email: `${name}-${crypto.randomUUID()}@example.invalid`,
       instanceID: process.env.OPENCODE_INSTANCE_ID!,
+      role: "member",
+      settingsPermissions: fullSettingsPermissions(),
     },
   ]),
 )

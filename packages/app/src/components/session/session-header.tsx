@@ -18,6 +18,7 @@ import { useLayout } from "@/context/layout"
 import { usePlatform } from "@/context/platform"
 import { useServer } from "@/context/server"
 import { useSettings } from "@/context/settings"
+import { useSettingsPermission } from "@/context/settings-permission"
 import { useSync } from "@/context/sync"
 import { useTerminal } from "@/context/terminal"
 import { focusTerminalById } from "@/pages/session/helpers"
@@ -144,6 +145,7 @@ export function SessionHeader() {
   const platform = usePlatform()
   const language = useLanguage()
   const settings = useSettings()
+  const permission = useSettingsPermission()
   const sync = useSync()
   const terminal = useTerminal()
   const { params, view } = useSessionLayout()
@@ -445,21 +447,23 @@ export function SessionHeader() {
                         <StatusPopover />
                       </Tooltip>
                     </Show>
-                    <TooltipKeybind
-                      title={language.t("command.terminal.toggle")}
-                      keybind={command.keybind("terminal.toggle")}
-                    >
-                      <Button
-                        variant="ghost"
-                        class="group/terminal-toggle titlebar-icon w-8 h-6 p-0 box-border shrink-0"
-                        onClick={toggleTerminal}
-                        aria-label={language.t("command.terminal.toggle")}
-                        aria-expanded={view().terminal.opened()}
-                        aria-controls="terminal-panel"
+                    <Show when={permission.can("terminal")}>
+                      <TooltipKeybind
+                        title={language.t("command.terminal.toggle")}
+                        keybind={command.keybind("terminal.toggle")}
                       >
-                        <Icon size="small" name={view().terminal.opened() ? "terminal-active" : "terminal"} />
-                      </Button>
-                    </TooltipKeybind>
+                        <Button
+                          variant="ghost"
+                          class="group/terminal-toggle titlebar-icon w-8 h-6 p-0 box-border shrink-0"
+                          onClick={toggleTerminal}
+                          aria-label={language.t("command.terminal.toggle")}
+                          aria-expanded={view().terminal.opened()}
+                          aria-controls="terminal-panel"
+                        >
+                          <Icon size="small" name={view().terminal.opened() ? "terminal-active" : "terminal"} />
+                        </Button>
+                      </TooltipKeybind>
+                    </Show>
 
                     <div class="hidden md:flex items-center gap-1 shrink-0">
                       <TooltipKeybind
@@ -478,33 +482,35 @@ export function SessionHeader() {
                         </Button>
                       </TooltipKeybind>
 
-                      <TooltipKeybind
-                        title={language.t("command.fileTree.toggle")}
-                        keybind={command.keybind("fileTree.toggle")}
-                      >
-                        <Button
-                          variant="ghost"
-                          class="titlebar-icon w-8 h-6 p-0 box-border"
-                          onClick={() => {
-                            if (!settings.general.showFileTree()) settings.general.setShowFileTree(true)
-                            layout.fileTree.toggle()
-                          }}
-                          aria-label={language.t("command.fileTree.toggle")}
-                          aria-expanded={layout.fileTree.opened()}
-                          aria-controls="file-tree-panel"
+                      <Show when={permission.can("fileTree")}>
+                        <TooltipKeybind
+                          title={language.t("command.fileTree.toggle")}
+                          keybind={command.keybind("fileTree.toggle")}
                         >
-                          <div class="relative flex items-center justify-center size-4">
-                            <Icon
-                              size="small"
-                              name={layout.fileTree.opened() ? "file-tree-active" : "file-tree"}
-                              classList={{
-                                "text-icon-strong": layout.fileTree.opened(),
-                                "text-icon-weak": !layout.fileTree.opened(),
-                              }}
-                            />
-                          </div>
-                        </Button>
-                      </TooltipKeybind>
+                          <Button
+                            variant="ghost"
+                            class="titlebar-icon w-8 h-6 p-0 box-border"
+                            onClick={() => {
+                              if (!settings.general.showFileTree()) settings.general.setShowFileTree(true)
+                              layout.fileTree.toggle()
+                            }}
+                            aria-label={language.t("command.fileTree.toggle")}
+                            aria-expanded={layout.fileTree.opened()}
+                            aria-controls="file-tree-panel"
+                          >
+                            <div class="relative flex items-center justify-center size-4">
+                              <Icon
+                                size="small"
+                                name={layout.fileTree.opened() ? "file-tree-active" : "file-tree"}
+                                classList={{
+                                  "text-icon-strong": layout.fileTree.opened(),
+                                  "text-icon-weak": !layout.fileTree.opened(),
+                                }}
+                              />
+                            </div>
+                          </Button>
+                        </TooltipKeybind>
+                      </Show>
                     </div>
                   </div>
                 </div>
