@@ -7,6 +7,7 @@ import { EventV2 } from "../event"
 import { makeGlobalNode } from "../effect/app-node"
 import { SessionEvent } from "./event"
 import { SessionV1 } from "../v1/session"
+import { sanitizeJson } from "../util/json"
 import { WorkspaceTable } from "../control-plane/workspace.sql"
 import { SessionMessage } from "./message"
 import { SessionMessageUpdater } from "./message-updater"
@@ -75,16 +76,19 @@ function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInse
   }
 }
 
+// PostgreSQL jsonb cannot store NUL (U+0000) or unpaired surrogates, and tool
+// output (for example `grep` on a binary file) can contain both. Sanitize every
+// value before it reaches a jsonb column.
 function messageData(
   info: (typeof SessionV1.Event.MessageUpdated.Type)["data"]["info"],
 ): typeof MessageTable.$inferInsert.data {
   const { id: _, sessionID: __, ...rest } = info
-  return rest as DeepMutable<typeof rest>
+  return sanitizeJson(rest) as DeepMutable<typeof rest>
 }
 
 function partData(part: (typeof SessionV1.Event.PartUpdated.Type)["data"]["part"]): typeof PartTable.$inferInsert.data {
   const { id: _, messageID: __, sessionID: ___, ...rest } = part
-  return rest as DeepMutable<typeof rest>
+  return sanitizeJson(rest) as DeepMutable<typeof rest>
 }
 
 function applyUsage(
@@ -118,7 +122,11 @@ function run(db: DatabaseService, event: SessionEvent.Event) {
       const { id, type, ...data } = encoded
       return db
         .update(SessionMessageTable)
-        .set({ type, time_created: DateTime.toEpochMillis(message.time.created), data })
+        .set({
+          type,
+          time_created: DateTime.toEpochMillis(message.time.created),
+          data: sanitizeJson(data),
+        })
         .where(
           and(
             eq(SessionMessageTable.id, SessionMessage.ID.make(id)),
@@ -199,7 +207,7 @@ function insertMessage(db: DatabaseService, event: SessionEvent.Event, message: 
       type,
       seq: event.durable.seq,
       time_created: DateTime.toEpochMillis(message.time.created),
-      data,
+      data: sanitizeJson(data),
     })
     .pipe(Effect.orDie)
 }
