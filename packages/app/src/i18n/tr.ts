@@ -1354,6 +1354,13 @@ export const dict = {
   "allProjects.view.grid": "Izgara görünümü",
   "allProjects.view.list": "Liste görünümü",
   "auth.login.stealthMode": "GİZLİ MOD",
+  "auth.login.eyebrow": "GÜVENLİ ERİŞİM",
+  "auth.login.footer": "Ekibiniz için güvenli çalışma alanı.",
+  "auth.marketing.eyebrow": "YAPAY ZEKÂ KOD AJANI",
+  "auth.marketing.title": "Kod yazan bir ajanla daha hızlı geliştirin.",
+  "auth.marketing.subtitle": "OMAI+ kod tabanınızı okur, dosyaları düzenler ve işinizi ilerletmek için araçları çalıştırır.",
+  "auth.login.password.show": "Parolayı göster",
+  "auth.login.password.hide": "Parolayı gizle",
   "session.prompt.disclaimer": "O M A I + bir yapay zekadır ve hata yapabilir. Lütfen yanıtları kontrol edin.",
 
   "dialog.provider.custom.label": "Özel OpenAI uyumlu sağlayıcı",

@@ -1360,6 +1360,13 @@ export const dict = {
   "allProjects.view.grid": "Rutenettvisning",
   "allProjects.view.list": "Listevisning",
   "auth.login.stealthMode": "SKJULT MODUS",
+  "auth.login.eyebrow": "SIKKER TILGANG",
+  "auth.login.footer": "Sikker arbeidsplass for teamet ditt.",
+  "auth.marketing.eyebrow": "AI-KODINGSAGENT",
+  "auth.marketing.title": "Bygg raskere med en agent som skriver kode.",
+  "auth.marketing.subtitle": "OMAI+ leser kodebasen din, redigerer filer og kjører verktøy for å få jobben gjort.",
+  "auth.login.password.show": "Vis passord",
+  "auth.login.password.hide": "Skjul passord",
   "session.prompt.disclaimer": "O M A I + er AI og kan gjøre feil. Vennligst dobbeltsjekk svarene.",
 
   "dialog.provider.custom.label": "Egendefinert OpenAI-kompatibel leverandør",

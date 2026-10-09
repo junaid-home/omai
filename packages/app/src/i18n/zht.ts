@@ -1316,6 +1316,13 @@ export const dict = {
   "allProjects.view.grid": "格線檢視",
   "allProjects.view.list": "清單檢視",
   "auth.login.stealthMode": "隱身模式",
+  "auth.login.eyebrow": "安全存取",
+  "auth.login.footer": "為您的團隊打造的安全工作區。",
+  "auth.marketing.eyebrow": "AI 程式設計代理",
+  "auth.marketing.title": "與會寫程式碼的代理一起，更快建置。",
+  "auth.marketing.subtitle": "OMAI+ 會閱讀你的程式碼庫、編輯檔案並執行工具，讓工作順利推進。",
+  "auth.login.password.show": "顯示密碼",
+  "auth.login.password.hide": "隱藏密碼",
   "session.prompt.disclaimer": "O M A I + 是人工智慧，可能會犯錯。請仔細核對回覆。",
 
   "dialog.provider.custom.label": "自訂 OpenAI 相容供應商",

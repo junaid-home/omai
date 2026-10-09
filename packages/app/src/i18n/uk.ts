@@ -1353,6 +1353,13 @@ export const dict = {
   "allProjects.view.grid": "Вигляд сіткою",
   "allProjects.view.list": "Вигляд списком",
   "auth.login.stealthMode": "ПРИХОВАНИЙ РЕЖИМ",
+  "auth.login.eyebrow": "БЕЗПЕЧНИЙ ДОСТУП",
+  "auth.login.footer": "Безпечний робочий простір для вашої команди.",
+  "auth.marketing.eyebrow": "ІІ-АГЕНТ РОЗРОБКИ",
+  "auth.marketing.title": "Створюйте швидше з агентом, який пише код.",
+  "auth.marketing.subtitle": "OMAI+ читає ваш код, редагує файли та запускає інструменти, просуваючи роботу вперед.",
+  "auth.login.password.show": "Показати пароль",
+  "auth.login.password.hide": "Приховати пароль",
   "session.prompt.disclaimer": "O M A I + — це ШІ і може помилятися. Будь ласка, перевіряйте відповіді.",
 
   "dialog.provider.custom.label": "Власний провайдер, сумісний з OpenAI",

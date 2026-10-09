@@ -1336,6 +1336,13 @@ export const dict = {
   "allProjects.view.grid": "มุมมองตาราง",
   "allProjects.view.list": "มุมมองรายการ",
   "auth.login.stealthMode": "โหมดลับ",
+  "auth.login.eyebrow": "การเข้าถึงที่ปลอดภัย",
+  "auth.login.footer": "พื้นที่ทำงานที่ปลอดภัยสำหรับทีมของคุณ",
+  "auth.marketing.eyebrow": "เอเจนต์เขียนโค้ด AI",
+  "auth.marketing.title": "สร้างได้เร็วยิ่งขึ้นกับเอเจนต์ที่เขียนโค้ด",
+  "auth.marketing.subtitle": "OMAI+ อ่านโค้ดเบสของคุณ แก้ไขไฟล์ และเรียกใช้เครื่องมือเพื่อให้งานเดินหน้า",
+  "auth.login.password.show": "แสดงรหัสผ่าน",
+  "auth.login.password.hide": "ซ่อนรหัสผ่าน",
   "session.prompt.disclaimer": "O M A I + คือ AI และอาจผิดพลาดได้ โปรดตรวจสอบคำตอบอีกครั้ง",
 
   "dialog.provider.custom.label": "ผู้ให้บริการที่เข้ากันได้กับ OpenAI แบบกำหนดเอง",

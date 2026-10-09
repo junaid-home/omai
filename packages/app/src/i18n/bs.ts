@@ -1349,6 +1349,13 @@ export const dict = {
   "allProjects.view.grid": "Mrežni prikaz",
   "allProjects.view.list": "Prikaz liste",
   "auth.login.stealthMode": "PRIKRIVENI REŽIM",
+  "auth.login.eyebrow": "SIGURAN PRISTUP",
+  "auth.login.footer": "Siguran radni prostor za vaš tim.",
+  "auth.marketing.eyebrow": "AI AGENT ZA KOD",
+  "auth.marketing.title": "Izgradite brže s agentom koji piše kod.",
+  "auth.marketing.subtitle": "OMAI+ čita vaš kod, uređuje datoteke i pokreće alate kako bi posao napredovao.",
+  "auth.login.password.show": "Prikaži lozinku",
+  "auth.login.password.hide": "Sakrij lozinku",
   "session.prompt.disclaimer": "O M A I + je AI i može praviti greške. Molimo provjerite odgovore.",
 
   "dialog.provider.custom.label": "Prilagođeni OpenAI-kompatibilni provajder",

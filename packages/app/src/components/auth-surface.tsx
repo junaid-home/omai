@@ -1,58 +1,99 @@
-import type { JSX } from "solid-js"
+import { For, Show, createSignal, onCleanup, type JSX } from "solid-js"
+import { Icon } from "@opencode-ai/ui/icon"
 import { useLanguage } from "@/context/language"
 
 export function AuthSurface(props: { children: JSX.Element }) {
   const language = useLanguage()
   return (
     <div data-component="auth-surface">
-      <div class="auth-backdrop" aria-hidden="true">
-        <span class="auth-glow auth-glow-core" />
-        <span class="auth-glow auth-glow-top" />
-        <span class="auth-glow auth-glow-bottom" />
-        <svg class="auth-aperture" viewBox="0 0 800 800" fill="none">
-          <g class="auth-aperture-rotor">
-            <circle class="auth-aperture-ring" cx="400" cy="400" r="372" />
-            <circle class="auth-aperture-ring" cx="400" cy="400" r="304" />
-            <circle class="auth-aperture-ring" cx="400" cy="400" r="236" />
-            {Array.from({ length: 9 }, (_, i) => (
-              <path
-                class="auth-aperture-blade"
-                d="M400 96 L578 86"
-                transform={`rotate(${i * 40} 400 400)`}
-              />
-            ))}
-            <path class="auth-aperture-arc" d="M400 44 A356 356 0 0 1 756 400" />
-            <path class="auth-aperture-arc auth-aperture-arc-faint" d="M400 756 A356 356 0 0 1 44 400" />
-          </g>
-        </svg>
-        <span class="auth-arc auth-arc-a" />
-        <span class="auth-arc auth-arc-b" />
-        <span class="auth-dots" />
-        <span class="auth-vignette" />
-      </div>
+      <section class="auth-panel" data-slot="auth-form-panel">
+        <a class="auth-wordmark" href="/" aria-label="O M A I +">
+          <span class="auth-wordmark-text">O M A I</span>
+          <span class="auth-wordmark-plus" aria-hidden="true">
+            +
+          </span>
+        </a>
 
-      <main class="auth-shell">
-        <span class="auth-card-glow" aria-hidden="true" />
-        <div class="auth-card">{props.children}</div>
-        <p class="auth-footnote">
-          <span class="auth-status" aria-hidden="true" />
-          {language.t("auth.login.stealthMode")}
-        </p>
-      </main>
+        <div class="auth-panel-body">{props.children}</div>
+
+        <div class="auth-panel-foot">
+          <p class="auth-footnote">{language.t("auth.login.footer")}</p>
+          <LanguagePill />
+        </div>
+      </section>
+
+      <aside class="auth-aside" aria-hidden="true">
+        <span class="auth-aside-stripes" />
+        <span class="auth-aside-glow" />
+        <div class="auth-aside-content">
+          <p class="auth-aside-eyebrow">{language.t("auth.marketing.eyebrow")}</p>
+          <h2 class="auth-aside-title">{language.t("auth.marketing.title")}</h2>
+          <p class="auth-aside-subtitle">{language.t("auth.marketing.subtitle")}</p>
+        </div>
+      </aside>
     </div>
   )
 }
 
-export function AuthHead(props: { title: string; subtitle: string }) {
+export function AuthHead(props: { eyebrow?: string; title: string; subtitle: string }) {
   return (
     <div class="auth-head">
-      <div class="auth-logo">
-        <span class="auth-logo-halo" aria-hidden="true" />
-        <span class="auth-logo-ring" aria-hidden="true" />
-        <img src="/icon.jpeg" alt="O M A I +" class="auth-logo-img" width={76} height={76} />
-      </div>
+      <Show when={props.eyebrow}>
+        <p class="auth-eyebrow">{props.eyebrow}</p>
+      </Show>
       <h1 class="auth-title">{props.title}</h1>
       <p class="auth-subtitle">{props.subtitle}</p>
+    </div>
+  )
+}
+
+function LanguagePill() {
+  const language = useLanguage()
+  const [open, setOpen] = createSignal(false)
+  let root: HTMLDivElement | undefined
+
+  const onClickDocument = (event: MouseEvent) => {
+    if (!root?.contains(event.target as Node)) setOpen(false)
+  }
+  document.addEventListener("mousedown", onClickDocument)
+  onCleanup(() => document.removeEventListener("mousedown", onClickDocument))
+
+  return (
+    <div class="auth-lang" ref={root}>
+      <button
+        type="button"
+        class="auth-lang-trigger"
+        aria-haspopup="listbox"
+        aria-expanded={open()}
+        onClick={() => setOpen(!open())}
+      >
+        <Icon name="wheel-globe" class="auth-lang-icon" />
+        <span class="auth-lang-current">{language.label(language.locale())}</span>
+        <Icon name="chevron-down" class="auth-lang-chevron" />
+      </button>
+      <Show when={open()}>
+        <ul class="auth-lang-menu" role="listbox">
+          <For each={language.locales}>
+            {(locale) => (
+              <li>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={language.locale() === locale}
+                  class="auth-lang-option"
+                  data-active={language.locale() === locale}
+                  onClick={() => {
+                    language.setLocale(locale)
+                    setOpen(false)
+                  }}
+                >
+                  {language.label(locale)}
+                </button>
+              </li>
+            )}
+          </For>
+        </ul>
+      </Show>
     </div>
   )
 }

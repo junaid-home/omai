@@ -1277,6 +1277,13 @@ export const dict = {
   "allProjects.view.grid": "Visualização em grade",
   "allProjects.view.list": "Visualização em lista",
   "auth.login.stealthMode": "MODO OCULTO",
+  "auth.login.eyebrow": "ACESSO SEGURO",
+  "auth.login.footer": "Espaço de trabalho seguro para a sua equipe.",
+  "auth.marketing.eyebrow": "AGENTE DE CÓDIGO COM IA",
+  "auth.marketing.title": "Construa mais rápido com um agente que escreve código.",
+  "auth.marketing.subtitle": "OMAI+ lê seu código, edita arquivos e executa as ferramentas para fazer seu trabalho avançar.",
+  "auth.login.password.show": "Mostrar senha",
+  "auth.login.password.hide": "Ocultar senha",
   "session.prompt.disclaimer": "O M A I + é IA e pode cometer erros. Verifique as respostas.",
 
   "dialog.provider.custom.label": "Provedor compatível com OpenAI personalizado",

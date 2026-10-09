@@ -1321,6 +1321,13 @@ export const dict = {
   "allProjects.view.grid": "网格视图",
   "allProjects.view.list": "列表视图",
   "auth.login.stealthMode": "隐身模式",
+  "auth.login.eyebrow": "安全访问",
+  "auth.login.footer": "为您团队打造的安全工作区。",
+  "auth.marketing.eyebrow": "AI 编程代理",
+  "auth.marketing.title": "与会写代码的智能体一起，更快构建。",
+  "auth.marketing.subtitle": "OMAI+ 会阅读你的代码库、编辑文件并运行工具，让工作顺利推进。",
+  "auth.login.password.show": "显示密码",
+  "auth.login.password.hide": "隐藏密码",
   "session.prompt.disclaimer": "O M A I + 是人工智能，可能会犯错误。请仔细核对回复。",
 
   "dialog.provider.custom.label": "自定义 OpenAI 兼容提供商",

@@ -1267,6 +1267,13 @@ export const dict = {
   "allProjects.view.grid": "グリッド表示",
   "allProjects.view.list": "リスト表示",
   "auth.login.stealthMode": "ステルスモード",
+  "auth.login.eyebrow": "安全なアクセス",
+  "auth.login.footer": "チームのための安全なワークスペース。",
+  "auth.marketing.eyebrow": "AIコーディングエージェント",
+  "auth.marketing.title": "コードを書くエージェントと、より速く構築する。",
+  "auth.marketing.subtitle": "OMAI+ はコードベースを読み、ファイルを編集し、ツールを実行して作業を進めます。",
+  "auth.login.password.show": "パスワードを表示",
+  "auth.login.password.hide": "パスワードを非表示",
   "session.prompt.disclaimer": "O M A I +はAIであり、間違いを犯す可能性があります。回答を再確認してください。",
 
   "dialog.provider.custom.label": "カスタム OpenAI 互換プロバイダー",

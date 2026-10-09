@@ -1251,6 +1251,13 @@ export const dict = {
   "auth.login.or": "or",
   "auth.login.continueWithGoogle": "Continue with Google",
   "auth.login.stealthMode": "STEALTH MODE",
+  "auth.login.eyebrow": "SECURE ACCESS",
+  "auth.login.footer": "Secure workspace for your team.",
+  "auth.marketing.eyebrow": "AI CODING AGENT",
+  "auth.marketing.title": "Build faster with an agent that writes code.",
+  "auth.marketing.subtitle": "OMAI+ reads your codebase, edits files, and runs the tools to get your work done.",
+  "auth.login.password.show": "Show password",
+  "auth.login.password.hide": "Hide password",
 
   "auth.signup.title": "Create account",
   "auth.signup.subtitle": "Get started with O M A I +",

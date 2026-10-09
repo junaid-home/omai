@@ -1,6 +1,7 @@
 import { createSignal } from "solid-js"
 import { useNavigate } from "@solidjs/router"
 import { Button } from "@opencode-ai/ui/button"
+import { IconButton } from "@opencode-ai/ui/icon-button"
 import { TextField } from "@opencode-ai/ui/text-field"
 import { AuthHead, AuthSurface } from "@/components/auth-surface"
 import { useAuth } from "@/context/auth"
@@ -14,6 +15,7 @@ export default function SignupPage() {
   const [email, setEmail] = createSignal("")
   const [password, setPassword] = createSignal("")
   const [confirmPassword, setConfirmPassword] = createSignal("")
+  const [revealPassword, setRevealPassword] = createSignal(false)
   const [error, setError] = createSignal("")
   const [loading, setLoading] = createSignal(false)
 
@@ -54,7 +56,11 @@ export default function SignupPage() {
 
   return (
     <AuthSurface>
-      <AuthHead title={language.t("auth.signup.title")} subtitle={language.t("auth.signup.subtitle")} />
+      <AuthHead
+        eyebrow={language.t("auth.login.eyebrow")}
+        title={language.t("auth.signup.title")}
+        subtitle={language.t("auth.signup.subtitle")}
+      />
 
       {error() && (
         <div role="alert" class="auth-error">
@@ -62,7 +68,7 @@ export default function SignupPage() {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} class="flex flex-col gap-3">
+      <form onSubmit={handleSubmit} class="auth-form">
         <TextField
           label={language.t("auth.signup.username.label")}
           placeholder={language.t("auth.signup.username.placeholder")}
@@ -82,19 +88,32 @@ export default function SignupPage() {
             setError("")
           }}
         />
-        <TextField
-          label={language.t("auth.signup.password.label")}
-          type="password"
-          placeholder="••••••••"
-          value={password()}
-          onChange={(v) => {
-            setPassword(v)
-            setError("")
-          }}
-        />
+        <div class="auth-password">
+          <TextField
+            label={language.t("auth.signup.password.label")}
+            type={revealPassword() ? "text" : "password"}
+            placeholder="••••••••"
+            value={password()}
+            onChange={(v) => {
+              setPassword(v)
+              setError("")
+            }}
+          />
+          <IconButton
+            type="button"
+            class="auth-password-toggle"
+            icon="eye"
+            variant="ghost"
+            aria-label={
+              revealPassword() ? language.t("auth.login.password.hide") : language.t("auth.login.password.show")
+            }
+            aria-pressed={revealPassword()}
+            onClick={() => setRevealPassword(!revealPassword())}
+          />
+        </div>
         <TextField
           label={language.t("auth.signup.confirmPassword.label")}
-          type="password"
+          type={revealPassword() ? "text" : "password"}
           placeholder="••••••••"
           value={confirmPassword()}
           onChange={(v) => {
@@ -102,7 +121,7 @@ export default function SignupPage() {
             setError("")
           }}
         />
-        <Button type="submit" variant="primary" size="large" class="mt-1" disabled={loading()}>
+        <Button type="submit" variant="primary" size="large" class="auth-submit" disabled={loading()}>
           {loading() ? language.t("auth.signup.submitting") : language.t("auth.signup.submit")}
         </Button>
       </form>

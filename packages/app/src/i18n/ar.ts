@@ -1253,6 +1253,13 @@ export const dict = {
   "allProjects.view.grid": "عرض شبكي",
   "allProjects.view.list": "عرض قائمة",
   "auth.login.stealthMode": "وضع التخفي",
+  "auth.login.eyebrow": "وصول آمن",
+  "auth.login.footer": "مساحة عمل آمنة لفريقك.",
+  "auth.marketing.eyebrow": "وكيل برمجة بالذكاء الاصطناعي",
+  "auth.marketing.title": "ابنِ أسرع مع وكيل يكتب الشيفرة.",
+  "auth.marketing.subtitle": "يقرأ OMAI+ قاعدة الشيفرة لديك ويحرّر الملفات ويشغّل الأدوات لإتمام عملك.",
+  "auth.login.password.show": "إظهار كلمة المرور",
+  "auth.login.password.hide": "إخفاء كلمة المرور",
   "session.prompt.disclaimer": "O M A I + هو ذكاء اصطناعي وقد يرتكب أخطاء. يرجى التحقق من الردود.",
 
   "dialog.provider.custom.label": "مزود OpenAI مخصص متوافق",

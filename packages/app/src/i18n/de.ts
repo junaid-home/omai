@@ -1289,6 +1289,13 @@ export const dict = {
   "allProjects.view.grid": "Rasteransicht",
   "allProjects.view.list": "Listenansicht",
   "auth.login.stealthMode": "GETARNTMODUS",
+  "auth.login.eyebrow": "SICHERER ZUGANG",
+  "auth.login.footer": "Sicherer Arbeitsbereich für Ihr Team.",
+  "auth.marketing.eyebrow": "KI-CODEAGENT",
+  "auth.marketing.title": "Bauen Sie schneller mit einem Agenten, der Code schreibt.",
+  "auth.marketing.subtitle": "OMAI+ liest Ihren Code, bearbeitet Dateien und führt Tools aus, damit Ihre Arbeit vorankommt.",
+  "auth.login.password.show": "Passwort anzeigen",
+  "auth.login.password.hide": "Passwort verbergen",
   "session.prompt.disclaimer": "O M A I + ist KI und kann Fehler machen. Bitte überprüfen Sie die Antworten.",
 
   "dialog.provider.custom.label": "Benutzerdefinierter OpenAI-kompatibler Anbieter",

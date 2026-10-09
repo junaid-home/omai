@@ -1261,6 +1261,13 @@ export const dict = {
   "allProjects.view.grid": "그리드 보기",
   "allProjects.view.list": "목록 보기",
   "auth.login.stealthMode": "스텔스 모드",
+  "auth.login.eyebrow": "안전한 접근",
+  "auth.login.footer": "팀을 위한 안전한 작업 공간입니다.",
+  "auth.marketing.eyebrow": "AI 코딩 에이전트",
+  "auth.marketing.title": "코드를 작성하는 에이전트와 더 빠르게 구축하세요.",
+  "auth.marketing.subtitle": "OMAI+는 코드베이스를 읽고, 파일을 편집하고, 도구를 실행하여 작업을 진행합니다.",
+  "auth.login.password.show": "비밀번호 표시",
+  "auth.login.password.hide": "비밀번호 숨기기",
   "session.prompt.disclaimer": "O M A I +는 AI이며 실수를 할 수 있습니다. 응답을 다시 확인하세요.",
 
   "dialog.provider.custom.label": "사용자 정의 OpenAI 호환 제공자",

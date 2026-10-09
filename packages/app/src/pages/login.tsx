@@ -1,11 +1,13 @@
 import { createSignal, onMount } from "solid-js"
 import { useNavigate } from "@solidjs/router"
 import { Button } from "@opencode-ai/ui/button"
+import { IconButton } from "@opencode-ai/ui/icon-button"
 import { TextField } from "@opencode-ai/ui/text-field"
 import { AuthHead, AuthSurface } from "@/components/auth-surface"
 import { useAuth } from "@/context/auth"
 import { useLanguage } from "@/context/language"
-import { centralRuntime } from "@/utils/central-state"
+// Needed again when the Google sign-in button below is uncommented.
+// import { centralRuntime } from "@/utils/central-state"
 
 export default function LoginPage() {
   const auth = useAuth()
@@ -13,6 +15,7 @@ export default function LoginPage() {
   const navigate = useNavigate()
   const [identifier, setIdentifier] = createSignal("")
   const [password, setPassword] = createSignal("")
+  const [revealPassword, setRevealPassword] = createSignal(false)
   const [error, setError] = createSignal("")
   const [loading, setLoading] = createSignal(false)
 
@@ -24,10 +27,13 @@ export default function LoginPage() {
     }
   })
 
-  const signInWithGoogle = () => {
-    const base = centralRuntime.get().url ?? window.location.origin
-    window.location.href = `${base.replace(/\/+$/, "")}/auth/google`
-  }
+  // Google sign-in is temporarily hidden. Restore by uncommenting the button
+  // below together with its divider and the signInWithGoogle helper.
+  //
+  // const signInWithGoogle = () => {
+  //   const base = centralRuntime.get().url ?? window.location.origin
+  //   window.location.href = `${base.replace(/\/+$/, "")}/auth/google`
+  // }
 
   const handleSubmit = async (e: SubmitEvent) => {
     e.preventDefault()
@@ -48,7 +54,11 @@ export default function LoginPage() {
 
   return (
     <AuthSurface>
-      <AuthHead title={language.t("auth.login.title")} subtitle={language.t("auth.login.subtitle")} />
+      <AuthHead
+        eyebrow={language.t("auth.login.eyebrow")}
+        title={language.t("auth.login.title")}
+        subtitle={language.t("auth.login.subtitle")}
+      />
 
       {error() && (
         <div role="alert" class="auth-error">
@@ -56,6 +66,7 @@ export default function LoginPage() {
         </div>
       )}
 
+      {/* Google sign-in — uncomment to re-enable.
       <Button variant="secondary" size="large" class="w-full" onClick={signInWithGoogle}>
         <span class="flex w-full items-center justify-center gap-2.5">
           <svg viewBox="0 0 48 48" aria-hidden="true" class="size-4 shrink-0">
@@ -85,8 +96,9 @@ export default function LoginPage() {
         <span class="auth-divider-label">{language.t("auth.login.or")}</span>
         <span class="auth-divider-line" />
       </div>
+      */}
 
-      <form onSubmit={handleSubmit} class="flex flex-col gap-3">
+      <form onSubmit={handleSubmit} class="auth-form">
         <TextField
           label={language.t("auth.login.username.label")}
           placeholder={language.t("auth.login.username.placeholder")}
@@ -96,17 +108,30 @@ export default function LoginPage() {
             setError("")
           }}
         />
-        <TextField
-          label={language.t("auth.login.password.label")}
-          type="password"
-          placeholder="••••••••"
-          value={password()}
-          onChange={(v) => {
-            setPassword(v)
-            setError("")
-          }}
-        />
-        <Button type="submit" variant="primary" size="large" class="mt-1" disabled={loading()}>
+        <div class="auth-password">
+          <TextField
+            label={language.t("auth.login.password.label")}
+            type={revealPassword() ? "text" : "password"}
+            placeholder="••••••••"
+            value={password()}
+            onChange={(v) => {
+              setPassword(v)
+              setError("")
+            }}
+          />
+          <IconButton
+            type="button"
+            class="auth-password-toggle"
+            icon="eye"
+            variant="ghost"
+            aria-label={
+              revealPassword() ? language.t("auth.login.password.hide") : language.t("auth.login.password.show")
+            }
+            aria-pressed={revealPassword()}
+            onClick={() => setRevealPassword(!revealPassword())}
+          />
+        </div>
+        <Button type="submit" variant="primary" size="large" class="auth-submit" disabled={loading()}>
           {loading() ? language.t("auth.login.submitting") : language.t("auth.login.submit")}
         </Button>
       </form>
