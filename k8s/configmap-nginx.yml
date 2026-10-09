@@ -22,7 +22,7 @@ data:
         gzip on;
         gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
 
-        location ~ ^/(global|session|file|project(?!s)|provider|path|config|question|permission|pty|mcp|sync|tui|preview|auth|api|agent|command|doc|event|experimental|find|formatter|git|instance|log|lsp|skill|vcs|publish|user-state)($|/) {
+        location ~ ^/(global|session|file|project(?!s)|provider|path|config|question|permission|pty|mcp|sync|tui|preview|auth|admin|api|agent|command|doc|event|experimental|find|formatter|git|instance|log|lsp|skill|vcs|publish|user-state)($|/) {
             proxy_pass http://omai-opencode.omai.svc.cluster.local:4096;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
