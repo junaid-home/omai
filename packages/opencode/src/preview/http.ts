@@ -8,7 +8,8 @@ import { open } from "node:fs/promises"
 import path from "node:path"
 import mime from "mime-types"
 import { previewProxyResponse, previewProxyTarget, proxyBase, rewritePreviewHtml } from "@/server/preview-proxy"
-import { previewDirectoryForPort } from "./server"
+import { websocket } from "@/server/routes/instance/httpapi/middleware/proxy"
+import { previewDirectoryForPort, touchDevServer } from "./server"
 import { visualBridgeScript } from "./visual-bridge"
 
 export function config() {
@@ -139,6 +140,13 @@ export const routes = HttpRouter.use((router) =>
           return HttpServerResponse.empty({ status: 403 })
         if (target && previewDirectoryForPort(port) !== grant.directory)
           return HttpServerResponse.empty({ status: 404 })
+        // Bridge dev-server HMR WebSockets on the dedicated preview origin.
+        if (target) {
+          touchDevServer(grant.directory)
+          if (request.headers.upgrade?.toLowerCase() === "websocket") {
+            return yield* websocket(request, `http://localhost:${port}${target.path}`)
+          }
+        }
         const storage = yield* Effect.tryPromise(() => CentralStorage.resolveWorkspace(grant.directory)).pipe(
           Effect.option,
         )

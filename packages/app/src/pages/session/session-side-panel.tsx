@@ -176,7 +176,6 @@ export function SessionSidePanel(props: {
   const [previewReloadKey, setPreviewReloadKey] = createSignal(0)
   const [device, setDevice] = createSignal<"desktop" | "tablet" | "mobile">("desktop")
   const [zoom, setZoom] = createSignal<number>(100)
-  const [urlBar, setUrlBar] = createSignal("")
   const [origin, setOrigin] = createSignal("")
   const previewControl: {
     navigate: (url: string) => void
@@ -217,12 +216,8 @@ export function SessionSidePanel(props: {
 
   const handleUrlChange = (url: string) => {
     try {
-      const u = new URL(url)
-      setOrigin(u.origin)
-      setUrlBar(`${u.pathname}${u.search}`)
-    } catch {
-      setUrlBar(url)
-    }
+      setOrigin(new URL(url).origin)
+    } catch {}
     setRoute("")
   }
 

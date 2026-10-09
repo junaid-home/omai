@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { mkdir, writeFile } from "fs/promises"
+import { chmod, mkdir, writeFile } from "fs/promises"
 import path from "path"
-import { collectIdleServers, getDevServerStatus, startDevServer, stopDevServer } from "../../src/preview/server"
+import {
+  PreviewStartError,
+  collectIdleServers,
+  getDevServerStatus,
+  startDevServer,
+  stopDevServer,
+} from "../../src/preview/server"
 import { tmpdir } from "../fixture/fixture"
 
 async function makePreviewProject(readyDelayMs: number) {
@@ -50,6 +56,41 @@ describe("preview.server start/stop refcount", () => {
     expect(b.port).toBe(a.port)
     expect(getDevServerStatus(tmp.path).running).toBe(true)
     expect(stopDevServer(tmp.path)).toBe(true)
+  })
+})
+
+describe("preview.server start failures", () => {
+  async function projectWithDevScript(script: string) {
+    return tmpdir({
+      init: async (dir) => {
+        await mkdir(path.join(dir, "node_modules"))
+        await writeFile(path.join(dir, "bun.lock"), "")
+        await writeFile(path.join(dir, "package.json"), JSON.stringify({ name: "preview-fail", scripts: { dev: script } }))
+      },
+    })
+  }
+
+  test("a framework dev script that exits rejects with a non-static start error", async () => {
+    await using tmp = await projectWithDevScript("exit 1")
+    const error = await startDevServer(tmp.path).catch((err: unknown) => err)
+    expect(error).toBeInstanceOf(PreviewStartError)
+    expect((error as PreviewStartError).staticFallback).toBe(false)
+    expect(getDevServerStatus(tmp.path).running).toBe(false)
+  })
+
+  test("a failed static serve still reports static fallback", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        // A local `serve` binary keeps `npx serve` offline and makes it exit fast.
+        await writeFile(path.join(dir, "index.html"), "<html><body>static</body></html>")
+        await mkdir(path.join(dir, "node_modules/.bin"), { recursive: true })
+        await writeFile(path.join(dir, "node_modules/.bin/serve"), "#!/bin/sh\nexit 1\n")
+        await chmod(path.join(dir, "node_modules/.bin/serve"), 0o755)
+      },
+    })
+    const error = await startDevServer(tmp.path).catch((err: unknown) => err)
+    expect(error).toBeInstanceOf(PreviewStartError)
+    expect((error as PreviewStartError).staticFallback).toBe(true)
   })
 })
 

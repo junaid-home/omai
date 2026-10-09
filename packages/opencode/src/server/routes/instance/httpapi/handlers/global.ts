@@ -29,7 +29,7 @@ import { RootHttpApi } from "../api"
 import { GlobalUpgradeInput } from "../groups/global"
 import { mkdir } from "fs/promises"
 import path from "path"
-import { startDevServer, stopDevServer, getDevServerStatus, touchDevServer } from "@/preview/server"
+import { PreviewStartError, startDevServer, stopDevServer, getDevServerStatus, touchDevServer, releaseDevServer, destroyDevServer } from "@/preview/server"
 import { captureAndStoreThumbnail } from "@/preview/capture"
 import { auditPreview } from "@/preview/lighthouse"
 import { ProjectArchive } from "@/server/project-archive"
@@ -303,10 +303,12 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
             }),
           )
           if (!start.ok) {
+            const err = start.error
             return HttpServerResponse.jsonUnsafe(
               {
                 success: false,
-                error: start.error instanceof Error ? start.error.message : "Failed to start dev server",
+                error: err instanceof Error ? err.message : "Failed to start dev server",
+                fallback: err instanceof PreviewStartError ? err.staticFallback : false,
               },
               { status: 400 },
             )
@@ -314,7 +316,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
           const status = getDevServerStatus(body.directory)
           if (!status.running || !status.port)
             return HttpServerResponse.jsonUnsafe(
-              { success: false, error: "Dev server failed to start" },
+              { success: false, error: "Dev server failed to start", fallback: start.result.framework === "static" },
               { status: 400 },
             )
           // Capture the thumbnail immediately when the webserver starts: it is captured when
@@ -389,7 +391,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
             Effect.option,
           )
           if (safePath._tag === "None") return HttpServerResponse.empty({ status: 403 })
-          return HttpServerResponse.jsonUnsafe({ success: stopDevServer(safePath.value) })
+          return HttpServerResponse.jsonUnsafe({ success: releaseDevServer(safePath.value) })
         }),
       )
       .handleRaw(

@@ -105,8 +105,18 @@ async function findPackageJson(
   maxDepth = 3,
 ): Promise<{ dir: string; pkg: Record<string, any> } | null> {
   const rootResult = await tryLoadPackageJson(directory)
-  if (rootResult) return rootResult
-  return searchSubdirectories(directory, 0, maxDepth)
+  // A monorepo root often has a package.json with no runnable script (or only
+  // "build"/"test"). Prefer a package that can actually start a dev server so
+  // `apps/web` is found instead of the workspace root.
+  if (rootResult && hasRunScript(rootResult.pkg.scripts)) return rootResult
+  const subResult = await searchSubdirectories(directory, 0, maxDepth)
+  return subResult ?? rootResult
+}
+
+const RUN_SCRIPTS = new Set([...DEV_SCRIPTS, "start", "serve"])
+
+function hasRunScript(scripts: Record<string, unknown> | undefined): boolean {
+  return Boolean(scripts) && Object.keys(scripts!).some((name) => RUN_SCRIPTS.has(name))
 }
 
 async function tryLoadPackageJson(directory: string): Promise<{ dir: string; pkg: Record<string, any> } | null> {
@@ -128,15 +138,17 @@ async function searchSubdirectories(
   } catch {
     return null
   }
+  let fallback: { dir: string; pkg: Record<string, any> } | null = null
   for (const entry of entries) {
     if (SKIP_DIRS.has(entry) || entry.startsWith(".")) continue
     const fullPath = path.join(directory, entry)
     const result = await tryLoadPackageJson(fullPath)
-    if (result && result.pkg.scripts) return result
+    if (result && hasRunScript(result.pkg.scripts)) return result
+    if (result && result.pkg.scripts && !fallback) fallback = result
     const subResult = await searchSubdirectories(fullPath, depth + 1, maxDepth)
     if (subResult) return subResult
   }
-  return null
+  return fallback
 }
 
 export async function detectProject(directory: string): Promise<ProjectInfo | null> {

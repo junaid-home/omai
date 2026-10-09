@@ -18,6 +18,7 @@ import {
   HttpServerResponse,
 } from "effect/unstable/http"
 import * as Socket from "effect/unstable/socket/Socket"
+import { previewDirectoryForPort, touchDevServer } from "@/preview/server"
 import { previewProxyResponse, previewProxyTarget } from "@/server/preview-proxy"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import * as Observability from "@opencode-ai/core/observability"
@@ -131,6 +132,7 @@ import { schemaErrorLayer as v2SchemaErrorLayer } from "@opencode-ai/server/midd
 import { workspaceHandlers } from "./handlers/workspace"
 import { instanceContextLayer } from "./middleware/instance-context"
 import { workspaceRoutingLayer } from "./middleware/workspace-routing"
+import { HttpApiProxy } from "./middleware/proxy"
 import { disposeMiddleware } from "./lifecycle"
 import { routerConfig } from "./router-config"
 import { memoMap } from "@opencode-ai/core/effect/memo-map"
@@ -228,16 +230,31 @@ const serverRoutes = HttpApiBuilder.layer(Api).pipe(
 const previewProxyHttpMiddleware = HttpRouter.middleware<{ handles: unknown }>()(
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
+    const makeWebSocket = yield* Socket.WebSocketConstructor
     return (effect) =>
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest
         const target = previewProxyTarget(new URL(request.url, "http://localhost"))
         if (!target) return yield* effect
         if (Authentication.central()) return HttpServerResponse.empty({ status: 404 })
+        // Only proxy ports owned by a registered workspace process. Without this
+        // a local request could proxy any localhost service via the path.
+        const directory = previewDirectoryForPort(target.port)
+        if (!directory) return HttpServerResponse.empty({ status: 404 })
+        // Real preview traffic proves the iframe is in use; refresh the idle lease.
+        touchDevServer(directory)
+        // Dev-server HMR uses a WebSocket. Bridge it through the same proxy path
+        // so edits stream in without a manual refresh.
+        if (request.headers["upgrade"]?.toLowerCase() === "websocket") {
+          return yield* HttpApiProxy.websocket(
+            request,
+            `http://localhost:${target.port}${target.path}`,
+          ).pipe(Effect.provideService(Socket.WebSocketConstructor, makeWebSocket))
+        }
         return yield* previewProxyResponse(client, request, target)
       })
   }),
-).layer
+).layer.pipe(Layer.provide(Socket.layerWebSocketConstructorGlobal))
 
 // `OpenApi.fromApi` is non-trivial; defer until /doc is actually hit so
 // processes that never serve it (CLI, scripts) don't pay at module load.
