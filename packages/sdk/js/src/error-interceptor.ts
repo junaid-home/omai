@@ -22,10 +22,11 @@ export function wrapClientError(
   // NamedError-shaped responses (the common case for opencode 4xx) come
   // through as POJOs — extract a useful message first, then wrap.
   if (typeof error === "object" && error !== null && Object.keys(error).length > 0) {
-    const obj = error as { data?: { message?: unknown }; message?: unknown; name?: unknown }
+    const obj = error as { data?: { message?: unknown }; message?: unknown; error?: unknown; name?: unknown }
     const message =
       (typeof obj.data?.message === "string" && obj.data.message) ||
       (typeof obj.message === "string" && obj.message) ||
+      (typeof obj.error === "string" && obj.error) ||
       (typeof obj.name === "string" && obj.name) ||
       describe(request, response)
     return new Error(message, { cause: { body: error, status: response?.status } })
