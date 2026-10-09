@@ -286,8 +286,9 @@ async function inventory(source: AsyncIterable<Entry>): Promise<Item[]> {
     ) {
       throw new Error(`Inconsistent ZIP file type: ${name}`)
     }
-    if (name.split("/").some((part) => vcs.has(part.toLowerCase())))
-      throw new Error(`ZIP contains VCS metadata: ${name}`)
+    // Import always starts a fresh repository (see gitInitRepo), so drop
+    // uploaded VCS metadata instead of rejecting the archive.
+    if (name.split("/").some((part) => vcs.has(part.toLowerCase()))) continue
     if (name === "__MACOSX" || name.startsWith("__MACOSX/")) continue
     items.push({ entry, name, kind, mode: unix ? unix & 0o777 : kind === "directory" ? 0o755 : 0o644 })
   }

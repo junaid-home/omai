@@ -123,7 +123,6 @@ describe("project ZIP validation", () => {
     { file: "file", "file/child": "child" },
     { "Folder/a": "one", "folder/b": "two" },
     { "caf\u00e9.txt": "one", "cafe\u0301.txt": "two" },
-    { ".git/hooks/pre-commit": "#!/bin/sh\n" },
   ]
   for (const files of collisions) {
     test(`rejects conflicting paths ${Object.keys(files).join(", ")}`, async () => {
@@ -132,6 +131,21 @@ describe("project ZIP validation", () => {
       expect(await readdir(tmp.path)).toEqual([])
     })
   }
+
+  test("strips VCS metadata instead of rejecting the archive", async () => {
+    await using tmp = await tmpdir()
+    const destination = path.join(tmp.path, "restored")
+    const data = await archive({
+      "project/src/main.ts": "main",
+      "project/.git/config": "[core]",
+      "project/.git/hooks/pre-commit": "#!/bin/sh\n",
+      "project/.hg/store": "hg",
+      "project/.svn/wc": "svn",
+    })
+    expect(await ProjectArchive.extract(data, destination)).toBe(1)
+    expect(await readdir(destination)).toEqual(["src"])
+    expect(await readFile(path.join(destination, "src/main.ts"), "utf8")).toBe("main")
+  })
 
   test("rejects an entry below a symlink before creating it", async () => {
     await using tmp = await tmpdir()
