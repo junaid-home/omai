@@ -229,14 +229,20 @@ spec:
                   name: omai-cloudflare-credentials
                   key: CLOUDFLARE_ACCOUNT_ID
 
+            # JSC sizes its GC heuristics from this value, so it must sit well
+            # below the container limit. The old 4831838208 (4.5Gi) let the
+            # server's heap balloon toward 4.5Gi and, together with the headless
+            # Chromium screenshot bursts and preview dev servers sharing this
+            # cgroup, crossed 6Gi and triggered OOMKilled (13 restarts).
             - name: BUN_JSC_forceRAMSize
-              value: "4831838208"
+              value: "3221225472"
           resources:
             requests:
               memory: "4Gi"
               cpu: "500m"
             limits:
-              memory: "6Gi"
+              # Headroom above the 3Gi heap cap for transient Chromium/vite bursts.
+              memory: "8Gi"
               cpu: "1800m"
           volumeMounts:
             # omai-data is intentionally not mounted: central mode moves
