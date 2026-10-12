@@ -146,7 +146,7 @@ spec:
             - name: OPENCODE_DATABASE_SCHEMA
               value: "opencode"
             - name: OPENCODE_DATABASE_POOL_SIZE
-              value: "8"
+              value: "24"
             - name: OPENCODE_INSTANCE_ID
               value: omai_k8s_central
 
