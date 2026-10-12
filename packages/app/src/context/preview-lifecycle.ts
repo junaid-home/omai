@@ -7,7 +7,11 @@ import { createMemo } from "solid-js"
 
 const activeSessions = new Map<string, number>()
 const previewUrls = new Map<string, string>()
-const HEARTBEAT_INTERVAL_MS = 20_000
+// The server reclaims an unused preview dev server after IDLE_TTL_MS (180s, and
+// proxied/HMR traffic also counts as activity). Background tabs clamp timers to
+// ~60s, so keep this at one minute: worst case a throttled tick lands at ~120s,
+// still short of the 180s eviction deadline.
+const HEARTBEAT_INTERVAL_MS = 60_000
 
 export function normalizePreviewUrl(url: string): string {
   return previewUrl(url, window.location.origin, centralRuntime.get().mode === "central")

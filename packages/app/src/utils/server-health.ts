@@ -94,7 +94,10 @@ export async function checkServerHealth(
   return attempt(0).finally(() => timeout?.clear?.())
 }
 
-const pollMs = 10_000
+// Health is a liveness signal, not a hot path: poll once a minute. Recovery from
+// a dropped connection is handled separately by the 1s ConnectionError retry loop,
+// so a slow poll only delays noticing an already-dead server, not reconnecting.
+const pollMs = 60_000
 
 export function useCheckServerHealth() {
   const platform = usePlatform()
