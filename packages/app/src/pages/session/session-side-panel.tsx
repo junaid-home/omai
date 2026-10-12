@@ -67,6 +67,17 @@ function toRoutePath(pathname: string): string {
   return normalized.startsWith("/") ? normalized : `/${normalized}`
 }
 
+// The preview iframe reports about:blank while it remounts (for example during a
+// reload). `about:blank` parses with pathname "blank", which is not a route.
+function previewRoutePath(url: string): string | undefined {
+  if (!/^https?:/i.test(url)) return undefined
+  try {
+    return toRoutePath(new URL(url).pathname)
+  } catch {
+    return undefined
+  }
+}
+
 import { SessionContextTab, SortableTab, SortableTabV2, FileVisual } from "@/components/session"
 import { SessionToolsTab } from "@/components/session/session-tools-tab"
 import { OpenInAppV2 } from "@/components/session/open-in-app-v2"
@@ -179,7 +190,7 @@ export function SessionSidePanel(props: {
   const [origin, setOrigin] = createSignal("")
   const previewControl: {
     navigate: (url: string) => void
-    reload: () => void
+    reload: (path?: string) => void
     getIframe: () => HTMLIFrameElement | undefined
     onLoad: () => void
   } = {
@@ -214,11 +225,19 @@ export function SessionSidePanel(props: {
     else setDevice("tablet")
   }
 
+  // The preview reports its URL when it (re)starts. Adopt the route it actually
+  // opened so a reload that returns to the same page does not reset the bar.
   const handleUrlChange = (url: string) => {
     try {
       setOrigin(new URL(url).origin)
     } catch {}
-    setRoute("")
+    const base = proxyBase().replace(/\/+$/, "")
+    let rel = ""
+    try {
+      const path = new URL(url).pathname.replace(/\/+$/, "")
+      rel = path.startsWith(base) ? path.slice(base.length) : ""
+    } catch {}
+    setRoute(!rel || rel === "/" ? "" : rel)
   }
 
   const resolveTargetUrl = (input: string) => {
@@ -244,17 +263,21 @@ export function SessionSidePanel(props: {
 
   const routeLabel = createMemo(() => (route() === "" ? "Homepage" : route()))
 
-  const activeRoute = createMemo(() => {
-    const r = route()
-    if (r) return r
-    try {
-      const iframe = previewControl.getIframe()
-      const doc = iframe?.contentDocument
-      if (!doc) return "/"
-      return toRoutePath(new URL(doc.URL).pathname)
-    } catch {
-      return "/"
-    }
+  // The poll below keeps `route` aligned with the iframe, so the active page is
+  // just the signal. Reading the document here would be non-reactive and go
+  // stale during navigation, leaving the check mark on the wrong route.
+  const activeRoute = createMemo(() => route() || "/")
+
+  const addressPages = createMemo(() => {
+    const pages = new Map(discoveredPages().map((page) => [page.route, page]))
+    pages.set("/", { route: "/" })
+    const active = activeRoute()
+    if (active) pages.set(active, { route: active })
+    return [...pages.values()].sort((a, b) => {
+      if (a.route === "/") return -1
+      if (b.route === "/") return 1
+      return a.route.localeCompare(b.route)
+    })
   })
 
   const searchPath = createMemo(() => {
@@ -266,11 +289,14 @@ export function SessionSidePanel(props: {
   const navigateRoute = (rel: string) => {
     const base = proxyBase().replace(/\/+$/, "")
     const originVal = origin()
-    if (!base || !originVal) return
+    if (!originVal) return
     const isHome = rel === "" || rel === "/"
     const path = rel.replace(/^\/+/, "")
     const target = isHome ? `${originVal}${base}/` : `${originVal}${base}/${path}`
     previewControl.navigate(target)
+    // The poll below can read the outgoing document while the new page loads
+    // and would flip the bar back; ignore it until the navigation settles.
+    navigateSuppressUntil = Date.now() + 1000
     setRoute(isHome ? "" : rel.startsWith("/") ? rel : `/${rel}`)
     setRouteSearch("")
   }
@@ -280,9 +306,11 @@ export function SessionSidePanel(props: {
   // history but not the `route` signal, so poll the iframe's URL and adopt it.
   let routeSyncTimer: ReturnType<typeof setInterval> | undefined
   let syncedIframe: HTMLIFrameElement | undefined
+  let navigateSuppressUntil = 0
 
   const syncRouteFromIframe = () => {
     try {
+      if (Date.now() < navigateSuppressUntil) return
       const iframe = previewControl.getIframe()
       if (iframe && iframe !== syncedIframe) {
         syncedIframe = iframe
@@ -294,7 +322,8 @@ export function SessionSidePanel(props: {
       }
       const doc = iframe?.contentDocument
       if (!doc) return
-      const actual = toRoutePath(new URL(doc.URL).pathname)
+      const actual = previewRoutePath(doc.URL)
+      if (!actual) return
       const current = route()
       const desired = current === "" ? "/" : current
       if (actual !== desired) {
@@ -1069,7 +1098,7 @@ export function SessionSidePanel(props: {
                                   variant="ghost-muted"
                                   size="small"
                                   class="hover:bg-transparent"
-                                  onClick={() => previewControl.reload()}
+                                  onClick={() => previewControl.reload(activeRoute())}
                                   aria-label={language.t("preview.action.reloadPreview")}
                                 />
                                 <MenuV2
@@ -1105,7 +1134,7 @@ export function SessionSidePanel(props: {
                                         />
                                       </div>
                                       <div class="mt-1 max-h-56 overflow-y-auto">
-                                        <For each={discoveredPages()}>
+                                        <For each={addressPages()}>
                                           {(page) => (
                                             <MenuV2.Item onSelect={() => navigateRoute(page.route)}>
                                               <span class="truncate flex-1 font-mono text-12-regular text-text-strong">

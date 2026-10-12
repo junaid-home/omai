@@ -17,27 +17,16 @@ import type { QuestionAnswer, QuestionRequest } from "@opencode-ai/sdk/v2"
 import { handleWheelPinch } from "@/utils/browser-zoom"
 import { showToast } from "@/utils/toast"
 
-function tryClickAnchor(iframe: HTMLIFrameElement | undefined, url: string): boolean {
-  if (!iframe) return false
+// Reloading restarts the preview at its root URL, so re-apply the path of the
+// page the user was viewing (query params such as the central ticket stay).
+function joinPreviewPath(base: string, path: string): string {
+  if (!path || path === "/") return base
   try {
-    const win = iframe.contentWindow
-    const doc = iframe.contentDocument
-    if (!win || !doc || win.location.origin !== window.location.origin) return false
-    if (!url.startsWith(win.location.origin)) return false
-    const desired = url.replace(win.location.origin, "").split("?")[0].split("#")[0].replace(/\/+$/, "") || "/"
-    const anchors = Array.from(doc.querySelectorAll<HTMLAnchorElement>("a[href]"))
-    for (const anchor of anchors) {
-      try {
-        const hrefPath = new URL(anchor.href, win.location.href).pathname.replace(/\/+$/, "") || "/"
-        if (hrefPath === desired) {
-          anchor.click()
-          return true
-        }
-      } catch {}
-    }
-    return false
+    const url = new URL(base)
+    url.pathname = url.pathname.replace(/\/+$/, "") + "/" + path.replace(/^\/+/, "")
+    return url.toString()
   } catch {
-    return false
+    return base
   }
 }
 
@@ -63,14 +52,12 @@ function LivePreview(props: {
       (nav, prev) => {
         if (!nav || nav.nonce === prev?.nonce) return
         if (!iframe) return
-        const clicked = tryClickAnchor(iframe, nav.url)
-        if (!clicked) {
-          ready = false
-          startPolling()
-          iframe.src = nav.url
-          props.onIframeLoaded?.()
-          return
-        }
+        // Load the URL directly. A synthetic anchor click is cancelled by the
+        // visual-editor bridge's capture-phase click interceptor, which would
+        // silently swallow the navigation.
+        ready = false
+        startPolling()
+        iframe.src = nav.url
         props.onIframeLoaded?.()
       },
     ),
@@ -716,7 +703,7 @@ export function PreviewPanel(props: {
   onUrlChange?: (url: string) => void
   control?: {
     navigate: (url: string) => void
-    reload: () => void
+    reload: (path?: string) => void
     getIframe?: () => HTMLIFrameElement | undefined
     onLoad?: () => void
   }
@@ -896,8 +883,10 @@ export function PreviewPanel(props: {
         const url = normalizePreviewUrl(data.url)
         if (centralRuntime.get().mode === "central" && new URL(url, location.href).origin === location.origin)
           throw new Error("Preview isolation is misconfigured.")
+        const path = pendingPath
+        pendingPath = ""
         setPreviewUrl(dir, url)
-        setState({ type: "live", url })
+        setState({ type: "live", url: joinPreviewPath(url, path) })
         return
       }
       const body = data ?? (result as any).error
@@ -960,9 +949,29 @@ export function PreviewPanel(props: {
     setState({ type: "static", html })
   }
 
-  const reloadPreview = () => {
+  // The path of the page currently open in the preview, relative to the preview
+  // root. Read before the reload remounts the iframe; empty for the root page
+  // or when the document is unreadable (cross-origin in central mode).
+  const currentPreviewPath = () => {
+    try {
+      const current = props.control?.getIframe?.()?.contentDocument?.URL
+      const base = liveUrl()
+      if (!current || !base) return ""
+      const currentPath = new URL(current).pathname.replace(/\/+$/, "")
+      const basePath = new URL(base).pathname.replace(/\/+$/, "")
+      if (basePath && !currentPath.startsWith(basePath)) return ""
+      return currentPath.slice(basePath.length) || ""
+    } catch {
+      return ""
+    }
+  }
+
+  let pendingPath = ""
+
+  const reloadPreview = (path?: string) => {
     const dir = directory()
     if (!dir) return
+    pendingPath = path ?? currentPreviewPath()
     setState({ type: "idle" })
     setIframeReady(false)
     started = false
@@ -1075,7 +1084,6 @@ export function PreviewPanel(props: {
                     nav={externalNav}
                     onIframeLoaded={() => setIframeLoaded((n) => n + 1)}
                     onUrlChange={(url) => {
-                      setPreviewUrl(directory(), url)
                       props.onUrlChange?.(url)
                     }}
                   />
@@ -1088,7 +1096,7 @@ export function PreviewPanel(props: {
             <Show when={showError()}>
               <div class="w-full h-full flex flex-col items-center justify-center gap-3 bg-background-base absolute inset-0 z-20 px-6">
                 <BrandLogo size="large" />
-                <Show when={errorMessage()}>
+                {/*<Show when={errorMessage()}>
                   <div class="text-12-regular text-text-weak text-center max-w-[480px] max-h-40 overflow-auto whitespace-pre-wrap break-words">
                     {errorMessage()}
                   </div>
@@ -1096,11 +1104,11 @@ export function PreviewPanel(props: {
                 <button
                   type="button"
                   class="flex items-center gap-1.5 h-8 px-3 rounded-md text-12-medium text-text-strong border border-base cursor-pointer transition-colors hover:bg-v2-overlay-simple-overlay-hover"
-                  onClick={reloadPreview}
+                  onClick={() => reloadPreview()}
                 >
                   <Icon name="refresh" size="small" />
                   {language.t("preview.action.reloadPreview")}
-                </button>
+                </button>*/}
               </div>
             </Show>
           </Show>
