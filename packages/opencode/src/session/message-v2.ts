@@ -30,7 +30,7 @@ import { or } from "drizzle-orm"
 import { MessageTable, PartTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { ProviderError } from "@/provider/error"
 import { iife } from "@/util/iife"
-import { errorMessage } from "@/util/error"
+import { errorMessageWithCause } from "@/util/error"
 import { isMedia, isVideoAttachment } from "@/util/media"
 import type { SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
@@ -718,7 +718,7 @@ export function fromError(
         { cause: e },
       ).toObject()
     case e instanceof Error:
-      return new NamedError.Unknown({ message: errorMessage(e) }, { cause: e }).toObject()
+      return new NamedError.Unknown({ message: errorMessageWithCause(e) }, { cause: e }).toObject()
     default:
       try {
         const parsed = ProviderError.parseStreamError(e)

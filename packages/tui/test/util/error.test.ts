@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { errorData, errorFormat, errorMessage } from "../../src/util/error"
+import { Cause } from "effect"
+import { errorCause, errorData, errorFormat, errorMessage, errorMessageWithCause } from "../../src/util/error"
 
 describe("util.error", () => {
   test("formats native Error instances", () => {
@@ -45,5 +46,36 @@ describe("util.error", () => {
     const data = errorData(err)
     expect(data.message).toBe("ResolveMessage: Cannot resolve module")
     expect(String(data.formatted)).toContain("ResolveMessage")
+  })
+
+  test("appends the cause chain when the message hides it", () => {
+    const err = new Error("Failed to acquire connection", { cause: new Error("timeout exceeded when trying to connect") })
+    expect(errorMessageWithCause(err)).toBe("Failed to acquire connection\nCaused by: timeout exceeded when trying to connect")
+    expect(errorMessage(err)).toBe("Failed to acquire connection")
+  })
+
+  test("unwraps Effect causes so tagged errors keep their reason", () => {
+    const err = Object.assign(new Error("Failed query: select 1\nparams: []"), {
+      cause: Cause.fail(new Error("timeout exceeded when trying to connect")),
+    })
+    expect(errorMessageWithCause(err)).toBe(
+      "Failed query: select 1\nparams: []\nCaused by: timeout exceeded when trying to connect",
+    )
+    expect(errorCause(err)).toBeInstanceOf(Error)
+  })
+
+  test("skips causes that repeat the message", () => {
+    expect(errorMessageWithCause(new Error("boom", { cause: new Error("boom") }))).toBe("boom")
+    expect(errorMessageWithCause(new Error("no cause"))).toBe("no cause")
+  })
+
+  test("keeps walking when a wrapper repeats its message", () => {
+    const root = new Error("timeout exceeded when trying to connect")
+    const reason = Object.assign(new Error("Failed to acquire connection"), { cause: root })
+    const wrapper = Object.assign(new Error("Failed to acquire connection"), { cause: reason })
+    const err = Object.assign(new Error("Failed query: select 1\nparams: []"), { cause: Cause.fail(wrapper) })
+    expect(errorMessageWithCause(err)).toBe(
+      "Failed query: select 1\nparams: []\nCaused by: Failed to acquire connection\nCaused by: timeout exceeded when trying to connect",
+    )
   })
 })

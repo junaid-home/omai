@@ -21,7 +21,7 @@ import { SessionStatus } from "./status"
 import { SessionSummary } from "./summary"
 import type { Provider } from "@/provider/provider"
 import { Question } from "@/question"
-import { errorMessage } from "@/util/error"
+import { errorMessage, errorMessageWithCause } from "@/util/error"
 import { isRecord } from "@/util/record"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
@@ -607,8 +607,8 @@ const layer = Layer.effect(
       const halt = Effect.fn("SessionProcessor.halt")(function* (e: unknown) {
         yield* Effect.logError("process", {
           "session.id": input.sessionID,
-          messageID: input.assistantMessage.id,
-          error: errorMessage(e),
+          messageID: ctx.assistantMessage.id,
+          error: errorMessageWithCause(e),
           stack: e instanceof Error ? e.stack : undefined,
         })
         const error = parse(e)

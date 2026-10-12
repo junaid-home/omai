@@ -16,6 +16,7 @@ import * as SessionExecutionLocal from "@opencode-ai/core/session/execution/loca
 import { locationServiceMapLayer } from "@opencode-ai/core/location-services"
 
 import { NotFoundError } from "@/storage/storage"
+import { errorCause } from "@/util/error"
 import { eq } from "drizzle-orm"
 import { and } from "drizzle-orm"
 import { gte } from "drizzle-orm"
@@ -39,7 +40,7 @@ import { SessionID, MessageID, PartID } from "./schema"
 
 import type { Provider } from "@/provider/provider"
 import { Global } from "@opencode-ai/core/global"
-import { Effect, Layer, Option, Context, Schema, Types } from "effect"
+import { Effect, Layer, Option, Context, Schema, Schedule, Types } from "effect"
 import { NonNegativeInt, optional } from "@opencode-ai/core/schema"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
@@ -659,6 +660,8 @@ const layer: Layer.Layer<
           ),
         )
         .pipe(Database.first)
+        // Transient pool/connection failures are common enough to absorb here rather than fail the turn.
+        .pipe(Effect.retry({ times: 2, schedule: Schedule.spaced("500 millis"), while: isTransientDatabaseError }))
         .pipe(Effect.orDie)
       if (!row) return
       return {
@@ -956,6 +959,13 @@ const cancelBackgroundJobs = Effect.fn("Session.cancelBackgroundJobs")(function*
     { concurrency: "unbounded", discard: true },
   )
 })
+
+/** Connection, timeout and deadlock failures clear on their own; constraint and syntax errors never do. */
+function isTransientDatabaseError(error: unknown): boolean {
+  const cause = errorCause(error)
+  if (typeof cause !== "object" || cause === null || !("isRetryable" in cause)) return false
+  return cause.isRetryable === true
+}
 
 function listByProject(
   db: Database.Interface["db"],

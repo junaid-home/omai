@@ -1,3 +1,4 @@
+import { Cause } from "effect"
 import { isRecord } from "./record"
 
 type ConfigIssue = { message: string; path: string[] }
@@ -142,6 +143,31 @@ export function errorMessage(error: unknown): string {
   const formatted = errorFormat(error)
   if (formatted) return formatted
   return "unknown error"
+}
+
+/** Message plus its cause chain, so wrapped failures (SQL, provider, IO) keep identifying the real reason. */
+export function errorMessageWithCause(error: unknown): string {
+  const messages = [errorMessage(error)]
+  let current: unknown = error
+  for (let depth = 0; depth < 5; depth++) {
+    const cause = errorCause(current)
+    if (cause === undefined) break
+    const message = errorMessage(cause)
+    if (!message) break
+    // Wrappers may repeat their own message while still nesting a deeper cause, so only skip the redundant line.
+    if (!messages.some((known) => known.includes(message))) messages.push(message)
+    current = cause
+  }
+  return messages.join("\nCaused by: ")
+}
+
+/** The immediate underlying failure, unwrapping Effect `Cause` wrappers used by tagged errors. */
+export function errorCause(value: unknown): unknown {
+  if (!isRecord(value)) return undefined
+  const cause = value.cause
+  if (cause === undefined || cause === null) return undefined
+  if (Cause.isCause(cause)) return Cause.hasFails(cause) || Cause.hasDies(cause) ? Cause.squash(cause) : undefined
+  return cause
 }
 
 export function errorData(error: unknown) {
