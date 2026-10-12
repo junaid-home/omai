@@ -376,7 +376,11 @@ export const { use: useVisualEditor, provider: VisualEditorProvider } = createSi
       }
     }
 
+    let attachedDoc: Document | null = null
+    let attachedWin: Window | null = null
+
     function attachListeners(iframe: HTMLIFrameElement) {
+      if (attachedDoc) return
       const doc = getIframeDoc(iframe)
       const win = iframe.contentWindow
       if (!doc || !win) return
@@ -385,11 +389,15 @@ export const { use: useVisualEditor, provider: VisualEditorProvider } = createSi
       doc.addEventListener("click", onClick, true)
       doc.addEventListener("dblclick", onDblClick, true)
       win.addEventListener("keydown", onKeyDown, true)
+      attachedDoc = doc
+      attachedWin = win
     }
 
-    function detachListeners(iframe: HTMLIFrameElement) {
-      const doc = getIframeDoc(iframe)
-      const win = iframe.contentWindow
+    function detachListeners() {
+      const doc = attachedDoc
+      const win = attachedWin
+      attachedDoc = null
+      attachedWin = null
       if (!doc || !win) return
       doc.removeEventListener("mouseover", onMouseOver, true)
       doc.removeEventListener("mouseout", onMouseOut, true)
@@ -649,26 +657,23 @@ export const { use: useVisualEditor, provider: VisualEditorProvider } = createSi
     const setEnabledState = (value: boolean) => {
       setEnabled(value)
       const iframe = iframeRef()
-      if (!iframe) return
       if (value) {
-        if (isIframeReady(iframe)) {
-          attachListeners(iframe)
-        }
+        if (iframe && isIframeReady(iframe)) attachListeners(iframe)
         setupMoveable()
         setupSelecto()
-      } else {
-        detachListeners(iframe)
-        destroyMoveable()
-        destroySelecto()
-        activeHovered = null
-        activeSelected = null
-        batch(() => {
-          setSelectedElement(null)
-          setIsEditing(false)
-          setEditingText("")
-          setHoveredElement(null)
-        })
+        return
       }
+      detachListeners()
+      destroyMoveable()
+      destroySelecto()
+      activeHovered = null
+      activeSelected = null
+      batch(() => {
+        setSelectedElement(null)
+        setIsEditing(false)
+        setEditingText("")
+        setHoveredElement(null)
+      })
     }
 
     function updateMoveableTarget() {
@@ -794,26 +799,29 @@ export const { use: useVisualEditor, provider: VisualEditorProvider } = createSi
       on(iframeRef, (iframe) => {
         if (!iframe) return
         let timer: ReturnType<typeof setInterval> | undefined
-        let listenersAttached = false
-        const cleanup = () => {
+        const stop = () => {
           clearInterval(timer)
           timer = undefined
         }
 
         const tryAttach = () => {
           if (!isIframeReady(iframe)) return false
-          cleanup()
-          if (!listenersAttached && enabled()) {
+          stop()
+          if (enabled()) {
             attachListeners(iframe)
-            listenersAttached = true
+            setupMoveable()
+            setupSelecto()
           }
           return true
         }
 
-        if (!tryAttach()) {
-          timer = setInterval(tryAttach, 200)
-          onCleanup(cleanup)
-        }
+        if (!tryAttach()) timer = setInterval(tryAttach, 200)
+        onCleanup(() => {
+          stop()
+          detachListeners()
+          destroyMoveable()
+          destroySelecto()
+        })
       }),
     )
 
@@ -826,7 +834,7 @@ export const { use: useVisualEditor, provider: VisualEditorProvider } = createSi
           setupMoveable()
           setupSelecto()
         } else {
-          detachListeners(iframe)
+          detachListeners()
           destroyMoveable()
           destroySelecto()
           activeHovered = null
@@ -841,6 +849,14 @@ export const { use: useVisualEditor, provider: VisualEditorProvider } = createSi
         }
       }),
     )
+
+    onCleanup(() => {
+      detachListeners()
+      destroyMoveable()
+      destroySelecto()
+      activeHovered = null
+      activeSelected = null
+    })
 
     return {
       enabled,

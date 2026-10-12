@@ -138,6 +138,7 @@ function LivePreview(props: {
   onCleanup(() => {
     window.removeEventListener("message", handleMessage)
     stopPolling()
+    if (iframe && editor.iframeRef() === iframe) editor.setIframeRef(null)
   })
 
   createEffect(
@@ -246,6 +247,7 @@ function StaticPreview(props: { html: string; nonce: number; onReady: () => void
   onCleanup(() => {
     window.removeEventListener("message", handleMessage)
     stopPolling()
+    if (iframe && editor.iframeRef() === iframe) editor.setIframeRef(null)
   })
 
   return (
@@ -852,15 +854,18 @@ export function PreviewPanel(props: {
   const startPhasePolling = (dir: string) => {
     stopPhasePolling()
     const tick = async () => {
-      const response = await fetch(
-        `${serverSDK().url}/global/preview/status?directory=${encodeURIComponent(dir)}`,
-        { credentials: "include" },
-      ).catch(() => undefined)
+      const response = await fetch(`${serverSDK().url}/global/preview/status?directory=${encodeURIComponent(dir)}`, {
+        credentials: "include",
+      }).catch(() => undefined)
       if (!response?.ok) return
       const body = (await response.json().catch(() => undefined)) as { phase?: string; message?: string } | undefined
       if (!body) return
       const fallback =
-        body.phase === "installing" ? "Installing dependencies…" : body.phase === "starting" ? "Starting dev server…" : ""
+        body.phase === "installing"
+          ? "Installing dependencies…"
+          : body.phase === "starting"
+            ? "Starting dev server…"
+            : ""
       const text = body.message || fallback
       if (text) setPhaseMessage(text)
     }
@@ -1034,9 +1039,7 @@ export function PreviewPanel(props: {
               <div class="w-full h-full flex items-center justify-center bg-background-base">
                 <div class="flex flex-col items-center gap-3">
                   <BrandLogo size="large" class="opacity-30 animate-pulse" />
-                  <div class="text-12-regular text-text-weak">
-                    {phaseMessage() || language.t("preview.starting")}
-                  </div>
+                  <div class="text-12-regular text-text-weak">{phaseMessage() || language.t("preview.starting")}</div>
                 </div>
               </div>
             </Show>
