@@ -738,6 +738,7 @@ export const dict = {
   "error.page.description.localServerStartup": "Yerel sunucu başlatılırken bir hata oluştu.",
   "error.page.details.label": "Hata Detayları",
   "error.page.action.restart": "Yeniden Başlat",
+  "error.page.action.retry": "Yeniden dene",
   "error.page.action.report": "Hatayı Bildir",
   "error.page.action.reported": "Hata Bildirildi",
   "error.page.action.exportLogs": "Günlükleri Dışa Aktar",

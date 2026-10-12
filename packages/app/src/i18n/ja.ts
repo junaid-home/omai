@@ -690,6 +690,7 @@ export const dict = {
   "error.page.description.localServerStartup": "ローカルサーバーの起動中にエラーが発生しました。",
   "error.page.details.label": "エラー詳細",
   "error.page.action.restart": "再起動",
+  "error.page.action.retry": "再試行",
   "error.page.action.report": "エラーを報告",
   "error.page.action.reported": "エラーを報告しました",
   "error.page.action.exportLogs": "ログをエクスポート",

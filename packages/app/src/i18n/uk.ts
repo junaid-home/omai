@@ -749,6 +749,7 @@ export const dict = {
   "error.page.description.localServerStartup": "Під час запуску локального сервера сталася помилка.",
   "error.page.details.label": "Деталі помилки",
   "error.page.action.restart": "Перезапустити",
+  "error.page.action.retry": "Повторити",
   "error.page.action.report": "Повідомити про помилку",
   "error.page.action.reported": "Помилку повідомлено",
   "error.page.action.exportLogs": "Експортувати журнали",

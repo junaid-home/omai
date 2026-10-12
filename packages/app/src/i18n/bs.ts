@@ -736,6 +736,7 @@ export const dict = {
   "error.page.description.localServerStartup": "Došlo je do greške pri pokretanju lokalnog servera.",
   "error.page.details.label": "Detalji greške",
   "error.page.action.restart": "Restartuj",
+  "error.page.action.retry": "Pokušaj ponovo",
   "error.page.action.report": "Prijavi grešku",
   "error.page.action.reported": "Greška prijavljena",
   "error.page.action.exportLogs": "Izvezi logove",

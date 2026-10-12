@@ -734,6 +734,7 @@ export const dict = {
   "error.page.description.localServerStartup": "เกิดข้อผิดพลาดขณะเริ่มเซิร์ฟเวอร์ในเครื่อง.",
   "error.page.details.label": "รายละเอียดข้อผิดพลาด",
   "error.page.action.restart": "รีสตาร์ท",
+  "error.page.action.retry": "ลองอีกครั้ง",
   "error.page.action.report": "รายงานข้อผิดพลาด",
   "error.page.action.reported": "รายงานข้อผิดพลาดแล้ว",
   "error.page.action.exportLogs": "ส่งออกบันทึก",

@@ -734,6 +734,7 @@ export const dict = {
   "error.page.description.localServerStartup": "Der opstod en fejl under start af den lokale server.",
   "error.page.details.label": "Fejldetaljer",
   "error.page.action.restart": "Genstart",
+  "error.page.action.retry": "Forsøg igen",
   "error.page.action.report": "Rapportér fejl",
   "error.page.action.reported": "Fejl rapporteret",
   "error.page.action.exportLogs": "Eksportér logfiler",

@@ -692,6 +692,7 @@ export const dict = {
   "error.page.description.localServerStartup": "Wystąpił błąd podczas uruchamiania serwera lokalnego.",
   "error.page.details.label": "Szczegóły błędu",
   "error.page.action.restart": "Restartuj",
+  "error.page.action.retry": "Ponów próbę",
   "error.page.action.report": "Zgłoś błąd",
   "error.page.action.reported": "Błąd zgłoszony",
   "error.page.action.exportLogs": "Eksportuj dzienniki",

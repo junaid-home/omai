@@ -653,6 +653,7 @@ export const dict = {
   "error.page.description": "Det oppstod en feil under lasting av applikasjonen.",
   "error.page.details.label": "Feildetaljer",
   "error.page.action.restart": "Start på nytt",
+  "error.page.action.retry": "Prøv igjen",
   "error.page.action.report": "Rapporter feil",
   "error.page.action.reported": "Feil rapportert",
   "error.page.action.checking": "Sjekker...",

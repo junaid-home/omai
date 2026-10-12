@@ -1,12 +1,9 @@
 import { TextField } from "@opencode-ai/ui/text-field"
-import * as Sentry from "@sentry/solid"
-import { Logo } from "@opencode-ai/ui/logo"
 import { Button } from "@opencode-ai/ui/button"
-import { Component, createSignal, onMount, Show } from "solid-js"
-import { createStore } from "solid-js/store"
+import { Component, onMount, Show } from "solid-js"
 import { usePlatform } from "@/context/platform"
 import { useLanguage } from "@/context/language"
-import { Icon } from "@opencode-ai/ui/icon"
+import { BrandLogo } from "@/components/brand-logo"
 import { errorDescriptionKey } from "./error-description"
 
 export type InitError = {
@@ -224,9 +221,6 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
   const language = useLanguage()
   const formattedError = () => formatError(props.error, language.t)
   let recordedFatalError: Promise<void> | undefined
-  const [store, setStore] = createStore({
-    actionError: undefined as string | undefined,
-  })
 
   function ensureFatalErrorRecorded() {
     recordedFatalError ??=
@@ -244,128 +238,37 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
     void ensureFatalErrorRecorded().catch(() => undefined)
   })
 
-  async function checkForUpdates() {
-    const state = await platform.updater?.check()
-    setStore("actionError", state?.status === "error" ? state.message : undefined)
-  }
-
-  async function installUpdate() {
-    await platform.updater
-      ?.install()
-      .then(() => setStore("actionError", undefined))
-      .catch((err) => {
-        setStore("actionError", formatError(err, language.t))
-      })
-  }
-
-  const updateVersion = () => {
-    const state = platform.updater?.state()
-    if (state?.status !== "ready") return
-    return state.version
-  }
-
-  async function exportDebugLogs() {
-    const exportLogs = platform.exportDebugLogs
-    if (!exportLogs) return
-    await ensureFatalErrorRecorded()
-      .then(() => exportLogs())
-      .then(() => setStore("actionError", undefined))
-      .catch((err) => {
-        setStore("actionError", formatError(err, language.t))
-      })
-  }
-
   return (
     <div
       class="relative flex-1 h-screen w-screen min-h-0 flex flex-col items-center justify-center font-sans"
       data-tauri-drag-region
     >
-      <div class="w-2/3 max-w-3xl flex flex-col items-center justify-center gap-8">
-        <Logo class="w-58.5 opacity-12 shrink-0" />
+      <div class="w-2/3 max-w-2xl flex flex-col items-center justify-center gap-6">
+        <BrandLogo size="extra-large" class="opacity-70 shrink-0" />
         <div class="flex flex-col items-center gap-2 text-center">
           <h1 class="text-lg font-medium text-text-strong">{language.t("error.page.title")}</h1>
           <p class="text-sm text-text-weak">{language.t(errorDescriptionKey(props.error))}</p>
         </div>
-        <TextField
-          value={formattedError()}
-          readOnly
-          copyable
-          multiline
-          class="max-h-96 w-full font-mono text-xs no-scrollbar"
-          label={language.t("error.page.details.label")}
-          hideLabel
-        />
-        <div class="flex flex-row items-center justify-center gap-3 flex-wrap max-w-64">
-          <Button size="large" onClick={platform.restart}>
-            {language.t("error.page.action.restart")}
-          </Button>
-          <Show when={platform.platform === "desktop" && platform.exportDebugLogs}>
-            <Button size="large" variant="ghost" onClick={exportDebugLogs}>
-              {language.t("error.page.action.exportLogs")}
-            </Button>
-          </Show>
-          <Show when={Sentry.isEnabled}>
-            {(_) => {
-              const [reported, setReported] = createSignal(false)
-              return (
-                <Button
-                  size="large"
-                  disabled={reported()}
-                  onClick={() => {
-                    Sentry.captureException(props.error)
-                    setReported(true)
-                  }}
-                >
-                  {language.t(reported() ? "error.page.action.reported" : "error.page.action.report")}
-                </Button>
-              )
-            }}
-          </Show>
-          <Show when={platform.updater}>
-            <Show
-              when={updateVersion()}
-              fallback={
-                <Button
-                  size="large"
-                  variant="ghost"
-                  onClick={checkForUpdates}
-                  disabled={["checking", "downloading", "installing"].includes(platform.updater?.state().status ?? "")}
-                >
-                  {platform.updater?.state().status === "checking"
-                    ? language.t("error.page.action.checking")
-                    : language.t("error.page.action.checkUpdates")}
-                </Button>
-              }
-            >
-              {(version) => (
-                <Button size="large" onClick={installUpdate}>
-                  {language.t("error.page.action.updateTo", { version: version() })}
-                </Button>
-              )}
-            </Show>
-          </Show>
-        </div>
-        <Show when={store.actionError}>
-          {(message) => <p class="text-xs text-text-danger-base text-center max-w-2xl">{message()}</p>}
+        <Button size="large" onClick={platform.restart}>
+          {language.t("error.page.action.retry")}
+        </Button>
+        <details class="w-full">
+          <summary class="cursor-pointer text-center text-xs text-text-weak">
+            {language.t("error.page.details.label")}
+          </summary>
+          <TextField
+            value={formattedError()}
+            readOnly
+            copyable
+            multiline
+            class="max-h-96 w-full font-mono text-xs no-scrollbar"
+            label={language.t("error.page.details.label")}
+            hideLabel
+          />
+        </details>
+        <Show when={platform.version}>
+          {(version) => <p class="text-xs text-text-weak">{language.t("error.page.version", { version: version() })}</p>}
         </Show>
-        <div class="flex flex-col items-center gap-2">
-          <div class="flex items-center justify-center gap-1">
-            {language.t("error.page.report.prefix")}
-            <button
-              type="button"
-              class="flex items-center text-text-interactive-base gap-1"
-              onClick={() => platform.openLink("https://omai.ch/desktop-feedback")}
-            >
-              <div>{language.t("error.page.report.discord")}</div>
-              <Icon name="discord" class="text-text-interactive-base" />
-            </button>
-          </div>
-          <Show when={platform.version}>
-            {(version) => (
-              <p class="text-xs text-text-weak">{language.t("error.page.version", { version: version() })}</p>
-            )}
-          </Show>
-        </div>
       </div>
     </div>
   )

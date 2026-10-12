@@ -731,6 +731,7 @@ export const dict = {
   "error.page.description.localServerStartup": "启动本地服务器时发生错误。",
   "error.page.details.label": "错误详情",
   "error.page.action.restart": "重启",
+  "error.page.action.retry": "重试",
   "error.page.action.report": "上报错误",
   "error.page.action.reported": "错误已上报",
   "error.page.action.exportLogs": "导出日志",
