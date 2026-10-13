@@ -20,6 +20,11 @@ export const maxBytes = 8 * 1024 * 1024
 // have a live capability, so cleanup never invalidates an active preview.
 export const retentionMs = 24 * 60 * 60 * 1000
 const writes = Semaphore.makeUnsafe(1)
+const snapshots = new Map<string, string>()
+
+export function snapshotFile(id: string): string | undefined {
+  return snapshots.get(id)
+}
 
 export const write = Effect.fn("StaticPreview.write")((directory: string, html: string) =>
   Effect.tryPromise({
@@ -34,14 +39,17 @@ export const write = Effect.fn("StaticPreview.write")((directory: string, html: 
         const file = path.join(root, entry.name)
         const info = await lstat(file)
         if (!info.isFile() || info.isSymbolicLink()) throw new SnapshotError(503, "Preview snapshot storage is invalid")
-        if (info.mtimeMs + retentionMs < Date.now()) await rm(file)
-        else active++
+        if (info.mtimeMs + retentionMs < Date.now()) {
+          await rm(file)
+          snapshots.delete(entry.name.slice(0, -5))
+        } else active++
       }
       if (active >= maxSnapshots)
         throw new SnapshotError(429, "Preview snapshot quota reached; retry after existing snapshots expire")
       const id = randomUUID()
       const file = await CentralStorage.resolveWorkspace(path.join(root, `${id}.html`))
       await writeFile(file, html, { flag: "wx", mode: 0o600 })
+      snapshots.set(id, file)
       return { id, file }
     },
     catch: (cause) =>

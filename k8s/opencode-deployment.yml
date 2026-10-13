@@ -162,6 +162,8 @@ spec:
               value: "https://preview.omai.ch"
             - name: OPENCODE_PREVIEW_PORT
               value: "4097"
+            - name: OPENCODE_PREVIEW_PUBLIC
+              value: "1"
 
             - name: OPENCODE_DATA_KEY
               valueFrom:

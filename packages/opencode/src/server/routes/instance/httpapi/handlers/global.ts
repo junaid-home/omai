@@ -330,6 +330,13 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
           if (isolated) {
             const principal = yield* Authentication.Current
             if (!principal) return HttpServerResponse.empty({ status: 401 })
+            if (isolated.public) {
+              const url = `${isolated.origin}/global/preview/proxy/${status.port}`
+              return HttpServerResponse.jsonUnsafe(
+                { success: true, url, framework: start.result.framework },
+                { headers: { "Cache-Control": "no-store" } },
+              )
+            }
             const grant = yield* previews
               .issue({
                 userID: principal.userID,
@@ -367,6 +374,12 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
               { error: snapshot.failure.message },
               { status: snapshot.failure.status },
             )
+          if (isolated.public) {
+            return HttpServerResponse.jsonUnsafe(
+              { url: `${isolated.origin}/static/${snapshot.success.id}/` },
+              { headers: { "Cache-Control": "no-store" } },
+            )
+          }
           const grant = yield* previews
             .issue({
               userID: principal.userID,

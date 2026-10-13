@@ -14,6 +14,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { PreviewHttp } from "../../src/preview/http"
+import { StaticPreview } from "../../src/preview/static"
 import { testEffect } from "../lib/effect"
 
 const environment = new Map<string, string | undefined>()
@@ -125,6 +126,34 @@ describe("dedicated preview HTTP listener", () => {
         .set({ time_revoked: Date.now() })
         .where(eq(AuthSessionTable.id, preview.sessionID))
       expect((yield* get(preview.root, { cookie })).status).toBe(401)
+    }),
+  )
+})
+
+describe("dedicated preview HTTP listener in public mode", () => {
+  const publicEnvironment = new Map<string, string | undefined>()
+  beforeEach(() => {
+    process.env.OPENCODE_PREVIEW_PUBLIC = "1"
+  })
+  afterEach(() => {
+    delete process.env.OPENCODE_PREVIEW_PUBLIC
+    publicEnvironment.clear()
+  })
+
+  it.live("serves a snapshot with no ticket and no cookie", () =>
+    Effect.gen(function* () {
+      const directory = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "omai-preview-public-"))),
+        (root) => Effect.promise(() => rm(root, { recursive: true, force: true })),
+      )
+      const snapshot = yield* StaticPreview.write(
+        directory,
+        "<html><head></head><body><h1>Public preview</h1></body></html>",
+      )
+      const page = yield* get(`/static/${snapshot.id}/`)
+      expect(page.status).toBe(200)
+      expect(yield* page.text).toContain("Public preview")
+      expect((yield* get(`/static/00000000-0000-0000-0000-000000000000/`)).status).toBe(404)
     }),
   )
 })

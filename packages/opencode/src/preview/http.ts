@@ -9,6 +9,7 @@ import path from "node:path"
 import mime from "mime-types"
 import { previewProxyResponse, previewProxyTarget, proxyBase, rewritePreviewHtml } from "@/server/preview-proxy"
 import { websocket } from "@/server/routes/instance/httpapi/middleware/proxy"
+import { StaticPreview } from "./static"
 import { previewDirectoryForPort, touchDevServer } from "./server"
 import { visualBridgeScript } from "./visual-bridge"
 
@@ -31,7 +32,8 @@ export function config() {
   }
   const port = Number(process.env.OPENCODE_PREVIEW_PORT ?? "4097")
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid OPENCODE_PREVIEW_PORT")
-  return { origin: url.origin, port }
+  const publicPreview = process.env.OPENCODE_PREVIEW_PUBLIC === "1"
+  return { origin: url.origin, port, public: publicPreview }
 }
 
 function cookie(request: HttpServerRequest.HttpServerRequest, name: string) {
@@ -115,6 +117,36 @@ export const routes = HttpRouter.use((router) =>
         const origin = request.headers.origin
         if (origin && origin !== selected.origin && origin !== parent) return HttpServerResponse.empty({ status: 403 })
         if (request.method === "OPTIONS") return HttpServerResponse.empty({ status: 204 })
+        const serve = (directory: string, refreshCookie?: string) =>
+          Effect.gen(function* () {
+            if (target) {
+              touchDevServer(directory)
+              if (request.headers.upgrade?.toLowerCase() === "websocket") {
+                return yield* websocket(request, `http://localhost:${port}${target.path}`)
+              }
+            }
+            const storage = yield* Effect.tryPromise(() => CentralStorage.resolveWorkspace(directory)).pipe(
+              Effect.option,
+            )
+            if (Option.isNone(storage)) return HttpServerResponse.empty({ status: 503 })
+            const response = target
+              ? yield* previewProxyResponse(client, request, target, bridge)
+              : yield* staticResponse(directory, decodeURIComponent(staticID![2]), bridge)
+            const headers: Record<string, string> = {
+              "Cache-Control": "no-store",
+              "Referrer-Policy": "no-referrer",
+              "Content-Security-Policy": `frame-ancestors ${parent}`,
+              "X-Content-Type-Options": "nosniff",
+              "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+            }
+            if (refreshCookie) headers["Set-Cookie"] = refreshCookie
+            return HttpServerResponse.setHeaders(response, headers)
+          })
+        if (selected.public) {
+          const directory = staticID ? StaticPreview.snapshotFile(staticID[1]) : previewDirectoryForPort(port)
+          if (!directory) return HttpServerResponse.empty({ status: 404 })
+          return yield* serve(directory)
+        }
         const tickets = url.searchParams.getAll("ticket")
         if (tickets.length) {
           if (request.method !== "GET" || tickets.length !== 1) return HttpServerResponse.empty({ status: 400 })
@@ -140,28 +172,7 @@ export const routes = HttpRouter.use((router) =>
           return HttpServerResponse.empty({ status: 403 })
         if (target && previewDirectoryForPort(port) !== grant.directory)
           return HttpServerResponse.empty({ status: 404 })
-        // Bridge dev-server HMR WebSockets on the dedicated preview origin.
-        if (target) {
-          touchDevServer(grant.directory)
-          if (request.headers.upgrade?.toLowerCase() === "websocket") {
-            return yield* websocket(request, `http://localhost:${port}${target.path}`)
-          }
-        }
-        const storage = yield* Effect.tryPromise(() => CentralStorage.resolveWorkspace(grant.directory)).pipe(
-          Effect.option,
-        )
-        if (Option.isNone(storage)) return HttpServerResponse.empty({ status: 503 })
-        const response = target
-          ? yield* previewProxyResponse(client, request, target, bridge)
-          : yield* staticResponse(grant.directory, decodeURIComponent(staticID![2]), bridge)
-        return HttpServerResponse.setHeaders(response, {
-          "Set-Cookie": setCookie(name, token!, base, grant.expiresAt),
-          "Cache-Control": "no-store",
-          "Referrer-Policy": "no-referrer",
-          "Content-Security-Policy": `frame-ancestors ${parent}`,
-          "X-Content-Type-Options": "nosniff",
-          "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
-        })
+        return yield* serve(grant.directory, setCookie(name, token!, base, grant.expiresAt))
       }).pipe(
         Effect.provideService(HttpServerRequest.MaxBodySize, FileSystem.Size(16 * 1024 * 1024)),
         Effect.catch(() => Effect.succeed(HttpServerResponse.empty({ status: 503 }))),
