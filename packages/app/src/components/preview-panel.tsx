@@ -36,6 +36,7 @@ function LivePreview(props: {
   nav?: () => { url: string; nonce: number } | null
   onIframeLoaded?: () => void
   onUrlChange?: (url: string) => void
+  onPages?: (urls: string[]) => void
 }) {
   let iframe: HTMLIFrameElement | undefined
   let initialUrl = props.url
@@ -85,7 +86,17 @@ function LivePreview(props: {
   }
 
   const handleMessage = (e: MessageEvent) => {
-    if (e.source !== iframe?.contentWindow || e.data?.type !== "preview-ready") return
+    if (e.source !== iframe?.contentWindow || !e.data || typeof e.data.type !== "string") return
+    // The visual bridge inside the preview reports discovered links. The parent
+    // cannot scrape the document when the preview runs on its dedicated origin.
+    if (e.data.type === "omai:preview:pages") {
+      if (centralRuntime.get().mode === "central" && e.origin !== new URL(props.url).origin) return
+      if (!Array.isArray(e.data.urls)) return
+      const urls = e.data.urls.filter((u: unknown): u is string => typeof u === "string" && u.length <= 2048).slice(0, 200)
+      if (urls.length) props.onPages?.(urls)
+      return
+    }
+    if (e.data.type !== "preview-ready") return
     if (centralRuntime.get().mode === "central") {
       if (e.origin !== new URL(props.url).origin || typeof e.data.url !== "string") return
       const received = new URL(e.data.url)
@@ -705,6 +716,7 @@ export function PreviewPanel(props: {
     reload: (path?: string) => void
     getIframe?: () => HTMLIFrameElement | undefined
     onLoad?: () => void
+    onPages?: (urls: string[]) => void
   }
 }) {
   const file = useFile()
@@ -1020,6 +1032,9 @@ export function PreviewPanel(props: {
                     onIframeLoaded={() => setIframeLoaded((n) => n + 1)}
                     onUrlChange={(url) => {
                       props.onUrlChange?.(url)
+                    }}
+                    onPages={(urls) => {
+                      props.control?.onPages?.(urls)
                     }}
                   />
                 </Show>

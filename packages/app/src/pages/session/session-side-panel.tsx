@@ -193,11 +193,13 @@ export function SessionSidePanel(props: {
     reload: (path?: string) => void
     getIframe: () => HTMLIFrameElement | undefined
     onLoad: () => void
+    onPages: (urls: string[]) => void
   } = {
     navigate: () => {},
     reload: () => {},
     getIframe: () => undefined,
     onLoad: () => {},
+    onPages: () => {},
   }
   const sync = useSync()
   const [discoveredPages, setDiscoveredPages] = createSignal<Array<{ route: string }>>([])
@@ -349,6 +351,40 @@ export function SessionSidePanel(props: {
 
   onCleanup(stopRouteSync)
 
+  const adoptPages = (pages: Array<{ route: string }>) => {
+    const existing = new Map(discoveredPages().map((p) => [p.route, p]))
+    for (const p of pages) existing.set(p.route, p)
+    const merged = [...existing.values()]
+    merged.sort((a, b) => {
+      if (a.route === "/") return -1
+      if (b.route === "/") return 1
+      return a.route.localeCompare(b.route)
+    })
+    setDiscoveredPages(merged)
+  }
+
+  // The visual bridge reports absolute links from inside the preview document.
+  // This is the only discovery path on prod, where the preview runs on a
+  // dedicated origin and iframe.contentDocument is unreadable here.
+  const adoptDiscoveredUrls = (urls: string[]) => {
+    const originVal = origin()
+    const seen = new Set<string>()
+    const pages: Array<{ route: string }> = []
+    for (const raw of urls) {
+      try {
+        const url = new URL(raw)
+        if (url.protocol !== "http:" && url.protocol !== "https:") continue
+        if (originVal && url.origin !== originVal) continue
+        const path = toRoutePath(url.pathname)
+        if (!path) continue
+        if (seen.has(path)) continue
+        seen.add(path)
+        pages.push({ route: path })
+      } catch {}
+    }
+    if (pages.length) adoptPages(pages)
+  }
+
   const scrapeLinks = () => {
     const iframe = previewControl.getIframe()
     if (!iframe) return
@@ -379,15 +415,7 @@ export function SessionSidePanel(props: {
           pages.push({ route: path })
         } catch {}
       }
-      const existing = new Map(discoveredPages().map((p) => [p.route, p]))
-      for (const p of pages) existing.set(p.route, p)
-      const merged = [...existing.values()]
-      merged.sort((a, b) => {
-        if (a.route === "/") return -1
-        if (b.route === "/") return 1
-        return a.route.localeCompare(b.route)
-      })
-      setDiscoveredPages(merged)
+      adoptPages(pages)
       setupLinkObserver(iframe)
     } catch {}
   }
@@ -414,6 +442,7 @@ export function SessionSidePanel(props: {
   previewControl.onLoad = () => {
     setTimeout(scrapeLinks, 500)
   }
+  previewControl.onPages = adoptDiscoveredUrls
 
   // Refresh the preview whenever the agent finishes responding to a prompt, so
   // file changes made during the turn are picked up by the dev server. Reload

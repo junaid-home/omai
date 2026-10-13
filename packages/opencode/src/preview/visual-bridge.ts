@@ -64,6 +64,41 @@ const source = String.raw`function(parentOrigin) {
     if (!channel) return;
     parent.postMessage(Object.assign({ type:type, channel:channel }, payload), parentOrigin);
   }
+  // Page discovery. The parent cannot read this document when the preview runs on
+  // its dedicated origin, so the bridge reports same-origin links directly. It
+  // must not depend on the visual-editor channel: discovery has to work with the
+  // visual editor off.
+  function pages() {
+    var seen = {};
+    var list = [];
+    var links = document.querySelectorAll("a[href]");
+    for (var i = 0; i < links.length && list.length < 200; i++) {
+      var href = links[i].getAttribute("href");
+      if (!href || href.length > 2048) continue;
+      try {
+        var url = new URL(href, location.href);
+        if (url.origin !== location.origin) continue;
+        var key = url.pathname + url.search;
+        if (seen[key]) continue;
+        seen[key] = true;
+        list.push(url.href);
+      } catch {}
+    }
+    return list;
+  }
+  var pagesSignature = "";
+  var pagesTimer = null;
+  function publishPages() {
+    var list = pages();
+    var signature = list.join("\n");
+    if (signature === pagesSignature) return;
+    pagesSignature = signature;
+    parent.postMessage({ type:"omai:preview:pages", urls:list }, parentOrigin);
+  }
+  function schedulePages() {
+    if (pagesTimer) return;
+    pagesTimer = setTimeout(function() { pagesTimer = null; publishPages(); }, 500);
+  }
   function snapshot() {
     draw();
     send("omai:visual:state", { selected:info(selected), hovered:info(hovered), isEditing:editing, inlineEditing:inline, editingText:editingText, changes:changes });
@@ -259,4 +294,6 @@ const source = String.raw`function(parentOrigin) {
   window.addEventListener("resize", draw);
   setInterval(function() { if (enabled && selected) snapshot(); }, 300);
   parent.postMessage({ type:"preview-ready", url:location.href }, parentOrigin);
+  publishPages();
+  new MutationObserver(schedulePages).observe(document.documentElement, { childList:true, subtree:true });
 }`
