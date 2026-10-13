@@ -228,9 +228,6 @@ spec:
                 secretKeyRef:
                   name: omai-cloudflare-credentials
                   key: CLOUDFLARE_ACCOUNT_ID
-
-            - name: BUN_JSC_forceRAMSize
-              value: "3221225472"
           resources:
             requests:
               memory: "4Gi"
