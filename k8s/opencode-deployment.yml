@@ -147,6 +147,8 @@ spec:
               value: "opencode"
             - name: OPENCODE_DATABASE_POOL_SIZE
               value: "24"
+            - name: OPENCODE_DATABASE_CONNECT_TIMEOUT
+              value: "60"
             - name: OPENCODE_INSTANCE_ID
               value: omai_k8s_central
 
