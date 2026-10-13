@@ -8,9 +8,8 @@ import { open } from "node:fs/promises"
 import path from "node:path"
 import mime from "mime-types"
 import { previewProxyResponse, previewProxyTarget, proxyBase, rewritePreviewHtml } from "@/server/preview-proxy"
-import { websocket } from "@/server/routes/instance/httpapi/middleware/proxy"
 import { StaticPreview } from "./static"
-import { previewDirectoryForPort, touchDevServer } from "./server"
+import { previewDirectoryForPort } from "./server"
 import { visualBridgeScript } from "./visual-bridge"
 
 export function config() {
@@ -119,12 +118,6 @@ export const routes = HttpRouter.use((router) =>
         if (request.method === "OPTIONS") return HttpServerResponse.empty({ status: 204 })
         const serve = (directory: string, refreshCookie?: string) =>
           Effect.gen(function* () {
-            if (target) {
-              touchDevServer(directory)
-              if (request.headers.upgrade?.toLowerCase() === "websocket") {
-                return yield* websocket(request, `http://localhost:${port}${target.path}`)
-              }
-            }
             const storage = yield* Effect.tryPromise(() => CentralStorage.resolveWorkspace(directory)).pipe(
               Effect.option,
             )

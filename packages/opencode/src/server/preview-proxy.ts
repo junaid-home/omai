@@ -18,21 +18,9 @@ export function proxyBase(port: number): string {
 }
 
 // Rebase absolute-path asset URLs (e.g. Vite's `/@vite/client`, `/src/main.tsx`)
-// onto the preview proxy path and anchor relative URLs with a <base> tag. Inline
-// module scripts and styles are rewritten too: a <base> tag does not affect
-// root-absolute specifiers inside inline code or CSS, so `import "/@react-refresh"`
-// or `url(/asset.png)` would otherwise resolve against the origin root and bypass
-// the proxy.
+// onto the preview proxy path and anchor relative URLs with a <base> tag.
 export function rewritePreviewHtml(body: string, base: string): string {
   let html = body.replace(/(\b(?:src|href)=")\/(?!\/)/g, (_m, prefix) => `${prefix}${base}`)
-  html = html.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (match, attrs: string, code: string) => {
-    if (!code || !/\btype\s*=\s*["']module["']/i.test(attrs)) return match
-    return `<script${attrs}>${rewritePreviewModule(code, base)}</script>`
-  })
-  html = html.replace(/<style\b([^>]*)>([\s\S]*?)<\/style>/gi, (match, attrs: string, css: string) => {
-    if (!css || !/url\(\s*["']?\//.test(css)) return match
-    return `<style${attrs}>${css.replace(/url\(\s*(["']?)\/(?!\/)/g, `url($1${base}`)}</style>`
-  })
   if (!/<base\b/i.test(html)) {
     const withBase = html.replace(/<head([^>]*)>/i, (m, attrs) => `<head${attrs}><base href="${base}">`)
     html = withBase === html ? `<base href="${base}">` + html : withBase
@@ -47,25 +35,11 @@ export function rewritePreviewHtml(body: string, base: string): string {
 // Only module-specifier positions are touched (`from`, `import`, `import(`,
 // `new URL(..., import.meta.url)`) so ordinary string literals like client-side
 // route paths are left alone.
-function rewritePreviewModule(body: string, base: string, modulePath?: string): string {
-  const rewritten = body
+function rewritePreviewModule(body: string, base: string): string {
+  return body
     .replace(/(\bfrom\s*["'])\/(?!\/)/g, `$1${base}`)
     .replace(/(\bimport\s*(?:\(\s*)?["'])\/(?!\/)/g, `$1${base}`)
     .replace(/(\bnew\s+URL\s*\(\s*["'])\/(?!\/)/g, `$1${base}`)
-  return /^\/@vite\/client(?:[?#]|$)/.test(modulePath ?? "") ? rewriteViteHmrSocket(rewritten, base) : rewritten
-}
-
-// Vite derives its HMR socket host from `import.meta.url` but drops the path,
-// so the default client dials the main origin root (`ws://host:port/`) and never
-// reaches the proxy prefix. Point both the primary and direct-fallback sockets at
-// the proxy base so HMR works even when the browser cannot reach the dev-server
-// port directly (remote/central). Version-defensive: if the injected client
-// shape changes, leave it untouched and Vite's own fallback still applies.
-function rewriteViteHmrSocket(body: string, base: string) {
-  return body
-    .replace(/const socketHost = `[^`]*`;/, `const socketHost = \`$\{location.host}${base}\`;`)
-    .replace(/const directSocketHost = "[^"]*";/, `const directSocketHost = \`$\{location.host}${base}\`;`)
-    .replace(/const base = [^;]*;/, `const base = ${JSON.stringify(base)};`)
 }
 
 // Preview proxy requests run inside the HttpApi app (short-circuiting the UI
@@ -73,9 +47,8 @@ function rewriteViteHmrSocket(body: string, base: string) {
 // callback only handles paths the app never sees. HTML/JS payloads are buffered
 // and rewritten so absolute asset URLs resolve through the proxy path; everything
 // else streams through untouched. Nothing may be cached: preview ports are stable
-// but their content changes on every edit. Dev-server HMR WebSockets are bridged
-// at the router middleware and, for Vite, the client is rewritten to dial the
-// proxy base instead of the main origin root. Preview
+// but their content changes on every edit, and there is no HMR/websocket
+// bridging — a manual refresh of the preview picks up the latest build. Preview
 // dev servers gzip responses, but the app's fetch-based HttpClient transparently
 // decompresses those bodies (while leaving `content-encoding` behind), so the
 // buffered bytes are always plain text; the stale encoding/framing headers are
@@ -110,7 +83,7 @@ export function previewProxyResponse(
           (bridge
             ? `<script id="omai-visual-bridge" data-omai-visual-bridge>${bridge.replace(/<\/script/gi, "<\\/script")}</script>`
             : "")
-        : rewritePreviewModule(body.toString("utf8"), base, target.path)
+        : rewritePreviewModule(body.toString("utf8"), base)
       const headers = new Headers(response.headers as HeadersInit)
       headers.delete("set-cookie")
       headers.delete("clear-site-data")

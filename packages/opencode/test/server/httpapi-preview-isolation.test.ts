@@ -9,7 +9,6 @@ import { afterEach, beforeEach, describe, expect } from "bun:test"
 import { eq } from "drizzle-orm"
 import { Effect, Layer } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpRouter } from "effect/unstable/http"
-import * as Socket from "effect/unstable/socket/Socket"
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -40,7 +39,6 @@ const it = testEffect(
     Layer.provideMerge(PreviewCapability.layer),
     Layer.provideMerge(InstanceStateStore.layerFromKey(InstanceStateEncryption.keyFromEnvironment())),
     Layer.provideMerge(Database.layerFromConfig(Database.configFromEnvironment())),
-    Layer.provide(Socket.layerWebSocketConstructorGlobal),
   ),
 )
 const get = (url: string, headers: Record<string, string> = {}) =>

@@ -28,6 +28,18 @@ export function setPreviewUrl(directory: string, url: string): void {
 export function usePreviewLifecycle(directory: () => string) {
   const serverSDK = useServerSDK()
 
+  const stopServer = async (dir: string) => {
+    if (!dir) return
+    const refs = (activeSessions.get(dir) ?? 1) - 1
+    activeSessions.set(dir, refs)
+    if (refs > 0) return
+    activeSessions.delete(dir)
+    previewUrls.delete(dir)
+    try {
+      await serverSDK().client.global.preview.stop({ directory: dir })
+    } catch {}
+  }
+
   const startServer = async (dir: string) => {
     if (!dir) return
     const refs = (activeSessions.get(dir) ?? 0) + 1
@@ -42,18 +54,6 @@ export function usePreviewLifecycle(directory: () => string) {
     } catch {}
   }
 
-  const releaseServer = async (dir: string) => {
-    if (!dir) return
-    const refs = (activeSessions.get(dir) ?? 0) - 1
-    activeSessions.set(dir, Math.max(0, refs))
-    if (refs > 0) return
-    activeSessions.delete(dir)
-    previewUrls.delete(dir)
-    try {
-      await serverSDK().client.global.preview.stop({ directory: dir })
-    } catch {}
-  }
-
   onMount(() => {
     startServer(directory())
     const dir = directory()
@@ -63,26 +63,28 @@ export function usePreviewLifecycle(directory: () => string) {
         .client.global.preview.heartbeat({ directory: dir })
         .catch(() => {})
     }, HEARTBEAT_INTERVAL_MS)
-    // Let this interval live across navigations but get cleared on cleanup.
-    heartbeat.unref?.()
     onCleanup(() => clearInterval(heartbeat))
   })
 
   onCleanup(() => {
-    releaseServer(directory())
+    stopServer(directory())
   })
 
   if (typeof window !== "undefined") {
     const dir = directory()
     const handler = () => {
-      if (dir) releaseServer(dir)
+      if (dir) stopServer(dir)
     }
-    // bfcache/navigation away: signal release (graceful); restart on return.
     window.addEventListener("pagehide", handler)
     window.addEventListener("beforeunload", handler)
     onCleanup(() => {
       window.removeEventListener("pagehide", handler)
       window.removeEventListener("beforeunload", handler)
     })
+  }
+
+  return {
+    start: () => startServer(directory()),
+    stop: () => stopServer(directory()),
   }
 }

@@ -9,7 +9,6 @@ import { Authentication } from "@opencode-ai/core/authentication"
 import { PreviewHttp } from "@/preview/http"
 import { ConfigProvider, Context, Effect, Exit, Layer, Scope } from "effect"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
-import * as Socket from "effect/unstable/socket/Socket"
 import { OpenApi } from "effect/unstable/httpapi"
 import { createServer } from "node:http"
 import { MDNS } from "./mdns"
@@ -139,7 +138,6 @@ function startListener(opts: ListenOptions, port: number) {
             // Listener routers are mutable registries; only application services share the memo map.
             Layer.fresh,
             Layer.provide(AppNodeBuilder.build(LayerNode.group([PreviewCapability.node, httpClient]))),
-            Layer.provide(Socket.layerWebSocketConstructorGlobal),
             Layer.provideMerge(serverLayer({ port: preview.port, hostname: opts.hostname })),
           ),
           memo,

@@ -510,33 +510,6 @@ describe("HttpApi preview proxy", () => {
     }),
   )
 
-  it.live("rewrites inline module scripts and styles onto the proxy path", () =>
-    Effect.gen(function* () {
-      const html =
-        '<html><head><script type="module">import "/@react-refresh"; import x from "/src/main.js"</script>' +
-        "<style>.a{background:url(/img/bg.png)}</style></head><body></body></html>"
-      const client = HttpClient.make((request) =>
-        Effect.succeed(
-          HttpClientResponse.fromWeb(
-            request,
-            new Response(html, { headers: { "content-type": "text/html" } }),
-          ),
-        ),
-      )
-
-      const response = yield* previewProxyResponse(
-        client,
-        HttpServerRequest.fromWeb(new Request("http://localhost/global/preview/proxy/60244")),
-        { port: 60244, path: "/" },
-      ).pipe(Effect.map(HttpServerResponse.toWeb))
-
-      const body = yield* responseText(response)
-      expect(body).toContain('import "/global/preview/proxy/60244/@react-refresh"')
-      expect(body).toContain('from "/global/preview/proxy/60244/src/main.js"')
-      expect(body).toContain("url(/global/preview/proxy/60244/img/bg.png)")
-    }),
-  )
-
   // The fetch-based HttpClient decompresses upstream gzip transparently but
   // leaves `content-encoding: gzip` behind; the buffered body is already plain
   // text, so the proxy must not try to gunzip it again. Upstream framing

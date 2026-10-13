@@ -8,7 +8,6 @@ import { useSDK } from "@/context/sdk"
 import { useLanguage } from "@/context/language"
 import { useCommand } from "@/context/command"
 import { loadPreviewHtml } from "@/components/preview-helpers"
-import { Icon } from "@opencode-ai/ui/icon"
 import { getPreviewUrl, setPreviewUrl, normalizePreviewUrl } from "@/context/preview-lifecycle"
 import { BrandLogo } from "@/components/brand-logo"
 import { useVisualEditor } from "@/context/visual-editor"
@@ -725,7 +724,6 @@ export function PreviewPanel(props: {
   )
 
   const [state, setState] = createSignal<PreviewState>({ type: "idle" })
-  const [phaseMessage, setPhaseMessage] = createSignal("")
   const [liveReloadKey, setLiveReloadKey] = createSignal(0)
   const [externalNav, setExternalNav] = createSignal<{ url: string; nonce: number } | null>(null)
   const [iframeReady, setIframeReady] = createSignal(false)
@@ -782,7 +780,6 @@ export function PreviewPanel(props: {
 
   onCleanup(() => {
     containerObserver?.disconnect()
-    stopPhasePolling()
     if (!props.control) return
     props.control.navigate = () => {}
     props.control.reload = () => {}
@@ -826,55 +823,12 @@ export function PreviewPanel(props: {
     return s.type === "static" ? s.html : undefined
   })
   const showError = () => state().type === "error"
-  const errorMessage = createMemo(() => {
-    const s = state()
-    return s.type === "error" ? s.message : ""
-  })
-
-  let phaseTimer: ReturnType<typeof setInterval> | undefined
-  const stopPhasePolling = () => {
-    if (phaseTimer) clearInterval(phaseTimer)
-    phaseTimer = undefined
-  }
-  // The server exposes an install/start phase so a slow first run (installing
-  // dependencies) shows progress instead of a static "Starting preview…".
-  const startPhasePolling = (dir: string) => {
-    stopPhasePolling()
-    const tick = async () => {
-      const response = await fetch(`${serverSDK().url}/global/preview/status?directory=${encodeURIComponent(dir)}`, {
-        credentials: "include",
-      }).catch(() => undefined)
-      if (!response?.ok) return
-      const body = (await response.json().catch(() => undefined)) as { phase?: string; message?: string } | undefined
-      if (!body) return
-      const fallback =
-        body.phase === "installing"
-          ? "Installing dependencies…"
-          : body.phase === "starting"
-            ? "Starting dev server…"
-            : ""
-      const text = body.message || fallback
-      if (text) setPhaseMessage(text)
-    }
-    void tick()
-    phaseTimer = setInterval(tick, 1000)
-  }
 
   const startPreview = async () => {
     const dir = directory()
     if (!dir) return
     setState({ type: "loading" })
     setIframeReady(false)
-    setPhaseMessage("")
-    startPhasePolling(dir)
-
-    // A failed dev server only falls back to the raw index.html when the server
-    // says that fallback is meaningful (static sites). Framework projects would
-    // otherwise show a blank SPA shell instead of the real start error.
-    const fail = (message: string, fallback: unknown) => {
-      if (fallback) return tryStaticPreview()
-      setState({ type: "error", message })
-    }
 
     try {
       const result = await serverSDK().client.global.preview.start({ directory: dir })
@@ -889,64 +843,45 @@ export function PreviewPanel(props: {
         setState({ type: "live", url: joinPreviewPath(url, path) })
         return
       }
-      const body = data ?? (result as any).error
-      if (body && typeof body.error === "string") {
-        await fail(body.error, body.fallback)
+      if (data?.error) {
+        setState({ type: "error", message: data.error })
         return
       }
       await tryStaticPreview()
-    } catch (err) {
-      // The SDK throws on 400 because it is configured with throwOnError; the
-      // server's start-failure body survives on `cause.body`.
-      const body = (err as { cause?: { body?: unknown } } | undefined)?.cause?.body
-      const failure = body && typeof body === "object" ? (body as { error?: unknown; fallback?: unknown }) : undefined
-      if (failure && typeof failure.error === "string") {
-        await fail(failure.error, failure.fallback)
-        return
-      }
+    } catch {
       await tryStaticPreview()
-    } finally {
-      stopPhasePolling()
     }
   }
 
   const tryStaticPreview = async () => {
     try {
       await file.load("index.html", { force: true })
-    } catch {
-      setState({
-        type: "error",
-        message: "The dev server failed to start and this project has no index.html to fall back to.",
-      })
-      return
-    }
-    const html = await loadPreviewHtml(file)
-    if (!html) {
-      setState({ type: "error", message: "The dev server failed to start and index.html could not be read." })
-      return
-    }
-    if (centralRuntime.get().mode === "central") {
-      try {
-        const response = await fetch(`${serverSDK().url}/global/preview/static`, {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ directory: directory(), html }),
-          signal: AbortSignal.timeout(30_000),
-        })
-        if (!response.ok) throw new Error(`The static preview could not be created (HTTP ${response.status}).`)
-        const result: unknown = await response.json()
-        if (!result || typeof result !== "object" || !("url" in result) || typeof result.url !== "string")
-          throw new Error("The static preview returned an invalid address.")
-        if (new URL(result.url, location.href).origin === location.origin)
-          throw new Error("The preview must use a separate origin.")
-        setState({ type: "live", url: result.url })
-      } catch (error) {
-        setState({ type: "error", message: error instanceof Error ? error.message : "Failed to load preview." })
+      const html = await loadPreviewHtml(file)
+      if (html) {
+        if (centralRuntime.get().mode === "central") {
+          const response = await fetch(`${serverSDK().url}/global/preview/static`, {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ directory: directory(), html }),
+            signal: AbortSignal.timeout(30_000),
+          })
+          if (!response.ok) throw new Error("The isolated static preview could not be created.")
+          const result: unknown = await response.json()
+          if (!result || typeof result !== "object" || !("url" in result) || typeof result.url !== "string")
+            throw new Error("Invalid isolated preview address.")
+          if (new URL(result.url, location.href).origin === location.origin)
+            throw new Error("The preview must use a separate origin.")
+          setState({ type: "live", url: result.url })
+          return
+        }
+        setState({ type: "static", html })
+      } else {
+        setState({ type: "error", message: "no preview" })
       }
-      return
+    } catch {
+      setState({ type: "error", message: "load failed" })
     }
-    setState({ type: "static", html })
   }
 
   // The path of the page currently open in the preview, relative to the preview
@@ -1048,7 +983,7 @@ export function PreviewPanel(props: {
               <div class="w-full h-full flex items-center justify-center bg-background-base">
                 <div class="flex flex-col items-center gap-3">
                   <BrandLogo size="large" class="opacity-30 animate-pulse" />
-                  <div class="text-12-regular text-text-weak">{phaseMessage() || language.t("preview.starting")}</div>
+                  <div class="text-12-regular text-text-weak">{language.t("preview.starting")}</div>
                 </div>
               </div>
             </Show>
@@ -1094,21 +1029,8 @@ export function PreviewPanel(props: {
               </div>
             </div>
             <Show when={showError()}>
-              <div class="w-full h-full flex flex-col items-center justify-center gap-3 bg-background-base absolute inset-0 z-20 px-6">
+              <div class="w-full h-full flex flex-col items-center justify-center gap-3 bg-background-base absolute inset-0 z-20">
                 <BrandLogo size="large" />
-                {/*<Show when={errorMessage()}>
-                  <div class="text-12-regular text-text-weak text-center max-w-[480px] max-h-40 overflow-auto whitespace-pre-wrap break-words">
-                    {errorMessage()}
-                  </div>
-                </Show>
-                <button
-                  type="button"
-                  class="flex items-center gap-1.5 h-8 px-3 rounded-md text-12-medium text-text-strong border border-base cursor-pointer transition-colors hover:bg-v2-overlay-simple-overlay-hover"
-                  onClick={() => reloadPreview()}
-                >
-                  <Icon name="refresh" size="small" />
-                  {language.t("preview.action.reloadPreview")}
-                </button>*/}
               </div>
             </Show>
           </Show>
