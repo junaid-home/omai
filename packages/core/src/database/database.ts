@@ -3,7 +3,7 @@ export * as Database from "./database"
 import { PgClient } from "@effect/sql-pg"
 import { readFileSync } from "node:fs"
 import { makeWithDefaults } from "drizzle-orm/effect-postgres"
-import { Context, Deferred, Effect, Layer, Redacted, Schedule } from "effect"
+import { Context, Deferred, Duration, Effect, Layer, Redacted, Schedule } from "effect"
 import { makeGlobalNode } from "../effect/app-node"
 import { schemaName } from "./schema.sql"
 import { PostgreSQLMigration } from "./postgres/migration"
@@ -21,6 +21,8 @@ export interface Config {
   readonly instanceID: string
   readonly schema?: string
   readonly maxConnections?: number
+  /** How long a query waits for a pooled connection before failing, in seconds. */
+  readonly connectTimeout?: number
   /** Migration mode is for the dedicated migration command and isolated tests, never automatic application startup. */
   readonly mode?: "runtime" | "migration"
 }
@@ -41,6 +43,12 @@ export function layerFromConfig(config: Config) {
     (!Number.isInteger(config.maxConnections) || config.maxConnections < 2 || config.maxConnections > 100)
   ) {
     throw new Error("PostgreSQL pool size must be an integer between 2 and 100")
+  }
+  if (
+    config.connectTimeout !== undefined &&
+    (!Number.isInteger(config.connectTimeout) || config.connectTimeout < 1 || config.connectTimeout > 300)
+  ) {
+    throw new Error("PostgreSQL connect timeout must be an integer between 1 and 300 seconds")
   }
   let url: URL
   try {
@@ -69,7 +77,11 @@ export function layerFromConfig(config: Config) {
         url: Redacted.make(url.toString()),
         applicationName: `omai:${config.instanceID}`,
         maxConnections: config.maxConnections ?? 10,
-        connectTimeout: "5 seconds",
+        // pg-pool starts this timer whenever a query waits for a pooled connection, including when
+        // free clients exist but the queue has not been drained yet. The JS event loop can stall for
+        // seconds under GC and large JSON work, which made the five second timer fire mid-stall and
+        // surface as "timeout exceeded when trying to connect" even though the pool was never full.
+        connectTimeout: Duration.seconds(config.connectTimeout ?? 30),
         idleTimeout: "30 seconds",
         connectionTTL: "30 minutes",
         transformJson: false,
@@ -103,6 +115,9 @@ export function configFromEnvironment(): Config & { readonly schema: string } {
     schema: schemaName,
     maxConnections: process.env.OPENCODE_DATABASE_POOL_SIZE
       ? Number(process.env.OPENCODE_DATABASE_POOL_SIZE)
+      : undefined,
+    connectTimeout: process.env.OPENCODE_DATABASE_CONNECT_TIMEOUT
+      ? Number(process.env.OPENCODE_DATABASE_CONNECT_TIMEOUT)
       : undefined,
   }
 }
