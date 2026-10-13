@@ -25,6 +25,10 @@ import { BashArity } from "@/permission/arity"
 export { Parameters } from "./shell/prompt"
 
 const MAX_METADATA_LENGTH = 30_000
+/** Minimum spacing between streamed output previews. Each write clones,
+ *  sanitizes, persists and broadcasts the part, and commands can emit
+ *  thousands of chunks per second. */
+const STREAM_METADATA_MS = 150
 const CWD = new Set(["cd", "chdir", "popd", "pushd", "push-location", "set-location"])
 const FILES = new Set([
   ...CWD,
@@ -478,6 +482,13 @@ export const ShellTool = Tool.define(
         },
       })
 
+      let streamed = Date.now()
+      const emit = () => {
+        if (Date.now() - streamed < STREAM_METADATA_MS) return Effect.void
+        streamed = Date.now()
+        return ctx.metadata({ metadata: { output: last } })
+      }
+
       const code: number | null = yield* Effect.scoped(
         Effect.gen(function* () {
           yield* Effect.addFinalizer(closeSink)
@@ -522,11 +533,7 @@ export const ShellTool = Tool.define(
                 }
               }
 
-              return ctx.metadata({
-                metadata: {
-                  output: last,
-                },
-              })
+              return emit()
             }),
           )
 
@@ -557,6 +564,14 @@ export const ShellTool = Tool.define(
           return exit.kind === "exit" ? exit.code : null
         }),
       ).pipe(Effect.orDie)
+
+      // The abort path persists the last streamed preview with the part, so
+      // flush once here: emit() may have throttled the final chunks away.
+      yield* ctx.metadata({
+        metadata: {
+          output: last,
+        },
+      })
 
       const meta: string[] = []
       if (expired) {

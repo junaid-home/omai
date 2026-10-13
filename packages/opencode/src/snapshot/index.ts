@@ -23,6 +23,11 @@ export type FileDiff = typeof FileDiff.Type
 
 const prune = "7.days"
 const limit = 2 * 1024 * 1024
+// Unified diff context kept around each change. Unlimited context turned a
+// patch into a copy of the whole file, and those copies were stored on message
+// summaries (the largest reached 38MB) and re-serialized on every later update.
+const diffContext = 20
+const patchLimit = 256 * 1024
 const core = ["-c", "core.longpaths=true", "-c", "core.symlinks=true"]
 const cfg = ["-c", "core.autocrlf=false", ...core]
 const quote = [...cfg, "-c", "core.quotepath=false"]
@@ -778,8 +783,13 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
               }
 
               const step = 100
-              const patch = (file: string, before: string, after: string) =>
-                formatPatch(structuredPatch(file, file, before, after, "", "", { context: Number.MAX_SAFE_INTEGER }))
+              const patch = (file: string, before: string, after: string) => {
+                const text = formatPatch(structuredPatch(file, file, before, after, "", "", { context: diffContext }))
+                if (Buffer.byteLength(text, "utf-8") <= patchLimit) return text
+                const head = Buffer.from(text, "utf-8").subarray(0, patchLimit).toString("utf-8")
+                const line = head.lastIndexOf("\n")
+                return `${line > 0 ? head.slice(0, line) : head}\n... diff truncated ...\n`
+              }
 
               for (let i = 0; i < rows.length; i += step) {
                 const run = rows.slice(i, i + step)

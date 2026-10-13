@@ -122,7 +122,7 @@ const layer = Layer.effect(
       const target = messages.find((m) => m.info.id === input.messageID)
       if (!target || target.info.role !== "user") return
       const msgDiffs = yield* computeDiff({ messages })
-      target.info.summary = { ...target.info.summary, diffs: msgDiffs }
+      target.info.summary = { ...target.info.summary, diffs: boundSummaryDiffs(msgDiffs) }
       yield* sessions.updateMessage(target.info)
     })
 
@@ -150,6 +150,25 @@ export const DiffInput = Schema.Struct({
   messageID: Schema.optional(MessageID),
 })
 export type DiffInput = Schema.Schema.Type<typeof DiffInput>
+
+/**
+ * Bytes of patch text kept on a single message summary. The summary is part of
+ * the message row, so an unbounded patch set is re-encoded and broadcast on
+ * every later update of that message. Files past the budget keep their name and
+ * counts, so the timeline still lists every changed file.
+ */
+const summaryPatchLimit = 512 * 1024
+
+function boundSummaryDiffs(diffs: Snapshot.FileDiff[]) {
+  let used = 0
+  return diffs.map((diff) => {
+    if (diff.patch === undefined) return diff
+    const size = Buffer.byteLength(diff.patch, "utf-8")
+    if (used + size > summaryPatchLimit) return { ...diff, patch: undefined }
+    used += size
+    return diff
+  })
+}
 
 export const node = LayerNode.make({
   service: Service,
