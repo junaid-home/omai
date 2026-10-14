@@ -14,6 +14,7 @@ import { createPersistedPromptInputHistory } from "@/components/prompt-input/his
 import { promptDesignPlaceholder, promptPlaceholder } from "@/components/prompt-input/placeholder"
 import { createPromptSubmit } from "@/components/prompt-input/submit"
 import { selectionFromLines, type SelectedLineRange, useFile } from "@/context/file"
+import { useAuthOptional } from "@/context/auth"
 import { useComments } from "@/context/comments"
 import { useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
@@ -24,6 +25,7 @@ import { usePlatform } from "@/context/platform"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { createSessionTabs } from "@/pages/session/helpers"
+import { LOCKED_MODEL_LABEL, isModelLocked } from "@/utils/model-lock"
 import { showToast } from "@/utils/toast"
 import { PromptInputV2, type PromptInputV2Suggestion } from "@opencode-ai/session-ui/v2/prompt-input"
 import {
@@ -49,6 +51,8 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
   const dialog = useDialog()
   const command = useCommand()
   const language = useLanguage()
+  const auth = useAuthOptional()
+  const locked = () => isModelLocked(auth?.user())
 
   useCommands(props)
   useEditHandler(props)
@@ -67,8 +71,12 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
             title={language.t("command.model.choose")}
             keybind={command.keybindParts("model.choose")}
             model={props.controller.model.selection}
-            providerID={props.controller.model.selection.current()?.provider?.id}
-            modelName={props.controller.model.selection.current()?.name ?? language.t("dialog.model.select.title")}
+            providerID={locked() ? undefined : props.controller.model.selection.current()?.provider?.id}
+            modelName={
+              locked()
+                ? LOCKED_MODEL_LABEL
+                : (props.controller.model.selection.current()?.name ?? language.t("dialog.model.select.title"))
+            }
             onClose={props.controller.restoreFocus}
           />
         }

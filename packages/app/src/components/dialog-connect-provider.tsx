@@ -29,11 +29,13 @@ import {
 } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { Link } from "@/components/link"
+import { useAuthOptional } from "@/context/auth"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
 import { useSettings } from "@/context/settings"
 import { popularProviders, useProviders } from "@/hooks/use-providers"
+import { isModelLocked } from "@/utils/model-lock"
 import { CustomProviderForm } from "./dialog-custom-provider"
 
 const CUSTOM_ID = "_custom"
@@ -57,6 +59,8 @@ export const DialogConnectProvider: Component<{
   const controller = props.controller ?? fallback
   const language = useLanguage()
   const settings = useSettings()
+  const auth = useAuthOptional()
+  const locked = () => isModelLocked(auth?.user())
   const newLayout = settings.general.newLayoutDesigns
   const reset = controller.back
   const back = { current: reset }
@@ -95,53 +99,55 @@ export const DialogConnectProvider: Component<{
   }
 
   return (
-    <Show
-      when={newLayout()}
-      fallback={
-        <Dialog
-          class="h-full"
-          transition
-          title={
-            <Show when={controller.selected()} fallback={language.t("command.provider.connect")}>
-              <IconButton
-                tabIndex={-1}
-                icon="arrow-left"
-                variant="ghost"
+    <Show when={!locked()}>
+      <Show
+        when={newLayout()}
+        fallback={
+          <Dialog
+            class="h-full"
+            transition
+            title={
+              <Show when={controller.selected()} fallback={language.t("command.provider.connect")}>
+                <IconButton
+                  tabIndex={-1}
+                  icon="arrow-left"
+                  variant="ghost"
+                  onClick={() => back.current()}
+                  aria-label={language.t("common.goBack")}
+                />
+              </Show>
+            }
+          >
+            <Content />
+          </Dialog>
+        }
+      >
+        <DialogV2
+          containerClass="!h-[min(calc(100vh_-_16px),512px)] !w-[min(calc(100vw_-_16px),640px)]"
+          class="[font-family:var(--v2-font-family-sans)] [&_[data-slot=dialog-header]]:!px-5 [&_[data-slot=dialog-header-title]]:!text-[15px] [&_[data-slot=dialog-header-title]]:!tracking-[-0.13px]"
+        >
+          <DialogHeader closeLabel={language.t("common.close")}>
+            <Show
+              when={controller.selected()}
+              fallback={<DialogTitle>{language.t("command.provider.connect")}</DialogTitle>}
+            >
+              <button
+                type="button"
+                class="flex size-5 items-center justify-center rounded-sm text-v2-icon-icon-muted hover:bg-v2-overlay-simple-overlay-hover focus-visible:bg-v2-overlay-simple-overlay-hover focus-visible:outline-none"
                 onClick={() => back.current()}
                 aria-label={language.t("common.goBack")}
-              />
+              >
+                <Icon name="arrow-left" size="small" />
+              </button>
             </Show>
-          }
-        >
-          <Content />
-        </Dialog>
-      }
-    >
-      <DialogV2
-        containerClass="!h-[min(calc(100vh_-_16px),512px)] !w-[min(calc(100vw_-_16px),640px)]"
-        class="[font-family:var(--v2-font-family-sans)] [&_[data-slot=dialog-header]]:!px-5 [&_[data-slot=dialog-header-title]]:!text-[15px] [&_[data-slot=dialog-header-title]]:!tracking-[-0.13px]"
-      >
-        <DialogHeader closeLabel={language.t("common.close")}>
-          <Show
-            when={controller.selected()}
-            fallback={<DialogTitle>{language.t("command.provider.connect")}</DialogTitle>}
-          >
-            <button
-              type="button"
-              class="flex size-5 items-center justify-center rounded-sm text-v2-icon-icon-muted hover:bg-v2-overlay-simple-overlay-hover focus-visible:bg-v2-overlay-simple-overlay-hover focus-visible:outline-none"
-              onClick={() => back.current()}
-              aria-label={language.t("common.goBack")}
-            >
-              <Icon name="arrow-left" size="small" />
-            </button>
-          </Show>
-        </DialogHeader>
-        <DialogBody class="min-h-0 flex-1 overflow-hidden px-2 pb-2">
-          <div ref={focusHost} tabIndex={-1} class="flex min-h-0 flex-1 flex-col outline-none">
-            <Content />
-          </div>
-        </DialogBody>
-      </DialogV2>
+          </DialogHeader>
+          <DialogBody class="min-h-0 flex-1 overflow-hidden px-2 pb-2">
+            <div ref={focusHost} tabIndex={-1} class="flex min-h-0 flex-1 flex-col outline-none">
+              <Content />
+            </div>
+          </DialogBody>
+        </DialogV2>
+      </Show>
     </Show>
   )
 }

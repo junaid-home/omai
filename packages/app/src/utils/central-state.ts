@@ -333,12 +333,16 @@ export type SettingsPermissionKey =
   | "general"
   | "terminal"
   | "fileTree"
+  | "mestro"
+  | "sessions"
+export type AuthModel = { providerID: string; modelID: string }
 export type AuthUser = {
   id: string
   username: string
   email: string
   role: "admin" | "member"
   settingsPermissions: Record<SettingsPermissionKey, boolean>
+  model: AuthModel | null
 }
 
 export function fullSettingsPermissions(): Record<SettingsPermissionKey, boolean> {
@@ -351,13 +355,31 @@ export function fullSettingsPermissions(): Record<SettingsPermissionKey, boolean
     general: true,
     terminal: true,
     fileTree: true,
+    mestro: true,
+    sessions: true,
   }
 }
 
 function isSettingsPermissions(value: unknown): value is Record<SettingsPermissionKey, boolean> {
   if (!value || typeof value !== "object") return false
-  const keys = ["mcp", "models", "providers", "servers", "shortcuts", "general", "terminal", "fileTree"]
+  const keys = [
+    "mcp",
+    "models",
+    "providers",
+    "servers",
+    "shortcuts",
+    "general",
+    "terminal",
+    "fileTree",
+    "mestro",
+    "sessions",
+  ]
   return keys.every((key) => typeof (value as Record<string, unknown>)[key] === "boolean")
+}
+
+function isAuthModel(value: unknown): value is AuthModel {
+  if (!value || typeof value !== "object") return false
+  return typeof (value as AuthModel).providerID === "string" && typeof (value as AuthModel).modelID === "string"
 }
 
 type Runtime = {
@@ -455,7 +477,15 @@ export async function bootstrapCentralState(input: { url: string; fetch: typeof 
   const settingsPermissions = isSettingsPermissions(user.settingsPermissions)
     ? user.settingsPermissions
     : fullSettingsPermissions()
-  const identity: AuthUser = { id: user.id, username: user.username, email: user.email, role, settingsPermissions }
+  const model = "model" in user && isAuthModel(user.model) ? user.model : null
+  const identity: AuthUser = {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    role,
+    settingsPermissions,
+    model,
+  }
   centralRuntime.configure({
     mode: "central",
     url: base,

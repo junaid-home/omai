@@ -30,6 +30,12 @@ const AuthUserResult = Schema.Struct({
   email: Schema.String,
   role: Role,
   settingsPermissions: SettingsPermissionsSchema,
+  model: Schema.NullOr(
+    Schema.Struct({
+      providerID: Schema.String,
+      modelID: Schema.String,
+    }),
+  ),
 })
 
 const AuthPaths = {

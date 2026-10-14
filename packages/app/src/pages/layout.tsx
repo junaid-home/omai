@@ -298,19 +298,21 @@ export default function Layout(props: ParentProps) {
                     />
                   </TooltipKeybind>
                   <div class="h-4" />
-                  <TooltipKeybind
-                    placement="right"
-                    title={language.t("command.project.previous") || "Open last session"}
-                    keybind={command.keybind("project.previous")}
-                  >
-                    <IconButton
-                      icon="wheel-globe"
-                      variant="ghost"
-                      size="large"
-                      onClick={openLastProject}
-                      aria-label={language.t("command.project.previous") || "Open last session"}
-                    />
-                  </TooltipKeybind>
+                  <Show when={permission.can("mestro")}>
+                    <TooltipKeybind
+                      placement="right"
+                      title={language.t("command.project.previous") || "Open last session"}
+                      keybind={command.keybind("project.previous")}
+                    >
+                      <IconButton
+                        icon="wheel-globe"
+                        variant="ghost"
+                        size="large"
+                        onClick={openLastProject}
+                        aria-label={language.t("command.project.previous") || "Open last session"}
+                      />
+                    </TooltipKeybind>
+                  </Show>
                   <TooltipKeybind
                     placement="right"
                     title={language.t("command.project.open")}
@@ -412,20 +414,22 @@ export default function Layout(props: ParentProps) {
                     aria-label={language.t("sidebar.settings")}
                   />
                 </TooltipKeybind>
-                <TooltipKeybind
-                  placement="right"
-                  title={language.t("command.sidebar.toggle")}
-                  keybind={showSessionPanel() ? (command.keybind("sidebar.toggle") ?? "") : ""}
-                >
-                  <IconButton
-                    icon={showSessionPanel() && layout.sidebar.opened() ? "sidebar-active" : "sidebar"}
-                    variant="ghost"
-                    size="large"
-                    onClick={showSessionPanel() ? () => layout.sidebar.toggle() : undefined}
-                    aria-label={language.t("command.sidebar.toggle")}
-                    aria-expanded={showSessionPanel() ? layout.sidebar.opened() : undefined}
-                  />
-                </TooltipKeybind>
+                <Show when={permission.can("sessions")}>
+                  <TooltipKeybind
+                    placement="right"
+                    title={language.t("command.sidebar.toggle")}
+                    keybind={showSessionPanel() ? (command.keybind("sidebar.toggle") ?? "") : ""}
+                  >
+                    <IconButton
+                      icon={showSessionPanel() && layout.sidebar.opened() ? "sidebar-active" : "sidebar"}
+                      variant="ghost"
+                      size="large"
+                      onClick={showSessionPanel() ? () => layout.sidebar.toggle() : undefined}
+                      aria-label={language.t("command.sidebar.toggle")}
+                      aria-expanded={showSessionPanel() ? layout.sidebar.opened() : undefined}
+                    />
+                  </TooltipKeybind>
+                </Show>
                 <div class="w-8 h-8 rounded-full bg-accent-base flex items-center justify-center cursor-pointer text-white text-12-semibold select-none">
                   <DropdownMenu>
                     <DropdownMenu.Trigger>
@@ -467,7 +471,11 @@ export default function Layout(props: ParentProps) {
           </Show>
 
           {/* Sessions Panel */}
-          <Show when={layout.sidebar.opened() && showSessionPanel() && !layout.session.collapsed()}>
+          <Show
+            when={
+              layout.sidebar.opened() && showSessionPanel() && permission.can("sessions") && !layout.session.collapsed()
+            }
+          >
             <div
               class="shrink-0 bg-v2-background-bg-base flex flex-col min-h-0 overflow-hidden rounded-xl border border-border-weak-base relative ml-1 my-1"
               style={{ width: `${sessionsPanelWidth()}px` }}

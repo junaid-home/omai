@@ -5,7 +5,9 @@ import { onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useSessionLayout } from "./session-layout"
 import { useDialog } from "@opencode-ai/ui/context"
+import { useAuthOptional } from "@/context/auth"
 import { DialogUsageExceeded } from "@/components/dialog-usage-exceeded"
+import { isModelLocked } from "@/utils/model-lock"
 import { useI18n } from "@opencode-ai/ui/context"
 
 const GO_UPSELL_FREE_TIER_LAST_SEEN_AT = "go_upsell_last_seen_at"
@@ -38,6 +40,7 @@ export function useUsageExceededDialogs() {
   const dialog = useDialog()
   const { params } = useSessionLayout()
   const { t, locale } = useI18n()
+  const auth = useAuthOptional()
   const isEnglish = () => locale() === "en"
 
   const [goUpsellState, setGoUpsellState] = persisted(
@@ -74,7 +77,7 @@ export function useUsageExceededDialogs() {
             link={action.link}
             onClose={(dontShowAgain) => {
               setGoUpsellState(keys.lastSeenAt, Date.now())
-              if (dontShowAgain) setGoUpsellState(keys.dontShow, Date.now())
+              if (dontShowAgain || isModelLocked(auth?.user())) setGoUpsellState(keys.dontShow, Date.now())
               else {
                 void import("../../components/dialog-connect-provider").then((x) => {
                   const controller = x.useProviderConnectController()

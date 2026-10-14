@@ -12,6 +12,8 @@ export const SettingsScope = Schema.Literals([
   "providers",
   "models",
   "mcp",
+  "mestro",
+  "sessions",
 ])
 export type SettingsScope = Schema.Schema.Type<typeof SettingsScope>
 
@@ -24,6 +26,8 @@ export const settingsScopes = [
   "providers",
   "models",
   "mcp",
+  "mestro",
+  "sessions",
 ] as const satisfies readonly SettingsScope[]
 
 export type SettingsPermissions = Record<SettingsScope, boolean>

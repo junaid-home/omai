@@ -2785,7 +2785,7 @@ export default function Page() {
                               </button>
                             ) : undefined
                           }
-                          fileBrowserState={permission.can("fileTree") ? reviewV2State : undefined}
+                          fileBrowserState={reviewV2State}
                           fileTabSource={(tab) => fileTabSources[tab]}
                           setFileTabSource={setFileTabSource}
                           activeDiff={activeReviewFile()}

@@ -12,6 +12,8 @@ const fullPermissions = {
   providers: true,
   models: true,
   mcp: true,
+  mestro: true,
+  sessions: true,
 } as const
 
 function signup(ctx: ScenarioContext, body: { username: string; email: string; password: string }) {
@@ -140,14 +142,15 @@ export const centralScenarios = [
         "me must return the session's exact persisted identity",
       )
       check(
-        Object.keys(body).sort().join(",") === "email,id,role,settingsPermissions,username",
-        "me must expose identity, role, and permissions without leaking credential fields",
+        Object.keys(body).sort().join(",") === "email,id,model,role,settingsPermissions,username",
+        "me must expose identity, role, permissions, and model without leaking credential fields",
       )
       check(body.role === "admin" || body.role === "member", "me must report a known role")
+      check(body.model === null, "me must expose an unassigned model as null")
       object(body.settingsPermissions)
       check(
         Object.keys(body.settingsPermissions).sort().join(",") ===
-          "fileTree,general,mcp,models,providers,servers,shortcuts,terminal",
+          "fileTree,general,mcp,mestro,models,providers,servers,sessions,shortcuts,terminal",
         "me must report every settings scope",
       )
     }),
@@ -283,13 +286,13 @@ export const centralScenarios = [
         for (const user of body) {
           object(user)
           check(
-            Object.keys(user).sort().join(",") === "email,id,role,settingsPermissions,username",
+            Object.keys(user).sort().join(",") === "email,id,model,role,settingsPermissions,username",
             "admin users must not expose password hashes",
           )
           object(user.settingsPermissions)
           check(
             Object.keys(user.settingsPermissions).sort().join(",") ===
-              "fileTree,general,mcp,models,providers,servers,shortcuts,terminal",
+              "fileTree,general,mcp,mestro,models,providers,servers,sessions,shortcuts,terminal",
             "admin users must include every settings scope",
           )
         }
@@ -331,6 +334,7 @@ export const centralScenarios = [
       Effect.gen(function* () {
         object(body)
         check(body.username === "httpapi_created" && body.role === "member", "create must return the new user")
+        check(body.model === null, "create must default to an unassigned model")
         object(body.settingsPermissions)
         check(
           body.settingsPermissions.mcp === false && body.settingsPermissions.general === true,
@@ -386,7 +390,10 @@ export const centralScenarios = [
     .at((ctx) => ({
       path: route("/admin/users/{userID}", { userID: ctx.state.member.id }),
       headers: { ...ctx.headers(), cookie: ctx.state.admin.cookie },
-      body: { settingsPermissions: { ...fullPermissions, mcp: false } },
+      body: {
+        settingsPermissions: { ...fullPermissions, mcp: false },
+        model: { providerID: "exercise", modelID: "model-assignment" },
+      },
     }))
     .jsonEffect(200, (body, ctx) =>
       Effect.gen(function* () {
@@ -394,6 +401,11 @@ export const centralScenarios = [
         check(body.id === ctx.state.member.id, "update must target the requested user")
         object(body.settingsPermissions)
         check(body.settingsPermissions.mcp === false, "update must persist permission overrides")
+        object(body.model)
+        check(
+          body.model.providerID === "exercise" && body.model.modelID === "model-assignment",
+          "update must persist an assigned model",
+        )
         const me = yield* ctx.request("GET", { path: "/auth/me", headers: { cookie: ctx.state.member.cookie } })
         object(me.body)
         object(me.body.settingsPermissions)
@@ -401,6 +413,18 @@ export const centralScenarios = [
           me.body.role === "member" && me.body.settingsPermissions.mcp === false,
           "member session must reflect the updated permissions",
         )
+        object(me.body.model)
+        check(
+          me.body.model.providerID === "exercise" && me.body.model.modelID === "model-assignment",
+          "member session must reflect the assigned model",
+        )
+        const cleared = yield* ctx.request("PATCH", {
+          path: route("/admin/users/{userID}", { userID: ctx.state.member.id }),
+          headers: { ...ctx.headers(), cookie: ctx.state.admin.cookie },
+          body: { model: null },
+        })
+        object(cleared.body)
+        check(cleared.body.model === null, "a null model must clear the assignment")
         const selfDemote = yield* ctx.request("PATCH", {
           path: route("/admin/users/{userID}", { userID: ctx.state.admin.id }),
           headers: { ...ctx.headers(), cookie: ctx.state.admin.cookie },

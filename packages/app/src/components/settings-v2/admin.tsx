@@ -2,12 +2,18 @@ import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { CheckboxV2 } from "@opencode-ai/ui/v2/checkbox-v2"
 import { SelectV2 } from "@opencode-ai/ui/v2/select-v2"
 import { TextInputV2 } from "@opencode-ai/ui/v2/text-input-v2"
-import { Component, For, Show, createEffect, createResource, createSignal } from "solid-js"
+import { Component, For, Show, createEffect, createMemo, createResource, createSignal } from "solid-js"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { useAuth } from "@/context/auth"
 import { useLanguage } from "@/context/language"
 import { useServer } from "@/context/server"
-import { centralRuntime, fullSettingsPermissions, type SettingsPermissionKey } from "@/utils/central-state"
+import { useProviders } from "@/hooks/use-providers"
+import {
+  centralRuntime,
+  fullSettingsPermissions,
+  type AuthModel,
+  type SettingsPermissionKey,
+} from "@/utils/central-state"
 import "./settings-v2.css"
 
 type Role = "admin" | "member"
@@ -18,11 +24,13 @@ type AdminUser = {
   email: string
   role: Role
   settingsPermissions: Record<SettingsPermissionKey, boolean>
+  model: AuthModel | null
 }
 
 type Draft = {
   role: Role
   settingsPermissions: Record<SettingsPermissionKey, boolean>
+  model: AuthModel | null
 }
 
 const SCOPE_LABEL_KEYS: Record<SettingsPermissionKey, string> = {
@@ -32,8 +40,10 @@ const SCOPE_LABEL_KEYS: Record<SettingsPermissionKey, string> = {
   servers: "status.popover.tab.servers",
   shortcuts: "settings.tab.shortcuts",
   general: "settings.tab.general",
-  terminal: "settings.general.row.terminalFont.title",
+  terminal: "settings.admin.permission.terminal",
   fileTree: "settings.general.row.showFileTree.title",
+  mestro: "settings.admin.permission.mestro",
+  sessions: "settings.admin.permission.sessions",
 }
 
 type RoleOption = { id: Role; label: string }
@@ -51,6 +61,7 @@ export const SettingsAdminV2: Component = () => {
   const language = useLanguage()
   const server = useServer()
   const auth = useAuth()
+  const providers = useProviders()
 
   const baseUrl = () => (centralRuntime.get().mode === "central" ? centralRuntime.get().url : server.current?.http.url)
 
@@ -72,6 +83,17 @@ export const SettingsAdminV2: Component = () => {
     { id: "member", label: language.t("settings.admin.role.member") },
     { id: "admin", label: language.t("settings.admin.role.admin") },
   ]
+
+  const modelOptionID = (model: AuthModel | null) => (model ? `${model.providerID}/${model.modelID}` : "none")
+  const modelOptions = createMemo(() => {
+    const options: { id: string; label: string }[] = [{ id: "none", label: language.t("settings.admin.user.model.none") }]
+    for (const provider of providers.connected()) {
+      for (const model of Object.values(provider.models)) {
+        options.push({ id: `${provider.id}/${model.id}`, label: `${model.name} (${provider.id})` })
+      }
+    }
+    return options
+  })
 
   const doFetch = async (path: string, init?: RequestInit) => {
     const url = baseUrl()
@@ -121,12 +143,13 @@ export const SettingsAdminV2: Component = () => {
     language.t(SCOPE_LABEL_KEYS[scope] as Parameters<typeof language.t>[0])
 
   const draftFor = (user: AdminUser): Draft =>
-    drafts[user.id] ?? { role: user.role, settingsPermissions: user.settingsPermissions }
+    drafts[user.id] ?? { role: user.role, settingsPermissions: user.settingsPermissions, model: user.model ?? null }
 
   const isDirty = (user: AdminUser) => {
     const draft = drafts[user.id]
     if (!draft) return false
     if (draft.role !== user.role) return true
+    if (modelOptionID(draft.model) !== modelOptionID(user.model ?? null)) return true
     return (Object.keys(user.settingsPermissions) as SettingsPermissionKey[]).some(
       (scope) => draft.settingsPermissions[scope] !== user.settingsPermissions[scope],
     )
@@ -134,7 +157,11 @@ export const SettingsAdminV2: Component = () => {
 
   const ensureDraft = (user: AdminUser) => {
     if (drafts[user.id]) return
-    setDrafts(user.id, { role: user.role, settingsPermissions: { ...user.settingsPermissions } })
+    setDrafts(user.id, {
+      role: user.role,
+      settingsPermissions: { ...user.settingsPermissions },
+      model: user.model ?? null,
+    })
   }
 
   const setDraftRole = (user: AdminUser, next: Role) => {
@@ -145,6 +172,16 @@ export const SettingsAdminV2: Component = () => {
     setError(undefined)
     ensureDraft(user)
     setDrafts(user.id, "role", next)
+  }
+
+  const setDraftModel = (user: AdminUser, option: { id: string; label: string }) => {
+    ensureDraft(user)
+    if (option.id === "none") {
+      setDrafts(user.id, "model", null)
+      return
+    }
+    const [providerID, modelID] = option.id.split("/")
+    setDrafts(user.id, "model", { providerID, modelID })
   }
 
   const setDraftScope = (user: AdminUser, scope: SettingsPermissionKey, allowed: boolean) => {
@@ -174,7 +211,11 @@ export const SettingsAdminV2: Component = () => {
     return run(user.id, async () => {
       const updated = (await doFetch(`/admin/users/${user.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ role: draft.role, settingsPermissions: draft.settingsPermissions }),
+        body: JSON.stringify({
+          role: draft.role,
+          settingsPermissions: draft.settingsPermissions,
+          model: draft.model,
+        }),
       })) as AdminUser
       setUsers((prev) => prev.map((x) => (x.id === user.id ? updated : x)))
       setDrafts(
@@ -450,6 +491,17 @@ export const SettingsAdminV2: Component = () => {
                           </div>
                         </div>
                         <div class="settings-v2-admin-card-actions">
+                          <SelectV2
+                            appearance="inline"
+                            options={modelOptions()}
+                            current={modelOptions().find((o) => o.id === modelOptionID(draftFor(user).model))}
+                            value={(o) => o.id}
+                            label={(o) => o.label}
+                            onSelect={(option) => option && setDraftModel(user, option)}
+                            placement="bottom-end"
+                            gutter={6}
+                            disabled={isSelf()}
+                          />
                           <SelectV2
                             appearance="inline"
                             options={roleOptions()}

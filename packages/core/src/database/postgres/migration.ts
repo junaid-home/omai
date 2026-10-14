@@ -18,6 +18,12 @@ ALTER TABLE "__OPENCODE_SCHEMA__"."user" ADD COLUMN IF NOT EXISTS "role" text NO
 ALTER TABLE "__OPENCODE_SCHEMA__"."user" ADD COLUMN IF NOT EXISTS "settings_permissions" jsonb;
 `,
   },
+  {
+    id: "0003_user_model",
+    source: `
+ALTER TABLE "__OPENCODE_SCHEMA__"."user" ADD COLUMN IF NOT EXISTS "model" jsonb;
+`,
+  },
 ].map((migration) => ({
   ...migration,
   checksum: createHash("sha256").update(migration.source).digest("hex"),

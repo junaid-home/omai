@@ -4,12 +4,18 @@ import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "e
 import { ConflictError, ForbiddenError, InvalidRequestError } from "../errors"
 import { described } from "./metadata"
 
+const AssignedModel = Schema.Struct({
+  providerID: Schema.String,
+  modelID: Schema.String,
+})
+
 export const AdminUser = Schema.Struct({
   id: Schema.String,
   username: Schema.String,
   email: Schema.String,
   role: Role,
   settingsPermissions: SettingsPermissionsSchema,
+  model: Schema.NullOr(AssignedModel),
 })
 export type AdminUser = Schema.Schema.Type<typeof AdminUser>
 
@@ -19,12 +25,14 @@ export const AdminCreateUserInput = Schema.Struct({
   password: Schema.String,
   role: Schema.optional(Role),
   settingsPermissions: Schema.optional(SettingsPermissionsSchema),
+  model: Schema.optional(Schema.NullOr(AssignedModel)),
 })
 
 export const AdminUpdateUserInput = Schema.Struct({
   role: Schema.optional(Role),
   settingsPermissions: Schema.optional(SettingsPermissionsSchema),
   password: Schema.optional(Schema.String),
+  model: Schema.optional(Schema.NullOr(AssignedModel)),
 })
 
 const AdminUserParams = Schema.Struct({

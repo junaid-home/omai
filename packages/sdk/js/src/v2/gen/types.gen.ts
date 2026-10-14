@@ -7956,6 +7956,12 @@ export type AuthMeResponses = {
       providers: boolean
       models: boolean
       mcp: boolean
+      mestro: boolean
+      sessions: boolean
+    }
+    model: {
+      providerID: string
+      modelID: string
     }
   }
 }
@@ -8000,6 +8006,12 @@ export type AdminListResponses = {
       providers: boolean
       models: boolean
       mcp: boolean
+      mestro: boolean
+      sessions: boolean
+    }
+    model: {
+      providerID: string
+      modelID: string
     }
   }>
 }
@@ -8021,6 +8033,12 @@ export type AdminCreateData = {
       providers: boolean
       models: boolean
       mcp: boolean
+      mestro: boolean
+      sessions: boolean
+    }
+    model?: {
+      providerID: string
+      modelID: string
     }
   }
   path?: never
@@ -8063,6 +8081,12 @@ export type AdminCreateResponses = {
       providers: boolean
       models: boolean
       mcp: boolean
+      mestro: boolean
+      sessions: boolean
+    }
+    model: {
+      providerID: string
+      modelID: string
     }
   }
 }
@@ -8116,8 +8140,14 @@ export type AdminUpdateData = {
       providers: boolean
       models: boolean
       mcp: boolean
+      mestro: boolean
+      sessions: boolean
     }
     password?: string
+    model?: {
+      providerID: string
+      modelID: string
+    }
   }
   path: {
     userID: string
@@ -8161,6 +8191,12 @@ export type AdminUpdateResponses = {
       providers: boolean
       models: boolean
       mcp: boolean
+      mestro: boolean
+      sessions: boolean
+    }
+    model: {
+      providerID: string
+      modelID: string
     }
   }
 }

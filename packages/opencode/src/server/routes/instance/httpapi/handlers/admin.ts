@@ -29,6 +29,7 @@ function toAdminUser(row: typeof UserTable.$inferSelect): AdminUser {
     email: row.email,
     role,
     settingsPermissions: effectiveSettingsPermissions(row.settings_permissions, role === "admin"),
+    model: row.model ?? null,
   }
 }
 
@@ -64,7 +65,9 @@ export const adminHandlers = HttpApiBuilder.group(RootHttpApi, "admin", (handler
       const email = payload.email.trim().toLowerCase()
       if (!validEmail(email)) return yield* new InvalidRequestError({ message: "Invalid email address" })
       if (!validPassword(payload.password))
-        return yield* new InvalidRequestError({ message: "Password must contain at least 12 characters and at most 1024 bytes" })
+        return yield* new InvalidRequestError({
+          message: "Password must contain at least 12 characters and at most 1024 bytes",
+        })
       const password = yield* Effect.promise(() => hashPassword(payload.password))
       const now = Date.now()
       const created = yield* db
@@ -76,6 +79,7 @@ export const adminHandlers = HttpApiBuilder.group(RootHttpApi, "admin", (handler
           password_hash: password,
           role: payload.role ?? "member",
           settings_permissions: payload.settingsPermissions ?? null,
+          model: payload.model ?? null,
           time_created: now,
           time_updated: now,
         })
@@ -103,9 +107,12 @@ export const adminHandlers = HttpApiBuilder.group(RootHttpApi, "admin", (handler
       const set: Partial<typeof UserTable.$inferInsert> = {}
       if (ctx.payload.role !== undefined) set.role = ctx.payload.role
       if (ctx.payload.settingsPermissions !== undefined) set.settings_permissions = ctx.payload.settingsPermissions
+      if (ctx.payload.model !== undefined) set.model = ctx.payload.model
       if (ctx.payload.password !== undefined) {
         if (!validPassword(ctx.payload.password))
-          return yield* new InvalidRequestError({ message: "Password must contain at least 12 characters and at most 1024 bytes" })
+          return yield* new InvalidRequestError({
+            message: "Password must contain at least 12 characters and at most 1024 bytes",
+          })
         set.password_hash = yield* Effect.promise(() => hashPassword(ctx.payload.password!))
       }
       if (Object.keys(set).length === 0) return toAdminUser(existing)

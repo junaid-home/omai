@@ -15,6 +15,7 @@ const principal = (name: string): Authentication.Principal => ({
   email: `${name}-${crypto.randomUUID()}@example.invalid`,
   role: "member",
   settingsPermissions: fullSettingsPermissions(),
+  model: null,
 })
 
 const alice = principal("alice")

@@ -50,6 +50,8 @@ import { useCommand } from "@/context/command"
 import { usePermission } from "@/context/permission"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
+import { useAuthOptional } from "@/context/auth"
+import { LOCKED_MODEL_LABEL, isModelLocked } from "@/utils/model-lock"
 import { createSessionTabs } from "@/pages/session/helpers"
 import { createTextFragment, getCursorPosition, setCursorPosition, setRangeEdge } from "./prompt-input/editor-dom"
 import { createPromptAttachments } from "./prompt-input/attachments"
@@ -127,6 +129,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const permission = usePermission()
   const language = useLanguage()
   const platform = usePlatform()
+  const auth = useAuthOptional()
+  const locked = () => isModelLocked(auth?.user())
+  const modelName = () =>
+    locked()
+      ? LOCKED_MODEL_LABEL
+      : (props.controls.model.selection.current()?.name ?? language.t("dialog.model.select.title"))
+  const modelProviderID = () => (locked() ? undefined : props.controls.model.selection.current()?.provider?.id)
   const tabs = () => props.controls.session.tabs
   let editorRef!: HTMLDivElement
   let fileInputRef: HTMLInputElement | undefined
@@ -1734,17 +1743,14 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                                 dialog.show(() => <DialogSelectModelUnpaid model={props.controls.model.selection} />)
                               }}
                             >
-                              <Show when={props.controls.model.selection.current()?.provider?.id}>
+                              <Show when={modelProviderID()}>
                                 <ProviderIcon
-                                  id={props.controls.model.selection.current()?.provider?.id ?? ""}
+                                  id={modelProviderID() ?? ""}
                                   class="size-4 shrink-0 opacity-40 group-hover:opacity-100 transition-opacity duration-150"
                                   style={{ "will-change": "opacity", transform: "translateZ(0)" }}
                                 />
                               </Show>
-                              <span class="truncate">
-                                {props.controls.model.selection.current()?.name ??
-                                  language.t("dialog.model.select.title")}
-                              </span>
+                              <span class="truncate">{modelName()}</span>
                               <Icon name="chevron-down" size="small" class="shrink-0" />
                             </Button>
                           </TooltipKeybind>
@@ -1768,17 +1774,14 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                             }}
                             onClose={restoreFocus}
                           >
-                            <Show when={props.controls.model.selection.current()?.provider?.id}>
+                            <Show when={modelProviderID()}>
                               <ProviderIcon
-                                id={props.controls.model.selection.current()?.provider?.id ?? ""}
+                                id={modelProviderID() ?? ""}
                                 class="size-4 shrink-0 opacity-40 group-hover:opacity-100 transition-opacity duration-150"
                                 style={{ "will-change": "opacity", transform: "translateZ(0)" }}
                               />
                             </Show>
-                            <span class="truncate">
-                              {props.controls.model.selection.current()?.name ??
-                                language.t("dialog.model.select.title")}
-                            </span>
+                            <span class="truncate">{modelName()}</span>
                             <Icon name="chevron-down" size="small" class="shrink-0" />
                           </ModelSelectorPopover>
                         </TooltipKeybind>

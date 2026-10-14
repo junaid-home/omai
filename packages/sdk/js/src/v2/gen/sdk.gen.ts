@@ -1868,6 +1868,12 @@ export class Admin extends HeyApiClient {
         providers: boolean
         models: boolean
         mcp: boolean
+        mestro: boolean
+        sessions: boolean
+      }
+      model?: {
+        providerID: string
+        modelID: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -1882,6 +1888,7 @@ export class Admin extends HeyApiClient {
             { in: "body", key: "password" },
             { in: "body", key: "role" },
             { in: "body", key: "settingsPermissions" },
+            { in: "body", key: "model" },
           ],
         },
       ],
@@ -1935,8 +1942,14 @@ export class Admin extends HeyApiClient {
         providers: boolean
         models: boolean
         mcp: boolean
+        mestro: boolean
+        sessions: boolean
       }
       password?: string
+      model?: {
+        providerID: string
+        modelID: string
+      }
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -1949,6 +1962,7 @@ export class Admin extends HeyApiClient {
             { in: "body", key: "role" },
             { in: "body", key: "settingsPermissions" },
             { in: "body", key: "password" },
+            { in: "body", key: "model" },
           ],
         },
       ],

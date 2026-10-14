@@ -36,7 +36,8 @@ export function AuthProvider(props: ParentProps) {
     void fetch(`${url}/auth/me`, { credentials: "include", cache: "no-store", signal: controller.signal })
       .then(async (response) => (response.ok ? ((await response.json()) as AuthUser) : null))
       .then((user) => {
-        if (!controller.signal.aborted) setState({ user, loading: false })
+        if (!controller.signal.aborted)
+          setState({ user: user ? { ...user, model: user.model ?? null } : null, loading: false })
       })
       .catch(() => {
         if (!controller.signal.aborted) setState({ user: null, loading: false })

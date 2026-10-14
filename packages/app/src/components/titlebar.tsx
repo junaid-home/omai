@@ -16,6 +16,7 @@ import { usePlatform } from "@/context/platform"
 import { useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { useSettings } from "@/context/settings"
+import { useSettingsPermission } from "@/context/settings-permission"
 import { WindowsAppMenu } from "./windows-app-menu"
 import { applyPath, backPath, forwardPath } from "./titlebar-history"
 import { TitlebarTabStrip } from "@/components/titlebar-tab-strip"
@@ -73,6 +74,7 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
   const command = useCommand()
   const language = useLanguage()
   const settings = useSettings()
+  const settingsPermission = useSettingsPermission()
   const theme = useTheme()
   const server = useServer()
   const navigate = useNavigate()
@@ -574,22 +576,24 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
                 </div>
               </Show>
               <div class="flex items-center gap-1 shrink-0">
-                <TooltipKeybind
-                  class={web() ? "hidden xl:flex shrink-0 ml-14" : "hidden xl:flex shrink-0 ml-2"}
-                  placement="bottom"
-                  title={language.t("command.sidebar.toggle")}
-                  keybind={command.keybind("sidebar.toggle")}
-                >
-                  <Button
-                    variant="ghost"
-                    class="group/sidebar-toggle titlebar-icon w-8 h-6 p-0 box-border"
-                    onClick={layout.sidebar.toggle}
-                    aria-label={language.t("command.sidebar.toggle")}
-                    aria-expanded={layout.sidebar.opened()}
+                <Show when={settingsPermission.can("sessions")}>
+                  <TooltipKeybind
+                    class={web() ? "hidden xl:flex shrink-0 ml-14" : "hidden xl:flex shrink-0 ml-2"}
+                    placement="bottom"
+                    title={language.t("command.sidebar.toggle")}
+                    keybind={command.keybind("sidebar.toggle")}
                   >
-                    <Icon size="small" name={layout.sidebar.opened() ? "sidebar-active" : "sidebar"} />
-                  </Button>
-                </TooltipKeybind>
+                    <Button
+                      variant="ghost"
+                      class="group/sidebar-toggle titlebar-icon w-8 h-6 p-0 box-border"
+                      onClick={layout.sidebar.toggle}
+                      aria-label={language.t("command.sidebar.toggle")}
+                      aria-expanded={layout.sidebar.opened()}
+                    >
+                      <Icon size="small" name={layout.sidebar.opened() ? "sidebar-active" : "sidebar"} />
+                    </Button>
+                  </TooltipKeybind>
+                </Show>
                 <div class="hidden xl:flex items-center shrink-0">
                   <Show when={params.dir}>
                     <div

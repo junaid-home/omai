@@ -28,6 +28,7 @@ const users: Record<string, Authentication.Principal> = Object.fromEntries(
       instanceID: process.env.OPENCODE_INSTANCE_ID!,
       role: "member",
       settingsPermissions: fullSettingsPermissions(),
+      model: null,
     },
   ]),
 )

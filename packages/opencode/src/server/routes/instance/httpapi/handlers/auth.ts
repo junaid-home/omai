@@ -117,7 +117,7 @@ export const authHandlers = HttpApiBuilder.group(RootHttpApi, "auth", (handlers)
         })
         .pipe(Effect.orDie)
       const rows = yield* db
-        .select({ role: UserTable.role, settings_permissions: UserTable.settings_permissions })
+        .select({ role: UserTable.role, settings_permissions: UserTable.settings_permissions, model: UserTable.model })
         .from(UserTable)
         .where(eq(UserTable.id, user.id))
         .limit(1)
@@ -129,6 +129,7 @@ export const authHandlers = HttpApiBuilder.group(RootHttpApi, "auth", (handlers)
         email: user.email,
         role,
         settingsPermissions: effectiveSettingsPermissions(rows[0]?.settings_permissions ?? null, role === "admin"),
+        model: rows[0]?.model ?? null,
       }
       return { token, user: publicUser, cookie: sessionCookie(token, TOKEN_LIFETIME_MS / 1000) }
     })
@@ -280,7 +281,8 @@ export const authHandlers = HttpApiBuilder.group(RootHttpApi, "auth", (handlers)
           const password = yield* Effect.promise(() => hashPassword(input.password)).pipe(hashSlots.withPermit)
           const user = { id: randomUUID(), username: input.username, email }
           const now = Date.now()
-          const hasUsers = (yield* db.select({ id: UserTable.id }).from(UserTable).limit(1).pipe(Effect.orDie)).length > 0
+          const hasUsers =
+            (yield* db.select({ id: UserTable.id }).from(UserTable).limit(1).pipe(Effect.orDie)).length > 0
           const created = yield* db
             .insert(UserTable)
             .values({
@@ -346,6 +348,7 @@ export const authHandlers = HttpApiBuilder.group(RootHttpApi, "auth", (handlers)
               email: principal.email,
               role: principal.role,
               settingsPermissions: principal.settingsPermissions,
+              model: principal.model,
             },
             { headers: { "Cache-Control": "no-store" } },
           )

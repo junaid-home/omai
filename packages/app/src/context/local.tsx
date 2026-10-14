@@ -3,9 +3,11 @@ import { base64Encode } from "@opencode-ai/core/util/encode"
 import { useParams } from "@solidjs/router"
 import { batch, createEffect, createMemo, startTransition } from "solid-js"
 import { createStore } from "solid-js/store"
+import { useAuth } from "@/context/auth"
 import { useModels } from "@/context/models"
 import { useSettings } from "@/context/settings"
 import { useProviders } from "@/hooks/use-providers"
+import { assignedModel } from "@/utils/model-lock"
 import { Persist, persisted } from "@/utils/persist"
 import { hasCustomAgent, resolveAgent } from "./local-agent"
 import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
@@ -65,6 +67,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const providers = useProviders(() => sdk().directory)
     const models = useModels()
     const settings = useSettings()
+    const auth = useAuth()
+    const lock = createMemo(() => assignedModel(auth.user()))
 
     const id = createMemo(() => params.id || undefined)
     const list = createMemo(() => sync().data.agent.filter((item) => item.mode !== "subagent" && !item.hidden))
@@ -233,6 +237,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
     const current = () => {
       const item = firstModel(
+        () => lock() ?? undefined,
         () => scope()?.model,
         () => agent.current()?.model,
         fallback,
@@ -284,6 +289,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       recent,
       list: models.list,
       cycle(direction: 1 | -1) {
+        if (lock()) return
         const items = recent()
         const item = current()
         if (!item) return
@@ -300,6 +306,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         model.set({ providerID: entry.provider.id, modelID: entry.id })
       },
       set(item: ModelKey | undefined, options?: { recent?: boolean }) {
+        if (lock()) return
         startTransition(() =>
           batch(() => {
             setStore("last", {

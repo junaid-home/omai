@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs"
 import { Context, Effect } from "effect"
 import type { Role, SettingsPermissions } from "./user/permissions"
+import type { AssignedModel } from "./user/sql"
 
 /** A user authenticated for one deployment-owned instance, not a filesystem capability. */
 export type Principal = {
@@ -11,6 +12,7 @@ export type Principal = {
   readonly email: string
   readonly role: Role
   readonly settingsPermissions: SettingsPermissions
+  readonly model: AssignedModel | null
 }
 
 export const Current = Context.Reference<Principal | undefined>("@opencode/Authentication/Current", {

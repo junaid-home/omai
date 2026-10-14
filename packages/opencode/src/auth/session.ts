@@ -28,6 +28,7 @@ export const layer = Layer.effect(
             sessionID: AuthSessionTable.id,
             role: UserTable.role,
             settingsPermissions: UserTable.settings_permissions,
+            model: UserTable.model,
           })
           .from(AuthSessionTable)
           .innerJoin(UserTable, eq(AuthSessionTable.user_id, UserTable.id))
@@ -50,6 +51,7 @@ export const layer = Layer.effect(
           instanceID: Authentication.instanceID(),
           role,
           settingsPermissions: effectiveSettingsPermissions(row.settingsPermissions, role === "admin"),
+          model: row.model ?? null,
         }
       }),
     })

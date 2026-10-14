@@ -1,4 +1,5 @@
 import { batch, createMemo, startTransition } from "solid-js"
+import { useAuth } from "@/context/auth"
 import { useModels } from "@/context/models"
 import type { ModelKey, ModelSelection } from "@/context/local"
 import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "@/context/model-variant"
@@ -6,6 +7,7 @@ import { usePrompt } from "@/context/prompt"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { useProviders } from "@/hooks/use-providers"
+import { assignedModel } from "@/utils/model-lock"
 
 export function createPromptModelSelection(input: { agent: () => { model?: ModelKey; variant?: string } | undefined }) {
   const sdk = useSDK()
@@ -13,6 +15,8 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
   const models = useModels()
   const prompt = usePrompt()
   const providers = useProviders(() => sdk().directory)
+  const auth = useAuth()
+  const lock = createMemo(() => assignedModel(auth.user()))
   const connected = createMemo(() => new Set(providers.connected().map((item) => item.id)))
 
   const valid = (model: ModelKey) => {
@@ -38,6 +42,8 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
   }
 
   const current = () => {
+    const assigned = lock()
+    if (assigned && valid(assigned)) return models.find(assigned)
     const key = [prompt.model.current(), input.agent()?.model, configured(), recent(), fallback()].find(
       (item): item is ModelKey => !!item && valid(item),
     )
@@ -57,6 +63,7 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
     recent: recentModels,
     list: models.list,
     cycle(direction: 1 | -1) {
+      if (lock()) return
       const items = recentModels()
       const item = current()
       if (!item) return
@@ -66,6 +73,7 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
       if (next) selection.set({ providerID: next.provider.id, modelID: next.id })
     },
     set(item: ModelKey | undefined, options?: { recent?: boolean }) {
+      if (lock()) return
       startTransition(() =>
         batch(() => {
           prompt.model.set(item ? { ...item, variant: prompt.model.current()?.variant } : undefined)

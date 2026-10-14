@@ -11,6 +11,7 @@ import {
   ValidComponent,
 } from "solid-js"
 import { createStore } from "solid-js/store"
+import { useAuthOptional } from "@/context/auth"
 import { useLocal } from "@/context/local"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { popularProviders } from "@/hooks/use-providers"
@@ -28,6 +29,7 @@ import { TooltipV2 } from "@opencode-ai/ui/v2/tooltip-v2"
 import { ModelTooltip } from "./model-tooltip"
 import { useLanguage } from "@/context/language"
 import { decode64 } from "@/utils/base64"
+import { LOCKED_MODEL_LABEL, isModelLocked } from "@/utils/model-lock"
 import { handleDocumentSearchKeydown } from "@/utils/search-keydown"
 import { createEventListener } from "@solid-primitives/event-listener"
 import { matchesModelSearch } from "./dialog-select-model-search"
@@ -40,6 +42,13 @@ type ModelItem = ReturnType<ModelState["list"]>[number]
 
 const modelKey = (model: ModelItem) => `${model.provider.id}:${model.id}`
 const manageKey = "action:manage"
+const lockedKey = "locked:omai"
+
+const LockedModelRow = () => (
+  <div class="flex w-full items-center gap-x-2 px-3 py-2 text-13-regular text-text-base">
+    <span class="truncate">{LOCKED_MODEL_LABEL}</span>
+  </div>
+)
 
 const sortModelGroups = (a: { category: string; items: ModelItem[] }, b: { category: string; items: ModelItem[] }) => {
   const aIndex = popularProviders.indexOf(a.category)
@@ -62,6 +71,7 @@ const ModelList: Component<{
 }> = (props) => {
   const model = props.model ?? useLocal().model
   const language = useLanguage()
+  const auth = useAuthOptional()
 
   const models = createMemo(() =>
     model
@@ -69,6 +79,13 @@ const ModelList: Component<{
       .filter((m) => model.visible({ modelID: m.id, providerID: m.provider.id }))
       .filter((m) => (props.provider ? m.provider.id === props.provider : true)),
   )
+
+  if (isModelLocked(auth?.user()))
+    return (
+      <div class={`flex-1 min-h-0 px-1 ${props.class ?? ""}`}>
+        <LockedModelRow />
+      </div>
+    )
 
   return (
     <List
@@ -141,6 +158,7 @@ export function ModelSelectorPopover(props: {
   })
   const dialog = useDialog()
   const local = useLocal()
+  const auth = useAuthOptional()
   const directory = () => decode64(local.slug())
 
   const close = (dismiss: Dismiss) => {
@@ -202,28 +220,30 @@ export function ModelSelectorPopover(props: {
             onSelect={() => close("select")}
             class="p-1"
             action={
-              <div class="flex items-center gap-1">
-                <Tooltip placement="top" value={language.t("dialog.model.select.title")}>
-                  <IconButton
-                    icon="plus-small"
-                    variant="ghost"
-                    iconSize="normal"
-                    class="size-6"
-                    aria-label={language.t("dialog.model.select.title")}
-                    onClick={openFullDialog}
-                  />
-                </Tooltip>
-                <Tooltip placement="top" value={language.t("command.provider.connect")}>
-                  <IconButton
-                    icon="sliders"
-                    variant="ghost"
-                    iconSize="normal"
-                    class="size-6"
-                    aria-label={language.t("command.provider.connect")}
-                    onClick={handleConnectProvider}
-                  />
-                </Tooltip>
-              </div>
+              <Show when={!isModelLocked(auth?.user())}>
+                <div class="flex items-center gap-1">
+                  <Tooltip placement="top" value={language.t("dialog.model.select.title")}>
+                    <IconButton
+                      icon="plus-small"
+                      variant="ghost"
+                      iconSize="normal"
+                      class="size-6"
+                      aria-label={language.t("dialog.model.select.title")}
+                      onClick={openFullDialog}
+                    />
+                  </Tooltip>
+                  <Tooltip placement="top" value={language.t("command.provider.connect")}>
+                    <IconButton
+                      icon="sliders"
+                      variant="ghost"
+                      iconSize="normal"
+                      class="size-6"
+                      aria-label={language.t("command.provider.connect")}
+                      onClick={handleConnectProvider}
+                    />
+                  </Tooltip>
+                </div>
+              </Show>
             }
           />
         </Kobalte.Content>
@@ -243,16 +263,20 @@ export function ModelSelectorPopoverV2(props: {
   const model = props.model ?? useLocal().model
   const language = useLanguage()
   const dialog = useDialog()
+  const auth = useAuthOptional()
+  const locked = () => isModelLocked(auth?.user())
   const [store, setStore] = createStore({ open: false, search: "", active: "" })
   let searchRef: HTMLInputElement | undefined
   let contentRef: HTMLDivElement | undefined
   let restoreTrigger = true
 
   const allModels = createMemo(() =>
-    model
-      .list()
-      .filter((item) => model.visible({ modelID: item.id, providerID: item.provider.id }))
-      .filter((item) => (props.provider ? item.provider.id === props.provider : true)),
+    locked()
+      ? []
+      : model
+          .list()
+          .filter((item) => model.visible({ modelID: item.id, providerID: item.provider.id }))
+          .filter((item) => (props.provider ? item.provider.id === props.provider : true)),
   )
   const models = createMemo(() => {
     const search = store.search.trim()
@@ -269,8 +293,9 @@ export function ModelSelectorPopoverV2(props: {
     }
     return Array.from(byProvider, ([category, items]) => ({ category, items })).sort(sortModelGroups)
   })
-  const keys = () => [...models().map(modelKey), manageKey]
+  const keys = () => (locked() ? [lockedKey] : [...models().map(modelKey), manageKey])
   const current = () => {
+    if (locked()) return lockedKey
     const value = model.current()
     return value ? `${value.provider.id}:${value.id}` : undefined
   }
@@ -332,6 +357,11 @@ export function ModelSelectorPopoverV2(props: {
     })
   }
   const selectActive = () => {
+    if (locked()) {
+      setOpen(false)
+      afterClose(() => props.onClose?.())
+      return
+    }
     const item = models().find((item) => modelKey(item) === store.active)
     if (item) {
       selectModel(item)
@@ -431,96 +461,111 @@ export function ModelSelectorPopoverV2(props: {
                   <Icon name="close" size="small" />
                 </button>
               </Show>
-              <TooltipV2 placement="top" gutter={4} value={language.t("dialog.model.select.title")}>
-                <button
-                  type="button"
-                  class="flex size-5 items-center justify-center rounded-sm text-v2-icon-icon-muted hover:bg-v2-overlay-simple-overlay-hover"
-                  onClick={openFullDialog}
-                >
-                  <Icon name="plus-small" size="small" />
-                </button>
-              </TooltipV2>
+              <Show when={!locked()}>
+                <TooltipV2 placement="top" gutter={4} value={language.t("dialog.model.select.title")}>
+                  <button
+                    type="button"
+                    class="flex size-5 items-center justify-center rounded-sm text-v2-icon-icon-muted hover:bg-v2-overlay-simple-overlay-hover"
+                    onClick={openFullDialog}
+                  >
+                    <Icon name="plus-small" size="small" />
+                  </button>
+                </TooltipV2>
+              </Show>
             </div>
           </div>
           <div class="h-px bg-v2-border-border-muted" />
           <ScrollView data-slot="model-selector-scroll" class="max-h-[220px] min-h-0">
             <div class="flex flex-col p-0.5 pt-0">
               <Show
-                when={models().length > 0}
+                when={locked()}
                 fallback={
-                  <div class="flex h-12 items-center px-3 text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-faint">
-                    {language.t("dialog.model.empty")}
-                  </div>
+                  <Show
+                    when={models().length > 0}
+                    fallback={
+                      <div class="flex h-12 items-center px-3 text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-faint">
+                        {language.t("dialog.model.empty")}
+                      </div>
+                    }
+                  >
+                    <For each={groups()}>
+                      {(group) => (
+                        <MenuV2.Group>
+                          <MenuV2.GroupLabel class="gap-2 px-3">
+                            <span class="min-w-0 truncate">{group.items[0].provider.name}</span>
+                          </MenuV2.GroupLabel>
+                          <MenuV2.RadioGroup value={current()}>
+                            <For each={group.items}>
+                              {(item) => (
+                                <TooltipV2
+                                  class="w-full"
+                                  placement="right-start"
+                                  gutter={6}
+                                  openDelay={0}
+                                  value={
+                                    <ModelTooltip
+                                      model={item}
+                                      latest={item.latest}
+                                      free={isFree(item.provider.id, item.cost)}
+                                      v2
+                                    />
+                                  }
+                                >
+                                  <MenuV2.RadioItem
+                                    value={modelKey(item)}
+                                    data-option-key={modelKey(item)}
+                                    data-selected-model={current() === modelKey(item) ? true : undefined}
+                                    class="scroll-my-6 w-full"
+                                    classList={{
+                                      "!bg-v2-overlay-simple-overlay-hover": store.active === modelKey(item),
+                                    }}
+                                    onMouseEnter={() => {
+                                      setStore("active", modelKey(item))
+                                      setTimeout(() => searchRef?.focus())
+                                    }}
+                                    onSelect={() => selectModel(item)}
+                                  >
+                                    <span class="min-w-0 truncate leading-5">{item.name}</span>
+                                    <Show when={isFree(item.provider.id, item.cost)}>
+                                      <TagV2 class="shrink-0">{language.t("model.tag.free")}</TagV2>
+                                    </Show>
+                                    <Show when={item.latest}>
+                                      <TagV2 class="shrink-0">{language.t("model.tag.latest")}</TagV2>
+                                    </Show>
+                                  </MenuV2.RadioItem>
+                                </TooltipV2>
+                              )}
+                            </For>
+                          </MenuV2.RadioGroup>
+                        </MenuV2.Group>
+                      )}
+                    </For>
+                  </Show>
                 }
               >
-                <For each={groups()}>
-                  {(group) => (
-                    <MenuV2.Group>
-                      <MenuV2.GroupLabel class="gap-2 px-3">
-                        <span class="min-w-0 truncate">{group.items[0].provider.name}</span>
-                      </MenuV2.GroupLabel>
-                      <MenuV2.RadioGroup value={current()}>
-                        <For each={group.items}>
-                          {(item) => (
-                            <TooltipV2
-                              class="w-full"
-                              placement="right-start"
-                              gutter={6}
-                              openDelay={0}
-                              value={
-                                <ModelTooltip
-                                  model={item}
-                                  latest={item.latest}
-                                  free={isFree(item.provider.id, item.cost)}
-                                  v2
-                                />
-                              }
-                            >
-                              <MenuV2.RadioItem
-                                value={modelKey(item)}
-                                data-option-key={modelKey(item)}
-                                data-selected-model={current() === modelKey(item) ? true : undefined}
-                                class="scroll-my-6 w-full"
-                                classList={{ "!bg-v2-overlay-simple-overlay-hover": store.active === modelKey(item) }}
-                                onMouseEnter={() => {
-                                  setStore("active", modelKey(item))
-                                  setTimeout(() => searchRef?.focus())
-                                }}
-                                onSelect={() => selectModel(item)}
-                              >
-                                <span class="min-w-0 truncate leading-5">{item.name}</span>
-                                <Show when={isFree(item.provider.id, item.cost)}>
-                                  <TagV2 class="shrink-0">{language.t("model.tag.free")}</TagV2>
-                                </Show>
-                                <Show when={item.latest}>
-                                  <TagV2 class="shrink-0">{language.t("model.tag.latest")}</TagV2>
-                                </Show>
-                              </MenuV2.RadioItem>
-                            </TooltipV2>
-                          )}
-                        </For>
-                      </MenuV2.RadioGroup>
-                    </MenuV2.Group>
-                  )}
-                </For>
+                <div data-option-key={lockedKey} class="w-full">
+                  <LockedModelRow />
+                </div>
               </Show>
             </div>
           </ScrollView>
-          <div class="h-px bg-v2-border-border-muted" />
-          <div class="flex flex-col p-0.5">
-            <MenuV2.Item
-              data-option-key={manageKey}
-              classList={{ "!bg-v2-overlay-simple-overlay-hover": store.active === manageKey }}
-              onMouseEnter={() => {
-                setStore("active", manageKey)
-                setTimeout(() => searchRef?.focus())
-              }}
-              onSelect={connectProvider}
-            >
-              <Icon name="outline-sliders" size="small" />
-              <span class="min-w-0 flex-1 truncate leading-5">{language.t("command.provider.connect")}</span>
-            </MenuV2.Item>
-          </div>
+          <Show when={!locked()}>
+            <div class="h-px bg-v2-border-border-muted" />
+            <div class="flex flex-col p-0.5">
+              <MenuV2.Item
+                data-option-key={manageKey}
+                classList={{ "!bg-v2-overlay-simple-overlay-hover": store.active === manageKey }}
+                onMouseEnter={() => {
+                  setStore("active", manageKey)
+                  setTimeout(() => searchRef?.focus())
+                }}
+                onSelect={connectProvider}
+              >
+                <Icon name="outline-sliders" size="small" />
+                <span class="min-w-0 flex-1 truncate leading-5">{language.t("command.provider.connect")}</span>
+              </MenuV2.Item>
+            </div>
+          </Show>
         </MenuV2.Content>
       </MenuV2.Portal>
     </MenuV2>
@@ -531,6 +576,8 @@ export const DialogSelectModel: Component<{ provider?: string; model?: ModelStat
   const dialog = useDialog()
   const language = useLanguage()
   const local = useLocal()
+  const auth = useAuthOptional()
+  const locked = () => isModelLocked(auth?.user())
   const directory = () => decode64(local.slug())
 
   const provider = () => {
@@ -549,15 +596,19 @@ export const DialogSelectModel: Component<{ provider?: string; model?: ModelStat
     <Dialog
       title={language.t("dialog.model.select.title")}
       action={
-        <Button class="h-7 -my-1 text-14-medium" icon="plus-small" tabIndex={-1} onClick={provider}>
-          {language.t("command.provider.connect")}
-        </Button>
+        <Show when={!locked()}>
+          <Button class="h-7 -my-1 text-14-medium" icon="plus-small" tabIndex={-1} onClick={provider}>
+            {language.t("command.provider.connect")}
+          </Button>
+        </Show>
       }
     >
       <ModelList provider={props.provider} model={props.model} onSelect={() => dialog.close()} />
-      <Button variant="ghost" class="ml-3 mt-5 mb-6 text-text-base self-start" onClick={manage}>
-        {language.t("dialog.model.manage")}
-      </Button>
+      <Show when={!locked()}>
+        <Button variant="ghost" class="ml-3 mt-5 mb-6 text-text-base self-start" onClick={manage}>
+          {language.t("dialog.model.manage")}
+        </Button>
+      </Show>
     </Dialog>
   )
 }

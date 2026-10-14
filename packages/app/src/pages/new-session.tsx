@@ -15,6 +15,7 @@ import {
   createPromptProjectController,
 } from "@/components/prompt-project-selector"
 import { useComments } from "@/context/comments"
+import { useAuthOptional } from "@/context/auth"
 import { usePrompt } from "@/context/prompt"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
@@ -29,6 +30,7 @@ import { PromptGitStatus, PromptWorkspaceSelector } from "@/components/prompt-wo
 import { useTitlebarRightMount } from "@/components/titlebar"
 import { useCommand } from "@/context/command"
 import { useProviders } from "@/hooks/use-providers"
+import { isModelLocked } from "@/utils/model-lock"
 import { Persist, persisted } from "@/utils/persist"
 import createPresence from "solid-presence"
 import { useLocal } from "@/context/local"
@@ -214,6 +216,7 @@ export default function NewSessionPage() {
 
 function ProviderTip(props: { ready: () => boolean; connected: () => boolean; openProviders: () => void }) {
   const language = useLanguage()
+  const auth = useAuthOptional()
   const [persistedState, setPersistedState, , persistedReady] = persisted(
     Persist.global("new-session.provider-tip"),
     createStore({ dismissedAt: 0 }),
@@ -223,6 +226,7 @@ function ProviderTip(props: { ready: () => boolean; connected: () => boolean; op
       props.ready() &&
       persistedReady() &&
       !props.connected() &&
+      !isModelLocked(auth?.user()) &&
       Date.now() - persistedState.dismissedAt >= providerTipDismissalDuration,
   )
 
