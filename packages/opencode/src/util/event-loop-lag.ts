@@ -16,7 +16,10 @@ export function watch(scope: Scope.Scope) {
   const histogram = monitorEventLoopDelay({ resolution: 20 })
   histogram.enable()
   return Effect.gen(function* () {
-    yield* Scope.addFinalizer(scope, Effect.sync(() => histogram.disable()))
+    yield* Scope.addFinalizer(
+      scope,
+      Effect.sync(() => histogram.disable()),
+    )
     yield* report(histogram).pipe(Effect.repeat(Schedule.spaced("10 seconds")), Effect.forkIn(scope))
   })
 }
@@ -27,7 +30,7 @@ function report(histogram: IntervalHistogram) {
     const p99Ms = histogram.percentile(99) / 1e6
     const samples = histogram.count
     histogram.reset()
-    if (maxMs < STALL_MS) return
+    if (maxMs < STALL_MS || maxMs > 60_000) return
     yield* Effect.logWarning("event loop stalled", {
       maxMs: Math.round(maxMs),
       p99Ms: Math.round(p99Ms),
