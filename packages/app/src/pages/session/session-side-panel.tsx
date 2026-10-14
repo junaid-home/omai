@@ -168,7 +168,8 @@ export function SessionSidePanel(props: {
   const projectName = createMemo(() => displayName(project() ?? { worktree: sdk().directory }))
   const downloadProject = async (name: string) => {
     try {
-      const response = await fetch(`${sdk().url}/file/download`, {
+      const params = new URLSearchParams({ directory: sdk().directory })
+      const response = await fetch(`${sdk().url}/file/download?${params}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ directory: sdk().directory }),
@@ -1521,7 +1522,8 @@ export function SessionSidePanel(props: {
                             onDownloadProject={downloadProject}
                             onRename={async (oldPath: string, newPath: string) => {
                               try {
-                                await fetch(`${sdk().url}/file/rename`, {
+                                const params = new URLSearchParams({ directory: projectDirectory() })
+                                await fetch(`${sdk().url}/file/rename?${params}`, {
                                   method: "POST",
                                   headers: { "Content-Type": "application/json" },
                                   body: JSON.stringify({ directory: projectDirectory(), oldPath, newPath }),
@@ -1531,7 +1533,8 @@ export function SessionSidePanel(props: {
                             }}
                             onDelete={async (path: string) => {
                               try {
-                                await fetch(`${sdk().url}/file/remove`, {
+                                const params = new URLSearchParams({ directory: projectDirectory() })
+                                await fetch(`${sdk().url}/file/remove?${params}`, {
                                   method: "POST",
                                   headers: { "Content-Type": "application/json" },
                                   body: JSON.stringify({ directory: projectDirectory(), path }),

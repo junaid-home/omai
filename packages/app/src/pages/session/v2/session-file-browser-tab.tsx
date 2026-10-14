@@ -84,7 +84,8 @@ export function SessionFileBrowserTab(props: {
 
   const downloadProject = async (name: string) => {
     try {
-      const response = await fetch(`${sdk().url}/file/download`, {
+      const params = new URLSearchParams({ directory: sdk().directory })
+      const response = await fetch(`${sdk().url}/file/download?${params}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ directory: sdk().directory }),
