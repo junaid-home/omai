@@ -20,6 +20,7 @@
 import { Effect } from "effect"
 import { OpenApi } from "effect/unstable/httpapi"
 import { TestLLMServer } from "../../lib/llm-server"
+import fs from "fs/promises"
 import path from "path"
 import { array, boolean, check, isRecord, message, object, stable } from "./assertions"
 import { controlledPtyInput, http, route } from "./dsl"
@@ -227,6 +228,35 @@ const scenarios: Scenario[] = [
       headers: ctx.headers(),
     }))
     .json(200, array, "status"),
+  http.protected
+    .delete("/project/{projectID}", "project.delete.missing")
+    .at((ctx) => ({
+      path: route("/project/{projectID}", { projectID: "project_httpapi_missing" }),
+      headers: ctx.headers(),
+    }))
+    .json(404, object, "status"),
+  http.protected
+    .delete("/project/{projectID}", "project.delete")
+    .mutating()
+    .seeded((ctx) => Effect.all({ project: ctx.project(), session: ctx.session() }))
+    .at((ctx) => ({
+      path: route("/project/{projectID}", { projectID: ctx.state.project.id }),
+      headers: ctx.headers(),
+    }))
+    .jsonEffect(
+      200,
+      (body, ctx) =>
+        Effect.gen(function* () {
+          check(body === true, "project delete should return true")
+          const exists = yield* Effect.promise(
+            () => fs.access(ctx.state.project.worktree).then(() => true, () => false),
+          )
+          check(!exists, "project delete should wipe the worktree directory")
+          const session = yield* ctx.sessionGet(ctx.state.session.id)
+          check(session === undefined, "project delete should remove the project's sessions")
+        }),
+      "status",
+    ),
   http.protected
     .post("/experimental/project/{projectID}/copy/generate-name", "experimental.projectCopy.generateName")
     .seeded((ctx) => ctx.project())

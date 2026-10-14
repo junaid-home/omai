@@ -70,6 +70,18 @@ export const ProjectApi = HttpApi.make("project")
             description: "Update project properties such as name, icon, and commands.",
           }),
         ),
+        HttpApiEndpoint.delete("remove", `${root}/:projectID`, {
+          params: { projectID: ProjectV2.ID },
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Boolean, "True once the project has been deleted"),
+          error: [HttpApiError.BadRequest, ProjectNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "project.delete",
+            summary: "Delete project",
+            description: "Delete a project, remove its sessions, and wipe its worktree directory from disk.",
+          }),
+        ),
         HttpApiEndpoint.get("directories", `${root}/:projectID/directories`, {
           params: { projectID: ProjectV2.ID },
           query: WorkspaceRoutingQuery,

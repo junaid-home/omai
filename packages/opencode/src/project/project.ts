@@ -4,10 +4,12 @@ import { Database } from "@opencode-ai/core/database/database"
 import { ProjectDirectoryTable, ProjectTable } from "@opencode-ai/core/project/sql"
 import { ProjectDirectories } from "@opencode-ai/core/project/directories"
 import { SessionTable } from "@opencode-ai/core/session/sql"
+import { InstanceStateTable } from "@opencode-ai/core/instance-state/sql"
 import { WorkspaceTable } from "@opencode-ai/core/control-plane/workspace.sql"
 import { PermissionTable } from "@opencode-ai/core/permission/sql"
 import { PublishDeploymentTable } from "@opencode-ai/core/publish/sql"
 import { Flag } from "@opencode-ai/core/flag/flag"
+import { Global } from "@opencode-ai/core/global"
 import { GlobalBus } from "@/bus/global"
 import { which } from "@opencode-ai/core/util/which"
 import { Command } from "@/command"
@@ -18,12 +20,16 @@ import { FSUtil } from "@opencode-ai/core/fs-util"
 import { AppProcess } from "@opencode-ai/core/process"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
+import { CentralStorage } from "@opencode-ai/core/storage/central"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
+import { Session } from "@/session/session"
+import { Storage } from "@/storage/storage"
 import { Project } from "@opencode-ai/schema/project"
+import os from "os"
 import path from "path"
 
 export const Info = Project.Info
@@ -79,6 +85,11 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Pro
   projectID: ProjectV2.ID,
 }) {}
 
+export class InvalidTargetError extends Schema.TaggedErrorClass<InvalidTargetError>()("Project.InvalidTargetError", {
+  projectID: ProjectV2.ID,
+  message: Schema.String,
+}) {}
+
 // ---------------------------------------------------------------------------
 // Effect service
 // ---------------------------------------------------------------------------
@@ -95,6 +106,7 @@ export interface Interface {
   readonly list: () => Effect.Effect<Info[]>
   readonly get: (id: ProjectV2.ID) => Effect.Effect<Info | undefined>
   readonly update: (input: UpdateInput) => Effect.Effect<Info, NotFoundError>
+  readonly remove: (id: ProjectV2.ID) => Effect.Effect<void, NotFoundError | InvalidTargetError>
   readonly initGit: (input: { directory: string; project: Info; force?: boolean }) => Effect.Effect<Info>
   readonly setInitialized: (id: ProjectV2.ID) => Effect.Effect<void>
   readonly sandboxes: (id: ProjectV2.ID) => Effect.Effect<string[]>
@@ -157,6 +169,7 @@ const layer = Layer.effect(
     const projectDirectories = yield* ProjectDirectories.Service
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
+    const session = yield* Session.Service
     const { db } = yield* Database.Service
 
     const emitUpdated = (data: Info) =>
@@ -418,6 +431,80 @@ const layer = Layer.effect(
       return data
     })
 
+    const remove = Effect.fn("Project.remove")(function* (id: ProjectV2.ID) {
+      if (id === ProjectV2.ID.global)
+        return yield* new InvalidTargetError({ projectID: id, message: "The global project cannot be deleted" })
+      const row = yield* db
+        .select()
+        .from(ProjectTable)
+        .where(eq(ProjectTable.id, id))
+        .pipe(Database.first)
+        .pipe(Effect.orDie)
+      if (!row) return yield* new NotFoundError({ projectID: id })
+
+      const worktree = FSUtil.resolve(row.worktree)
+      const root = CentralStorage.workspaceRoot()
+      if (root) {
+        yield* Effect.promise(() => CentralStorage.resolveUnder(root, worktree)).pipe(
+          Effect.catch(() =>
+            Effect.fail(
+              new InvalidTargetError({
+                projectID: id,
+                message: `Refusing to delete a directory outside the workspace: ${worktree}`,
+              }),
+            ),
+          ),
+        )
+      } else if (worktree === "/" || worktree === os.homedir()) {
+        return yield* new InvalidTargetError({
+          projectID: id,
+          message: `Refusing to delete a protected directory: ${worktree}`,
+        })
+      }
+
+      const sessions = yield* db
+        .select({ id: SessionTable.id })
+        .from(SessionTable)
+        .where(eq(SessionTable.project_id, id))
+        .pipe(Effect.orDie)
+      // A session row that vanishes mid-delete is already gone; the rest of
+      // the project cleanup must still run.
+      yield* Effect.forEach(sessions, (item) => session.remove(item.id).pipe(Effect.ignore), {
+        concurrency: 1,
+        discard: true,
+      })
+
+      // Checkpoint rows live in instance_state without a foreign key, and the
+      // project id derives from the directory, so a recreated project would
+      // otherwise inherit stale checkpoints.
+      const prefix = `["checkpoint","${id}"`
+      const pattern = `${prefix.replace(/[\\%_]/g, (character) => `\\${character}`)}%`
+      yield* db
+        .delete(InstanceStateTable)
+        .where(
+          and(
+            eq(InstanceStateTable.namespace, Storage.namespace),
+            sql`${InstanceStateTable.key} like ${pattern} escape '\\'`,
+          ),
+        )
+        .pipe(Effect.orDie)
+      yield* db.delete(ProjectTable).where(eq(ProjectTable.id, id)).pipe(Effect.orDie)
+
+      yield* fs
+        .remove(worktree, { recursive: true, force: true })
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("project directory removal failed", { projectID: id, worktree, cause }),
+          ),
+        )
+      yield* fs
+        .remove(path.join(Global.Path.data, "checkpoint", id), { recursive: true, force: true })
+        .pipe(Effect.ignore)
+      yield* fs
+        .remove(path.join(Global.Path.data, "snapshot", id), { recursive: true, force: true })
+        .pipe(Effect.ignore)
+    })
+
     const initGit = Effect.fn("Project.initGit")(function* (input: {
       directory: string
       project: Info
@@ -526,6 +613,7 @@ const layer = Layer.effect(
       list,
       get,
       update,
+      remove,
       initGit,
       setInitialized,
       sandboxes,
@@ -548,6 +636,7 @@ export const node = LayerNode.make({
     ProjectDirectories.node,
     EventV2Bridge.node,
     RuntimeFlags.node,
+    Session.node,
     Database.node,
   ],
 })

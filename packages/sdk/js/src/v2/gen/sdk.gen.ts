@@ -3,6 +3,14 @@
 import { client } from "./client.gen.js"
 import { buildClientParams, type Client, type Options as Options2, type TDataShape } from "./client/index.js"
 import type {
+  AdminCreateErrors,
+  AdminCreateResponses,
+  AdminListErrors,
+  AdminListResponses,
+  AdminRemoveErrors,
+  AdminRemoveResponses,
+  AdminUpdateErrors,
+  AdminUpdateResponses,
   AgentPartInput,
   AppAgentsErrors,
   AppAgentsResponses,
@@ -219,6 +227,8 @@ import type {
   ProjectCommands,
   ProjectCurrentErrors,
   ProjectCurrentResponses,
+  ProjectDeleteErrors,
+  ProjectDeleteResponses,
   ProjectDirectoriesErrors,
   ProjectDirectoriesResponses,
   ProjectIcon,
@@ -1822,6 +1832,137 @@ export class Global extends HeyApiClient {
   private _preview?: Preview
   get preview(): Preview {
     return (this._preview ??= new Preview({ client: this.client }))
+  }
+}
+
+export class Admin extends HeyApiClient {
+  /**
+   * List users
+   *
+   * List every user on the instance with role and settings permissions.
+   */
+  public list<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<AdminListResponses, AdminListErrors, ThrowOnError>({
+      url: "/admin/users",
+      ...options,
+    })
+  }
+
+  /**
+   * Create a user
+   *
+   * Create a new user with a role and settings permissions.
+   */
+  public create<ThrowOnError extends boolean = false>(
+    parameters?: {
+      username?: string
+      email?: string
+      password?: string
+      role?: "admin" | "member"
+      settingsPermissions?: {
+        general: boolean
+        terminal: boolean
+        fileTree: boolean
+        shortcuts: boolean
+        servers: boolean
+        providers: boolean
+        models: boolean
+        mcp: boolean
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "username" },
+            { in: "body", key: "email" },
+            { in: "body", key: "password" },
+            { in: "body", key: "role" },
+            { in: "body", key: "settingsPermissions" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<AdminCreateResponses, AdminCreateErrors, ThrowOnError>({
+      url: "/admin/users",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Remove a user
+   *
+   * Delete a user account and revoke its sessions.
+   */
+  public remove<ThrowOnError extends boolean = false>(
+    parameters: {
+      userID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "userID" }] }])
+    return (options?.client ?? this.client).delete<AdminRemoveResponses, AdminRemoveErrors, ThrowOnError>({
+      url: "/admin/users/{userID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Update a user
+   *
+   * Change a user's role, settings permissions, or password.
+   */
+  public update<ThrowOnError extends boolean = false>(
+    parameters: {
+      userID: string
+      role?: "admin" | "member"
+      settingsPermissions?: {
+        general: boolean
+        terminal: boolean
+        fileTree: boolean
+        shortcuts: boolean
+        servers: boolean
+        providers: boolean
+        models: boolean
+        mcp: boolean
+      }
+      password?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "userID" },
+            { in: "body", key: "role" },
+            { in: "body", key: "settingsPermissions" },
+            { in: "body", key: "password" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<AdminUpdateResponses, AdminUpdateErrors, ThrowOnError>({
+      url: "/admin/users/{userID}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
   }
 }
 
@@ -4127,6 +4268,38 @@ export class Project extends HeyApiClient {
     )
     return (options?.client ?? this.client).post<ProjectInitGitResponses, ProjectInitGitErrors, ThrowOnError>({
       url: "/project/git/init",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Delete project
+   *
+   * Delete a project, remove its sessions, and wipe its worktree directory from disk.
+   */
+  public delete<ThrowOnError extends boolean = false>(
+    parameters: {
+      projectID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "projectID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<ProjectDeleteResponses, ProjectDeleteErrors, ThrowOnError>({
+      url: "/project/{projectID}",
       ...options,
       ...params,
     })
@@ -8965,6 +9138,11 @@ export class OpencodeClient extends HeyApiClient {
   private _global?: Global
   get global(): Global {
     return (this._global ??= new Global({ client: this.client }))
+  }
+
+  private _admin?: Admin
+  get admin(): Admin {
+    return (this._admin ??= new Admin({ client: this.client }))
   }
 
   private _media?: Media

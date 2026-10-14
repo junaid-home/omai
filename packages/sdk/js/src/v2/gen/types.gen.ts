@@ -143,6 +143,11 @@ export type InvalidRequestError = {
   field?: string
 }
 
+export type ForbiddenError = {
+  _tag: "ForbiddenError"
+  message: string
+}
+
 export type MoveSessionError = {
   name: "MoveSessionError"
   data: {
@@ -2044,6 +2049,12 @@ export type Config = {
   }
 }
 
+export type ConflictError = {
+  _tag: "ConflictError"
+  message: string
+  resource?: string
+}
+
 export type UserStateConflict = {
   revision: number
   value: string
@@ -2762,12 +2773,6 @@ export type PromptInput = {
   agents?: Array<PromptAgentAttachment>
 }
 
-export type ConflictError = {
-  _tag: "ConflictError"
-  message: string
-  resource?: string
-}
-
 export type ServiceUnavailableError = {
   _tag: "ServiceUnavailableError"
   message: string
@@ -2995,11 +3000,6 @@ export type V2Event =
   | GlobalDisposed
 
 export type V2EventStream = string
-
-export type ForbiddenError = {
-  _tag: "ForbiddenError"
-  message: string
-}
 
 export type ProjectCopyError = {
   name: "ProjectCopyError"
@@ -7185,6 +7185,10 @@ export type AuthRemoveErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type AuthRemoveError = AuthRemoveErrors[keyof AuthRemoveErrors]
@@ -7212,6 +7216,10 @@ export type AuthSetErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type AuthSetError = AuthSetErrors[keyof AuthSetErrors]
@@ -7418,6 +7426,10 @@ export type GlobalConfigUpdateErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type GlobalConfigUpdateError = GlobalConfigUpdateErrors[keyof GlobalConfigUpdateErrors]
@@ -7934,10 +7946,226 @@ export type AuthMeResponses = {
     id: string
     username: string
     email: string
+    role: "admin" | "member"
+    settingsPermissions: {
+      general: boolean
+      terminal: boolean
+      fileTree: boolean
+      shortcuts: boolean
+      servers: boolean
+      providers: boolean
+      models: boolean
+      mcp: boolean
+    }
   }
 }
 
 export type AuthMeResponse = AuthMeResponses[keyof AuthMeResponses]
+
+export type AdminListData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/admin/users"
+}
+
+export type AdminListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type AdminListError = AdminListErrors[keyof AdminListErrors]
+
+export type AdminListResponses = {
+  /**
+   * All users
+   */
+  200: Array<{
+    id: string
+    username: string
+    email: string
+    role: "admin" | "member"
+    settingsPermissions: {
+      general: boolean
+      terminal: boolean
+      fileTree: boolean
+      shortcuts: boolean
+      servers: boolean
+      providers: boolean
+      models: boolean
+      mcp: boolean
+    }
+  }>
+}
+
+export type AdminListResponse = AdminListResponses[keyof AdminListResponses]
+
+export type AdminCreateData = {
+  body?: {
+    username: string
+    email: string
+    password: string
+    role?: "admin" | "member"
+    settingsPermissions?: {
+      general: boolean
+      terminal: boolean
+      fileTree: boolean
+      shortcuts: boolean
+      servers: boolean
+      providers: boolean
+      models: boolean
+      mcp: boolean
+    }
+  }
+  path?: never
+  query?: never
+  url: "/admin/users"
+}
+
+export type AdminCreateErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type AdminCreateError = AdminCreateErrors[keyof AdminCreateErrors]
+
+export type AdminCreateResponses = {
+  /**
+   * User created
+   */
+  200: {
+    id: string
+    username: string
+    email: string
+    role: "admin" | "member"
+    settingsPermissions: {
+      general: boolean
+      terminal: boolean
+      fileTree: boolean
+      shortcuts: boolean
+      servers: boolean
+      providers: boolean
+      models: boolean
+      mcp: boolean
+    }
+  }
+}
+
+export type AdminCreateResponse = AdminCreateResponses[keyof AdminCreateResponses]
+
+export type AdminRemoveData = {
+  body?: never
+  path: {
+    userID: string
+  }
+  query?: never
+  url: "/admin/users/{userID}"
+}
+
+export type AdminRemoveErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type AdminRemoveError = AdminRemoveErrors[keyof AdminRemoveErrors]
+
+export type AdminRemoveResponses = {
+  /**
+   * User removed
+   */
+  200: boolean
+}
+
+export type AdminRemoveResponse = AdminRemoveResponses[keyof AdminRemoveResponses]
+
+export type AdminUpdateData = {
+  body?: {
+    role?: "admin" | "member"
+    settingsPermissions?: {
+      general: boolean
+      terminal: boolean
+      fileTree: boolean
+      shortcuts: boolean
+      servers: boolean
+      providers: boolean
+      models: boolean
+      mcp: boolean
+    }
+    password?: string
+  }
+  path: {
+    userID: string
+  }
+  query?: never
+  url: "/admin/users/{userID}"
+}
+
+export type AdminUpdateErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type AdminUpdateError = AdminUpdateErrors[keyof AdminUpdateErrors]
+
+export type AdminUpdateResponses = {
+  /**
+   * User updated
+   */
+  200: {
+    id: string
+    username: string
+    email: string
+    role: "admin" | "member"
+    settingsPermissions: {
+      general: boolean
+      terminal: boolean
+      fileTree: boolean
+      shortcuts: boolean
+      servers: boolean
+      providers: boolean
+      models: boolean
+      mcp: boolean
+    }
+  }
+}
+
+export type AdminUpdateResponse = AdminUpdateResponses[keyof AdminUpdateResponses]
 
 export type MediaImageData = {
   body?: never
@@ -10018,6 +10246,10 @@ export type McpAddErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type McpAddError = McpAddErrors[keyof McpAddErrors]
@@ -10050,6 +10282,10 @@ export type McpAuthRemoveErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * McpServerNotFoundError
    */
@@ -10086,6 +10322,10 @@ export type McpAuthStartErrors = {
    * McpUnsupportedOAuthError | InvalidRequestError
    */
   400: McpUnsupportedOAuthError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * McpServerNotFoundError
    */
@@ -10126,6 +10366,10 @@ export type McpAuthCallbackErrors = {
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * McpServerNotFoundError
    */
   404: McpServerNotFoundError
@@ -10159,6 +10403,10 @@ export type McpAuthAuthenticateErrors = {
    * McpUnsupportedOAuthError | InvalidRequestError
    */
   400: McpUnsupportedOAuthError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * McpServerNotFoundError
    */
@@ -10194,6 +10442,10 @@ export type McpConnectErrors = {
    */
   400: BadRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * McpServerNotFoundError
    */
   404: McpServerNotFoundError
@@ -10228,6 +10480,10 @@ export type McpDisconnectErrors = {
    */
   400: BadRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * McpServerNotFoundError
    */
   404: McpServerNotFoundError
@@ -10261,6 +10517,10 @@ export type McpRemoveErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * McpServerNotFoundError
    */
@@ -10362,6 +10622,40 @@ export type ProjectInitGitResponses = {
 }
 
 export type ProjectInitGitResponse = ProjectInitGitResponses[keyof ProjectInitGitResponses]
+
+export type ProjectDeleteData = {
+  body?: never
+  path: {
+    projectID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/project/{projectID}"
+}
+
+export type ProjectDeleteErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ProjectNotFoundError
+   */
+  404: ProjectNotFoundError
+}
+
+export type ProjectDeleteError = ProjectDeleteErrors[keyof ProjectDeleteErrors]
+
+export type ProjectDeleteResponses = {
+  /**
+   * True once the project has been deleted
+   */
+  200: boolean
+}
+
+export type ProjectDeleteResponse = ProjectDeleteResponses[keyof ProjectDeleteResponses]
 
 export type ProjectUpdateData = {
   body?: {

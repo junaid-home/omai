@@ -126,6 +126,7 @@ export default function ProjectsPage() {
 
   const deleteProject = (directory: string) => {
     const projectName = directory.split("/").filter(Boolean).pop() || directory
+    const [deleting, setDeleting] = createSignal(false)
     dialog.show(
       () => (
         <Dialog size="normal" class="max-w-[400px] translate-x-[100px]" title={language.t("projects.delete.title")} fit>
@@ -136,19 +137,42 @@ export default function ProjectsPage() {
               </span>
             </div>
             <div class="flex justify-end gap-2">
-              <Button variant="ghost" size="large" onClick={() => dialog.close()}>
+              <Button variant="ghost" size="large" disabled={deleting()} onClick={() => dialog.close()}>
                 {language.t("common.cancel")}
               </Button>
               <Button
                 variant="primary"
                 size="large"
                 class="bg-[#ff6b6b] hover:bg-[#ff4c4c] text-white"
+                disabled={deleting()}
                 onClick={() => {
-                  server.projects.close(directory)
-                  dialog.close()
+                  if (deleting()) return
+                  setDeleting(true)
+                  const project = serverSync().data.project.find((item) => item.worktree === directory)
+                  void (async () => {
+                    try {
+                      if (project) {
+                        const result = await serverSDK().client.project.delete({ projectID: project.id, directory })
+                        if (result.error) {
+                          setDeleting(false)
+                          return
+                        }
+                        serverSync().set(
+                          "project",
+                          serverSync().data.project.filter((item) => item.id !== project.id),
+                        )
+                      }
+                      server.projects.close(directory)
+                      dialog.close()
+                    } catch {
+                      setDeleting(false)
+                    }
+                  })()
                 }}
               >
-                {language.t("common.delete")}
+                <Show when={deleting()} fallback={language.t("common.delete")}>
+                  <LoaderV2 class="shrink-0" />
+                </Show>
               </Button>
             </div>
           </div>

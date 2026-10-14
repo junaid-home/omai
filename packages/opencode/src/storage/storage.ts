@@ -24,7 +24,8 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@opencode/Storage") {}
 
 const decodeKey = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String)))
-const namespace = "legacy-storage"
+
+export const namespace = "legacy-storage"
 
 const layer = Layer.effect(
   Service,
