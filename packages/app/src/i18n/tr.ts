@@ -975,6 +975,8 @@ export const dict = {
   "settings.section.desktop": "Masaüstü",
   "settings.section.server": "Sunucu",
   "settings.tab.general": "Genel",
+  "settings.admin.permission.context": "Bağlam",
+  "settings.admin.permission.sessionNavigation": "Oturum gezintisi",
   "settings.tab.shortcuts": "Kısayollar",
   "settings.desktop.section.wsl": "WSL",
   "settings.desktop.wsl.title": "WSL entegrasyonu",

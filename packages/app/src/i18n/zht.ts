@@ -950,6 +950,8 @@ export const dict = {
   "settings.section.desktop": "桌面",
   "settings.section.server": "伺服器",
   "settings.tab.general": "一般",
+  "settings.admin.permission.context": "上下文",
+  "settings.admin.permission.sessionNavigation": "工作階段導覽",
   "settings.tab.shortcuts": "快速鍵",
   "settings.desktop.section.wsl": "WSL",
   "settings.desktop.wsl.title": "WSL 整合",

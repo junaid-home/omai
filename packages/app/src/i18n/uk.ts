@@ -1065,6 +1065,8 @@ export const dict = {
   "settings.section.desktop": "Робочий стіл",
   "settings.section.server": "Сервер",
   "settings.tab.general": "Загальні",
+  "settings.admin.permission.context": "Контекст",
+  "settings.admin.permission.sessionNavigation": "Навігація по сесіях",
   "settings.tab.shortcuts": "Скорочення",
   "settings.desktop.section.wsl": "WSL",
   "settings.desktop.wsl.title": "Інтеграція WSL",

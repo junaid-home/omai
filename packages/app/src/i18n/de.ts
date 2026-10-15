@@ -921,6 +921,8 @@ export const dict = {
   "settings.section.desktop": "Desktop",
   "settings.section.server": "Server",
   "settings.tab.general": "Allgemein",
+  "settings.admin.permission.context": "Kontext",
+  "settings.admin.permission.sessionNavigation": "Sitzungsnavigation",
   "settings.tab.shortcuts": "Tastenkombinationen",
   "settings.desktop.section.wsl": "WSL",
   "settings.desktop.wsl.title": "WSL-Integration",

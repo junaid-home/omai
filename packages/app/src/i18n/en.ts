@@ -934,6 +934,8 @@ export const dict = {
   "settings.admin.permission.terminal": "Terminal",
   "settings.admin.permission.mestro": "Mestro",
   "settings.admin.permission.sessions": "Sessions",
+  "settings.admin.permission.context": "Context",
+  "settings.admin.permission.sessionNavigation": "Session navigation",
   "settings.admin.user.model": "Model",
   "settings.admin.user.model.none": "No restriction",
   "settings.admin.user.model.hint": "Locked members only use this model and see it as OMAI+.",

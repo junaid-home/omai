@@ -7,6 +7,7 @@ export const SettingsScope = Schema.Literals([
   "general",
   "terminal",
   "fileTree",
+  "context",
   "shortcuts",
   "servers",
   "providers",
@@ -14,6 +15,7 @@ export const SettingsScope = Schema.Literals([
   "mcp",
   "mestro",
   "sessions",
+  "sessionNavigation",
 ])
 export type SettingsScope = Schema.Schema.Type<typeof SettingsScope>
 
@@ -21,6 +23,7 @@ export const settingsScopes = [
   "general",
   "terminal",
   "fileTree",
+  "context",
   "shortcuts",
   "servers",
   "providers",
@@ -28,6 +31,7 @@ export const settingsScopes = [
   "mcp",
   "mestro",
   "sessions",
+  "sessionNavigation",
 ] as const satisfies readonly SettingsScope[]
 
 export type SettingsPermissions = Record<SettingsScope, boolean>

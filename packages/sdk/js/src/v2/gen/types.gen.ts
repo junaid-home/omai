@@ -7951,6 +7951,7 @@ export type AuthMeResponses = {
       general: boolean
       terminal: boolean
       fileTree: boolean
+      context: boolean
       shortcuts: boolean
       servers: boolean
       providers: boolean
@@ -7958,6 +7959,7 @@ export type AuthMeResponses = {
       mcp: boolean
       mestro: boolean
       sessions: boolean
+      sessionNavigation: boolean
     }
     model: {
       providerID: string
@@ -8001,6 +8003,7 @@ export type AdminListResponses = {
       general: boolean
       terminal: boolean
       fileTree: boolean
+      context: boolean
       shortcuts: boolean
       servers: boolean
       providers: boolean
@@ -8008,6 +8011,7 @@ export type AdminListResponses = {
       mcp: boolean
       mestro: boolean
       sessions: boolean
+      sessionNavigation: boolean
     }
     model: {
       providerID: string
@@ -8028,6 +8032,7 @@ export type AdminCreateData = {
       general: boolean
       terminal: boolean
       fileTree: boolean
+      context: boolean
       shortcuts: boolean
       servers: boolean
       providers: boolean
@@ -8035,6 +8040,7 @@ export type AdminCreateData = {
       mcp: boolean
       mestro: boolean
       sessions: boolean
+      sessionNavigation: boolean
     }
     model?: {
       providerID: string
@@ -8076,6 +8082,7 @@ export type AdminCreateResponses = {
       general: boolean
       terminal: boolean
       fileTree: boolean
+      context: boolean
       shortcuts: boolean
       servers: boolean
       providers: boolean
@@ -8083,6 +8090,7 @@ export type AdminCreateResponses = {
       mcp: boolean
       mestro: boolean
       sessions: boolean
+      sessionNavigation: boolean
     }
     model: {
       providerID: string
@@ -8135,6 +8143,7 @@ export type AdminUpdateData = {
       general: boolean
       terminal: boolean
       fileTree: boolean
+      context: boolean
       shortcuts: boolean
       servers: boolean
       providers: boolean
@@ -8142,6 +8151,7 @@ export type AdminUpdateData = {
       mcp: boolean
       mestro: boolean
       sessions: boolean
+      sessionNavigation: boolean
     }
     password?: string
     model?: {
@@ -8186,6 +8196,7 @@ export type AdminUpdateResponses = {
       general: boolean
       terminal: boolean
       fileTree: boolean
+      context: boolean
       shortcuts: boolean
       servers: boolean
       providers: boolean
@@ -8193,6 +8204,7 @@ export type AdminUpdateResponses = {
       mcp: boolean
       mestro: boolean
       sessions: boolean
+      sessionNavigation: boolean
     }
     model: {
       providerID: string

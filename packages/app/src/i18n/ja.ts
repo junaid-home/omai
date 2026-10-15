@@ -906,6 +906,8 @@ export const dict = {
   "settings.section.desktop": "デスクトップ",
   "settings.section.server": "サーバー",
   "settings.tab.general": "一般",
+  "settings.admin.permission.context": "コンテキスト",
+  "settings.admin.permission.sessionNavigation": "セッションナビゲーション",
   "settings.tab.shortcuts": "ショートカット",
   "settings.desktop.section.wsl": "WSL",
   "settings.desktop.wsl.title": "WSL連携",

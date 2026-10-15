@@ -895,6 +895,8 @@ export const dict = {
   "settings.section.desktop": "سطح المكتب",
   "settings.section.server": "الخادم",
   "settings.tab.general": "عام",
+  "settings.admin.permission.context": "السياق",
+  "settings.admin.permission.sessionNavigation": "التنقل بين الجلسات",
   "settings.tab.shortcuts": "اختصارات",
   "settings.desktop.section.wsl": "WSL",
   "settings.desktop.wsl.title": "تكامل WSL",

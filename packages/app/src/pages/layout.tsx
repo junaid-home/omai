@@ -378,7 +378,7 @@ export default function Layout(props: ParentProps) {
                       />
                     </TooltipKeybind>
                   </Show>
-                  <Show when={currentDir()}>
+                  <Show when={currentDir() && permission.can("sessionNavigation")}>
                     <Tooltip placement="right" value={language.t("command.session.previous")}>
                       <IconButton
                         icon="chevron-left"

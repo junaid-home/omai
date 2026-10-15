@@ -750,6 +750,8 @@ export const dict = {
   "settings.section.desktop": "데스크톱",
   "settings.section.server": "서버",
   "settings.tab.general": "일반",
+  "settings.admin.permission.context": "컨텍스트",
+  "settings.admin.permission.sessionNavigation": "세션 탐색",
   "settings.tab.shortcuts": "단축키",
   "settings.desktop.section.wsl": "WSL",
   "settings.desktop.wsl.title": "WSL 통합",

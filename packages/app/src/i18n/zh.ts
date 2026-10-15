@@ -956,6 +956,8 @@ export const dict = {
   "settings.section.server": "服务器",
 
   "settings.tab.general": "通用",
+  "settings.admin.permission.context": "上下文",
+  "settings.admin.permission.sessionNavigation": "会话导航",
   "settings.tab.shortcuts": "快捷键",
 
   "settings.desktop.section.wsl": "WSL",

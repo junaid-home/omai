@@ -909,6 +909,8 @@ export const dict = {
   "settings.section.desktop": "Pulpit",
   "settings.section.server": "Serwer",
   "settings.tab.general": "Ogólne",
+  "settings.admin.permission.context": "Kontekst",
+  "settings.admin.permission.sessionNavigation": "Nawigacja między sesjami",
   "settings.tab.shortcuts": "Skróty",
   "settings.desktop.section.wsl": "WSL",
   "settings.desktop.wsl.title": "Integracja z WSL",

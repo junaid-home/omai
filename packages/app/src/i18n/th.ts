@@ -964,6 +964,8 @@ export const dict = {
   "settings.section.desktop": "เดสก์ท็อป",
   "settings.section.server": "เซิร์ฟเวอร์",
   "settings.tab.general": "ทั่วไป",
+  "settings.admin.permission.context": "บริบท",
+  "settings.admin.permission.sessionNavigation": "การนำสายเซ็สชัน",
   "settings.tab.shortcuts": "ทางลัด",
   "settings.desktop.section.wsl": "WSL",
   "settings.desktop.wsl.title": "การรวม WSL",

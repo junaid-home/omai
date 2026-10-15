@@ -978,6 +978,8 @@ export const dict = {
   "settings.section.desktop": "Escritorio",
   "settings.section.server": "Servidor",
   "settings.tab.general": "General",
+  "settings.admin.permission.context": "Contexto",
+  "settings.admin.permission.sessionNavigation": "Navegación de sesiones",
   "settings.tab.shortcuts": "Atajos",
   "settings.desktop.section.wsl": "WSL",
   "settings.desktop.wsl.title": "Integración con WSL",

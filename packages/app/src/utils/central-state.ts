@@ -372,8 +372,10 @@ export type SettingsPermissionKey =
   | "general"
   | "terminal"
   | "fileTree"
+  | "context"
   | "mestro"
   | "sessions"
+  | "sessionNavigation"
 export type AuthModel = { providerID: string; modelID: string }
 export type AuthUser = {
   id: string
@@ -394,8 +396,10 @@ export function fullSettingsPermissions(): Record<SettingsPermissionKey, boolean
     general: true,
     terminal: true,
     fileTree: true,
+    context: true,
     mestro: true,
     sessions: true,
+    sessionNavigation: true,
   }
 }
 
@@ -410,8 +414,10 @@ function isSettingsPermissions(value: unknown): value is Record<SettingsPermissi
     "general",
     "terminal",
     "fileTree",
+    "context",
     "mestro",
     "sessions",
+    "sessionNavigation",
   ]
   return keys.every((key) => typeof (value as Record<string, unknown>)[key] === "boolean")
 }

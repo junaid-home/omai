@@ -7,6 +7,7 @@ const fullPermissions = {
   general: true,
   terminal: true,
   fileTree: true,
+  context: true,
   shortcuts: true,
   servers: true,
   providers: true,
@@ -14,6 +15,7 @@ const fullPermissions = {
   mcp: true,
   mestro: true,
   sessions: true,
+  sessionNavigation: true,
 } as const
 
 function signup(ctx: ScenarioContext, body: { username: string; email: string; password: string }) {
@@ -150,7 +152,7 @@ export const centralScenarios = [
       object(body.settingsPermissions)
       check(
         Object.keys(body.settingsPermissions).sort().join(",") ===
-          "fileTree,general,mcp,mestro,models,providers,servers,sessions,shortcuts,terminal",
+          "context,fileTree,general,mcp,mestro,models,providers,servers,sessionNavigation,sessions,shortcuts,terminal",
         "me must report every settings scope",
       )
     }),
@@ -292,7 +294,7 @@ export const centralScenarios = [
           object(user.settingsPermissions)
           check(
             Object.keys(user.settingsPermissions).sort().join(",") ===
-              "fileTree,general,mcp,mestro,models,providers,servers,sessions,shortcuts,terminal",
+              "context,fileTree,general,mcp,mestro,models,providers,servers,sessionNavigation,sessions,shortcuts,terminal",
             "admin users must include every settings scope",
           )
         }

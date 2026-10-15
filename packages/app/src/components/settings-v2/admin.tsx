@@ -42,8 +42,10 @@ const SCOPE_LABEL_KEYS: Record<SettingsPermissionKey, string> = {
   general: "settings.tab.general",
   terminal: "settings.admin.permission.terminal",
   fileTree: "settings.general.row.showFileTree.title",
+  context: "settings.admin.permission.context",
   mestro: "settings.admin.permission.mestro",
   sessions: "settings.admin.permission.sessions",
+  sessionNavigation: "settings.admin.permission.sessionNavigation",
 }
 
 type RoleOption = { id: Role; label: string }

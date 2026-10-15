@@ -1863,6 +1863,7 @@ export class Admin extends HeyApiClient {
         general: boolean
         terminal: boolean
         fileTree: boolean
+        context: boolean
         shortcuts: boolean
         servers: boolean
         providers: boolean
@@ -1870,6 +1871,7 @@ export class Admin extends HeyApiClient {
         mcp: boolean
         mestro: boolean
         sessions: boolean
+        sessionNavigation: boolean
       }
       model?: {
         providerID: string
@@ -1937,6 +1939,7 @@ export class Admin extends HeyApiClient {
         general: boolean
         terminal: boolean
         fileTree: boolean
+        context: boolean
         shortcuts: boolean
         servers: boolean
         providers: boolean
@@ -1944,6 +1947,7 @@ export class Admin extends HeyApiClient {
         mcp: boolean
         mestro: boolean
         sessions: boolean
+        sessionNavigation: boolean
       }
       password?: string
       model?: {
