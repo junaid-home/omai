@@ -1,5 +1,7 @@
 import type { Session } from "@opencode-ai/sdk/v2/client"
 import { base64Encode } from "@opencode-ai/core/util/encode"
+import type { ServerConnection } from "@/context/server"
+import { sessionHref } from "@/utils/session-route"
 
 // Resolve the most recent (or a freshly created) session first, then navigate
 // straight to its canonical server-scoped URL. This avoids parking the user on
@@ -50,6 +52,18 @@ export function prefetchProjectSessions(
 
 export function prefetchedProjectTarget(directory: string): string | undefined {
   return prefetchedTargets.get(directory)
+}
+
+export function hasProjectPrefetch(directory: string) {
+  return sessionListCache.has(directory)
+}
+
+// Final navigation target for a project row: the prefetched latest session when
+// the prefetch resolved, otherwise the bare project shell (the empty
+// new-session route) as a safe fallback.
+export function prefetchedProjectHref(directory: string, serverKey: ServerConnection.Key) {
+  const id = prefetchedTargets.get(directory)
+  return id ? sessionHref(serverKey, id) : `/${base64Encode(directory)}/session`
 }
 
 export function openProjectImmediate(

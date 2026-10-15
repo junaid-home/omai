@@ -17,9 +17,13 @@ import { useServerSDK } from "@/context/server-sdk"
 import { useAuth } from "@/context/auth"
 import { useDirectoryPicker } from "@/components/directory-picker"
 import { DialogOpenPath } from "@/components/dialog-open-path"
-import { openProjectImmediate, prefetchProjectSessions, prefetchedProjectTarget } from "@/utils/open-project"
+import {
+  openProjectImmediate,
+  prefetchProjectSessions,
+  prefetchedProjectHref,
+  prefetchedProjectTarget,
+} from "@/utils/open-project"
 import { sessionHref } from "@/utils/session-route"
-import { base64Encode } from "@opencode-ai/core/util/encode"
 
 const INITIAL_SHOW = 5
 
@@ -110,11 +114,6 @@ export default function ProjectsPage() {
       () => serverSDK().client.session.list({ directory }),
       () => serverSDK().client.session.create({ directory }),
     )
-  }
-
-  const projectHref = (directory: string) => {
-    const id = prefetchedProjectTarget(directory)
-    return id ? sessionHref(server.key, id) : `/${base64Encode(directory)}/session`
   }
 
   const openOpenProjectDialog = () => {
@@ -264,7 +263,7 @@ export default function ProjectsPage() {
                 {(project) => (
                   <div class="flex items-center w-full rounded-lg text-13-mono text-text-base hover:bg-surface-raised-base-hover transition-colors group">
                     <A
-                      href={projectHref(project.worktree)}
+                      href={prefetchedProjectHref(project.worktree, server.key)}
                       class="flex items-center gap-3 flex-1 text-left px-3 py-2.5 cursor-pointer"
                       onClick={(event) => {
                         if (!prefetchedProjectTarget(project.worktree)) {
