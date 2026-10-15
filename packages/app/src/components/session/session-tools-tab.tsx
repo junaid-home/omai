@@ -565,7 +565,7 @@ export function SessionToolsTab(props: SessionToolsTabProps = {}) {
             {language.t("session.tools.tab.publishing")}
           </TabsV2.Trigger>
           <TabsV2.Trigger value="domains">
-            <Icon name="wheel-globe" />
+            <IconV2 name="globe" />
             {language.t("session.tools.tab.domains")}
           </TabsV2.Trigger>
           <TabsV2.Trigger value="git">
