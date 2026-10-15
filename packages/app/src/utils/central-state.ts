@@ -30,6 +30,8 @@ type Entry = {
   load?: Promise<string | null>
   task?: Promise<void>
   timer?: ReturnType<typeof setTimeout>
+  failures?: number
+  retryAt?: number
   listeners: Set<(value: string | null) => void>
 }
 
@@ -131,6 +133,8 @@ export function createCentralState(input: {
     entry.status = error instanceof StateConflictError ? "conflict" : "error"
     entry.error = error instanceof Error ? error.message : "Central storage is unavailable."
     entry.remote = error instanceof StateConflictError ? error.current : undefined
+    entry.failures = (entry.failures ?? 0) + 1
+    entry.retryAt = Date.now() + Math.min(5_000 * 2 ** (entry.failures - 1), 300_000)
     notify()
   }
   const load = (entry: Entry): Promise<string | null> => {
@@ -143,6 +147,8 @@ export function createCentralState(input: {
         entry.committed = current
         entry.status = entry.desired ? "pending" : "saved"
         entry.error = undefined
+        entry.failures = undefined
+        entry.retryAt = undefined
         notify()
         return entry.desired ? entry.desired.value : current.value
       })
@@ -164,6 +170,10 @@ export function createCentralState(input: {
         active()
         if (entry.status === "conflict") throw new StateConflictError(entry.remote!)
         const desired = entry.desired
+        if (entry.committed?.value === desired.value) {
+          entry.desired = undefined
+          continue
+        }
         const previous = entry.committed!
         entry.status = "pending"
         notify()
@@ -183,6 +193,8 @@ export function createCentralState(input: {
         entry.remote = undefined
       }
       entry.status = "saved"
+      entry.failures = undefined
+      entry.retryAt = undefined
       notify()
     })()
       .catch((error: unknown) => {
@@ -196,6 +208,7 @@ export function createCentralState(input: {
   }
   const schedule = (entry: Entry, value: string | null) => {
     active()
+    if (entry.status === "saved" && !entry.desired && entry.committed?.value === value) return
     entry.desired = { value }
     entry.listeners.forEach((listener) => listener(value))
     if (entry.status !== "conflict") entry.status = "pending"
@@ -215,6 +228,55 @@ export function createCentralState(input: {
       remote: entry.remote,
       error: entry.error,
     }))
+  const retry = async (address: StateAddress) => {
+    const entry = entryFor(address)
+    if (entry.status === "conflict") throw new StateConflictError(entry.remote!)
+    if (entry.desired) return drain(entry)
+    entry.committed = undefined
+    await load(entry)
+    entry.listeners.forEach((listener) => listener(entry.committed!.value))
+  }
+  const resolve = async (address: StateAddress, choice: "local" | "remote") => {
+    const entry = entryFor(address)
+    if (entry.status !== "conflict" || !entry.remote) return
+    entry.committed = entry.remote
+    entry.remote = undefined
+    entry.error = undefined
+    entry.status = "saved"
+    if (choice === "remote") {
+      entry.desired = undefined
+      entry.listeners.forEach((listener) => listener(entry.committed!.value))
+      notify()
+      return
+    }
+    await drain(entry)
+  }
+  let refreshing: Promise<void> | undefined
+  const refresh = (): Promise<void> => {
+    if (refreshing) return refreshing
+    const task: Promise<void> = (async () => {
+      await Promise.all(
+        [...entries.values()]
+          .filter((entry) => entry.status === "saved" && !entry.task && !entry.load && entry.listeners.size > 0)
+          .map(async (entry) => {
+            const before = entry.committed
+            const current = await request(entry.address).catch((error: unknown) => {
+              failed(entry, error)
+              throw error
+            })
+            if (entry.status !== "saved" || entry.desired || entry.committed !== before) return
+            if (current.revision === before?.revision) return
+            entry.committed = current
+            entry.listeners.forEach((listener) => listener(current.value))
+            notify()
+          }),
+      )
+    })().finally(() => {
+      refreshing = undefined
+    })
+    refreshing = task
+    return task
+  }
   return {
     url: input.url,
     userID: input.userID,
@@ -241,6 +303,8 @@ export function createCentralState(input: {
       entry.listeners.add(listener)
       return () => {
         entry.listeners.delete(listener)
+        if (entry.listeners.size === 0 && !entry.desired && !entry.task && entry.status !== "conflict")
+          entry.committed = undefined
       }
     },
     storage(address: StateAddress) {
@@ -269,51 +333,26 @@ export function createCentralState(input: {
       if ([...pendingChecks].some((check) => check()))
         throw new Error("State is still loading. Your changes have not been saved.")
     },
-    async retry(address: StateAddress) {
-      const entry = entryFor(address)
-      if (entry.status === "conflict") throw new StateConflictError(entry.remote!)
-      if (entry.desired) return drain(entry)
-      entry.committed = undefined
-      await load(entry)
-      entry.listeners.forEach((listener) => listener(entry.committed!.value))
-    },
-    async resolve(address: StateAddress, choice: "local" | "remote") {
-      const entry = entryFor(address)
-      if (entry.status !== "conflict" || !entry.remote) return
-      entry.committed = entry.remote
-      entry.remote = undefined
-      entry.error = undefined
-      entry.status = "saved"
-      if (choice === "remote") {
-        entry.desired = undefined
-        entry.listeners.forEach((listener) => listener(entry.committed!.value))
-        notify()
-        return
+    retry,
+    resolve,
+    recover() {
+      const now = Date.now()
+      for (const entry of entries.values()) {
+        if (entry.status === "conflict") {
+          void resolve(entry.address, "local").catch(() => undefined)
+          continue
+        }
+        if (entry.status !== "error") continue
+        if (entry.listeners.size === 0 && !entry.desired) continue
+        if (entry.retryAt !== undefined && now < entry.retryAt) continue
+        void retry(entry.address).catch(() => undefined)
       }
-      await drain(entry)
     },
-    async refresh() {
-      await Promise.all(
-        [...entries.values()]
-          .filter((entry) => entry.status === "saved" && !entry.task)
-          .map(async (entry) => {
-            const before = entry.committed
-            const current = await request(entry.address).catch((error: unknown) => {
-              failed(entry, error)
-              throw error
-            })
-            // Edits made while the refresh was in flight retain their original revision and conflict on save.
-            if (entry.status !== "saved" || entry.desired || entry.committed !== before) return
-            if (current.revision === before?.revision) return
-            entry.committed = current
-            entry.listeners.forEach((listener) => listener(current.value))
-            notify()
-          }),
-      )
-    },
+    refresh,
     dirty: () => [...entries.values()].some((entry) => !!entry.desired) || [...pendingChecks].some((check) => check()),
     dispose() {
       abort.abort()
+      refreshing = undefined
       entries.forEach((entry) => {
         if (entry.timer) clearTimeout(entry.timer)
       })

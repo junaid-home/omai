@@ -29,6 +29,7 @@ function fixture() {
     offline: false,
     lostAck: false,
     writes: 0,
+    requests: 0,
     delayRead: undefined as Promise<void> | undefined,
     userID: "alice",
   }
@@ -40,6 +41,7 @@ function fixture() {
       if (url.pathname === "/auth/config") return Response.json({ mode: "central" })
       if (url.pathname === "/auth/me")
         return Response.json({ id: "alice", username: "Alice", email: "alice@example.test" })
+      if (url.pathname === "/user-state") controls.requests++
       if (controls.offline) return new Response("Unavailable", { status: 503 })
       if (url.pathname !== "/user-state") return new Response(null, { status: 404 })
       if (request.headers.get("X-Opencode-User-ID") !== controls.userID) return new Response(null, { status: 401 })
@@ -379,6 +381,50 @@ describe("central browser persistence over HTTP", () => {
     expect(previewUrl("http://127.0.0.1:4096/preview/3000", "https://local.example.test", false)).toBe(
       "https://local.example.test/preview/3000",
     )
+  })
+
+  test("idle state is not polled and unchanged values are not rewritten", async () => {
+    const service = fixture()
+    const client = service.client()
+    const storage = client.storage(address)
+    await storage.getItem("")
+    const hydrated = service.controls.requests
+    await client.refresh()
+    expect(service.controls.requests).toBe(hydrated)
+
+    const stopWatching = client.watch(address, () => undefined)
+    await client.refresh()
+    expect(service.controls.requests).toBe(hydrated + 1)
+
+    await storage.setItem("", '{"text":"once"}')
+    await client.flush()
+    expect(service.controls.writes).toBe(1)
+    const afterWrite = service.controls.requests
+    await storage.setItem("", '{"text":"once"}')
+    await client.flush()
+    expect(service.controls.writes).toBe(1)
+    expect(service.controls.requests).toBe(afterWrite)
+
+    stopWatching()
+    await client.refresh()
+    expect(service.controls.requests).toBe(afterWrite)
+  })
+
+  test("recover backs off failed reads instead of retrying on every tick", async () => {
+    const service = fixture()
+    const client = service.client()
+    const stopWatching = client.watch(address, () => undefined)
+    service.controls.offline = true
+    await client.storage(address).getItem("").catch(() => undefined)
+    expect(client.snapshots()[0].status).toBe("error")
+    const attempts = service.controls.requests
+    client.recover()
+    expect(service.controls.requests).toBe(attempts)
+
+    service.controls.offline = false
+    await client.retry(address)
+    expect(client.snapshots()[0].status).toBe("saved")
+    stopWatching()
   })
 
   test("addressing is collision-free and PostgreSQL text safe for scoped keys", () => {

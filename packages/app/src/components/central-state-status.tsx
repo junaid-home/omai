@@ -19,10 +19,7 @@ export function CentralStateStatus(props: { browserImport?: ReturnType<typeof ma
   }
   // Conflicts and failed saves recover silently so simultaneous use never interrupts the user.
   const heal = () => {
-    for (const entry of client.snapshots()) {
-      if (entry.status === "conflict") void client.resolve(entry, "local").catch(() => undefined)
-      if (entry.status === "error") void client.retry(entry).catch(() => undefined)
-    }
+    client.recover()
   }
   const unload = (event: BeforeUnloadEvent) => {
     if (!client.dirty()) return
