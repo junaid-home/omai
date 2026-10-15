@@ -1,6 +1,7 @@
 import { createSignal, onMount } from "solid-js"
 import { useNavigate } from "@solidjs/router"
 import { Button } from "@opencode-ai/ui/button"
+import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { TextField } from "@opencode-ai/ui/text-field"
 import { AuthHead, AuthSurface } from "@/components/auth-surface"
@@ -99,20 +100,23 @@ export default function LoginPage() {
       */}
 
       <form onSubmit={handleSubmit} class="auth-form">
-        <TextField
-          label={language.t("auth.login.username.label")}
-          placeholder={language.t("auth.login.username.placeholder")}
-          value={identifier()}
-          onChange={(v) => {
-            setIdentifier(v)
-            setError("")
-          }}
-        />
+        <div class="auth-field">
+          <TextField
+            label={language.t("auth.login.username.label")}
+            placeholder={language.t("auth.login.username.placeholder")}
+            value={identifier()}
+            onChange={(v) => {
+              setIdentifier(v)
+              setError("")
+            }}
+          />
+          <Icon name="user" class="auth-field-icon" />
+        </div>
         <div class="auth-password">
           <TextField
             label={language.t("auth.login.password.label")}
             type={revealPassword() ? "text" : "password"}
-            placeholder="••••••••"
+            placeholder={language.t("auth.login.password.placeholder")}
             value={password()}
             onChange={(v) => {
               setPassword(v)
@@ -132,7 +136,10 @@ export default function LoginPage() {
           />
         </div>
         <Button type="submit" variant="primary" size="large" class="auth-submit" disabled={loading()}>
-          {loading() ? language.t("auth.login.submitting") : language.t("auth.login.submit")}
+          <span class="auth-submit-inner">
+            {loading() ? language.t("auth.login.submitting") : language.t("auth.login.submit")}
+            <Icon name="arrow-right" class="auth-submit-icon" />
+          </span>
         </Button>
       </form>
     </AuthSurface>

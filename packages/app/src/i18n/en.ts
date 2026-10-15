@@ -1241,10 +1241,11 @@ export const dict = {
 
   // Auth
   "auth.login.title": "Welcome back",
-  "auth.login.subtitle": "Sign in to your O M A I + account",
+  "auth.login.subtitle": "Sign in to your OMAI+ account to continue your projects.",
   "auth.login.username.label": "Username or Email",
-  "auth.login.username.placeholder": "username or email@example.com",
+  "auth.login.username.placeholder": "name@company.com",
   "auth.login.password.label": "Password",
+  "auth.login.password.placeholder": "Your password",
   "auth.login.submit": "Sign In",
   "auth.login.submitting": "Signing in...",
   "auth.login.noAccount": "Don't have an account?",
@@ -1260,9 +1261,11 @@ export const dict = {
   "auth.login.stealthMode": "STEALTH MODE",
   "auth.login.eyebrow": "SECURE ACCESS",
   "auth.login.footer": "Secure workspace for your team.",
-  "auth.marketing.eyebrow": "AI CODING AGENT",
-  "auth.marketing.title": "Build faster with an agent that writes code.",
-  "auth.marketing.subtitle": "OMAI+ reads your codebase, edits files, and runs the tools to get your work done.",
+  "auth.marketing.eyebrow": "O M A I +",
+  "auth.marketing.title": "Create, develop and publish your",
+  "auth.marketing.title-accent": "websites, software and apps",
+  "auth.marketing.title-tail": "– with OMAI.",
+  "auth.marketing.subtitle": "The modern development platform for your ideas. Fast, flexible, and simple to set up.",
   "auth.login.password.show": "Show password",
   "auth.login.password.hide": "Hide password",
 

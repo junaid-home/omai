@@ -23,12 +23,23 @@ export function AuthSurface(props: { children: JSX.Element }) {
       </section>
 
       <aside class="auth-aside" aria-hidden="true">
-        <span class="auth-aside-stripes" />
-        <span class="auth-aside-glow" />
+        <span class="auth-aside-arc auth-aside-arc-a" />
+        <span class="auth-aside-arc auth-aside-arc-b" />
         <div class="auth-aside-content">
           <p class="auth-aside-eyebrow">{language.t("auth.marketing.eyebrow")}</p>
-          <h2 class="auth-aside-title">{language.t("auth.marketing.title")}</h2>
+          <h2 class="auth-aside-title">
+            {language.t("auth.marketing.title")}{" "}
+            <span class="auth-aside-title-accent">{language.t("auth.marketing.title-accent")}</span>{" "}
+            {language.t("auth.marketing.title-tail")}
+          </h2>
           <p class="auth-aside-subtitle">{language.t("auth.marketing.subtitle")}</p>
+          <p class="auth-aside-strip">
+            <span class="auth-aside-strip-word">THINK</span>
+            <span class="auth-aside-strip-rule" />
+            <span class="auth-aside-strip-word">PROMPT</span>
+            <span class="auth-aside-strip-rule" />
+            <span class="auth-aside-strip-word">BUILD</span>
+          </p>
         </div>
       </aside>
     </div>
