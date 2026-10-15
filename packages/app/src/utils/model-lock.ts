@@ -1,6 +1,6 @@
 import type { AuthModel, AuthUser } from "./central-state"
 
-export const LOCKED_MODEL_LABEL = "OMAI+"
+export const LOCKED_MODEL_LABEL = "O M A I +"
 
 /** The admin-assigned model lock. Admins and unassigned members stay unrestricted. */
 export function assignedModel(user: AuthUser | null | undefined): AuthModel | null {
