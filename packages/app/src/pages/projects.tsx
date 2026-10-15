@@ -1,6 +1,6 @@
 import { centralRuntime } from "@/utils/central-state"
 import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js"
-import { useLocation, useNavigate } from "@solidjs/router"
+import { A, useLocation, useNavigate } from "@solidjs/router"
 import { Button } from "@opencode-ai/ui/button"
 import { LoaderV2 } from "@opencode-ai/ui/v2/loader-v2"
 import { Dialog } from "@opencode-ai/ui/dialog"
@@ -17,8 +17,9 @@ import { useServerSDK } from "@/context/server-sdk"
 import { useAuth } from "@/context/auth"
 import { useDirectoryPicker } from "@/components/directory-picker"
 import { DialogOpenPath } from "@/components/dialog-open-path"
-import { openProjectImmediate, prefetchProjectSessions } from "@/utils/open-project"
+import { openProjectImmediate, prefetchProjectSessions, prefetchedProjectTarget } from "@/utils/open-project"
 import { sessionHref } from "@/utils/session-route"
+import { base64Encode } from "@opencode-ai/core/util/encode"
 
 const INITIAL_SHOW = 5
 
@@ -109,6 +110,11 @@ export default function ProjectsPage() {
       () => serverSDK().client.session.list({ directory }),
       () => serverSDK().client.session.create({ directory }),
     )
+  }
+
+  const projectHref = (directory: string) => {
+    const id = prefetchedProjectTarget(directory)
+    return id ? sessionHref(server.key, id) : `/${base64Encode(directory)}/session`
   }
 
   const openOpenProjectDialog = () => {
@@ -257,10 +263,19 @@ export default function ProjectsPage() {
               <For each={visibleProjects()}>
                 {(project) => (
                   <div class="flex items-center w-full rounded-lg text-13-mono text-text-base hover:bg-surface-raised-base-hover transition-colors group">
-                    <button
-                      type="button"
+                    <A
+                      href={projectHref(project.worktree)}
                       class="flex items-center gap-3 flex-1 text-left px-3 py-2.5 cursor-pointer"
-                      onClick={() => openProject(project.worktree)}
+                      onClick={(event) => {
+                        if (!prefetchedProjectTarget(project.worktree)) {
+                          event.preventDefault()
+                          openProject(project.worktree)
+                          return
+                        }
+                        server.projects.open(project.worktree)
+                        server.projects.touch(project.worktree)
+                        layout.sidebar.close()
+                      }}
                     >
                       <Icon
                         name="folder"
@@ -271,7 +286,7 @@ export default function ProjectsPage() {
                       <Show when={opening() === project.worktree}>
                         <LoaderV2 class="shrink-0 text-text-weak" />
                       </Show>
-                    </button>
+                    </A>
                     <DropdownMenu>
                       <DropdownMenu.Trigger
                         as={IconButton}
