@@ -2500,6 +2500,11 @@ export type Project = {
   sandboxes: Array<string>
 }
 
+export type ProjectOverview = {
+  projects: Array<Project>
+  sessions: Array<GlobalSession>
+}
+
 export type ProjectNotFoundError = {
   _tag: "ProjectNotFoundError"
   projectID: string
@@ -10641,6 +10646,34 @@ export type ProjectCurrentResponses = {
 }
 
 export type ProjectCurrentResponse = ProjectCurrentResponses[keyof ProjectCurrentResponses]
+
+export type ProjectSummaryData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/project/summary"
+}
+
+export type ProjectSummaryErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ProjectSummaryError = ProjectSummaryErrors[keyof ProjectSummaryErrors]
+
+export type ProjectSummaryResponses = {
+  /**
+   * Projects with their latest sessions
+   */
+  200: ProjectOverview
+}
+
+export type ProjectSummaryResponse = ProjectSummaryResponses[keyof ProjectSummaryResponses]
 
 export type ProjectInitGitData = {
   body?: never

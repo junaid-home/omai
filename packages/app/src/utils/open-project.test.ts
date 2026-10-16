@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { Session } from "@opencode-ai/sdk/v2/client"
 import { base64Encode } from "@opencode-ai/core/util/encode"
-import { openProjectImmediate, prefetchProjectSessions } from "./open-project"
+import { openProjectImmediate, prefetchProjectSessions, prefetchProjectTargets } from "./open-project"
 
 const session = (id: string, updated: number): Session => ({
   id,
@@ -11,6 +11,11 @@ const session = (id: string, updated: number): Session => ({
   title: id,
   version: "1",
   time: { created: 1, updated },
+})
+
+const sessionIn = (id: string, directory: string, updated: number): Session => ({
+  ...session(id, updated),
+  directory,
 })
 
 describe("openProjectImmediate", () => {
@@ -200,5 +205,56 @@ describe("prefetchProjectSessions", () => {
     )
     expect(created).toBe(0)
     expect(result.data?.map((item) => item.id)).toEqual(["existing"])
+  })
+})
+
+describe("prefetchProjectTargets", () => {
+  test("seeds every requested directory from a single summary response", async () => {
+    const seeded = await prefetchProjectTargets(["/batch/a", "/batch/b"], async () => ({
+      data: {
+        sessions: [sessionIn("batch-a", "/batch/a", 10), sessionIn("batch-b", "/batch/b", 20)],
+      },
+    }))
+    expect(seeded.map((item) => item.id).sort()).toEqual(["batch-a", "batch-b"])
+
+    const hrefs: string[] = []
+    let listCalls = 0
+    openProjectImmediate(
+      "/batch/a",
+      (href) => hrefs.push(href),
+      (id) => `/server/${id}`,
+      async () => {
+        listCalls++
+        return { data: [sessionIn("stale", "/batch/a", 99)] }
+      },
+      async () => ({ data: sessionIn("created", "/batch/a", 30) }),
+    )
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(listCalls).toBe(0)
+    expect(hrefs).toEqual(["/server/batch-a"])
+  })
+
+  test("prefers the newest session per directory", async () => {
+    const seeded = await prefetchProjectTargets(["/batch/newest"], async () => ({
+      data: {
+        sessions: [sessionIn("old", "/batch/newest", 10), sessionIn("new", "/batch/newest", 30)],
+      },
+    }))
+    expect(seeded.map((item) => item.id)).toEqual(["new"])
+  })
+
+  test("ignores directories that were not requested", async () => {
+    const seeded = await prefetchProjectTargets(["/batch/c"], async () => ({
+      data: { sessions: [sessionIn("other", "/batch/other", 5)] },
+    }))
+    expect(seeded).toEqual([])
+  })
+
+  test("returns an empty list when the summary request fails", async () => {
+    const seeded = await prefetchProjectTargets(["/batch/d"], async () => {
+      throw new Error("summary failed")
+    })
+    expect(seeded).toEqual([])
   })
 })

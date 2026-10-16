@@ -58,6 +58,33 @@ export function hasProjectPrefetch(directory: string) {
   return sessionListCache.has(directory)
 }
 
+export function prefetchProjectTargets(
+  directories: string[],
+  summary: () => Promise<{ data?: { sessions?: Session[] } }>,
+): Promise<Session[]> {
+  const wanted = new Set(directories)
+  if (wanted.size === 0) return Promise.resolve([])
+  return summary()
+    .then((result) => {
+      const updated = (item: Session) => item.time?.updated ?? item.time?.created ?? 0
+      const newest = new Map<string, Session>()
+      for (const session of result.data?.sessions ?? []) {
+        if (!session?.id || !session.directory) continue
+        if (session.time?.archived) continue
+        if (!wanted.has(session.directory)) continue
+        const current = newest.get(session.directory)
+        if (current && updated(current) > updated(session)) continue
+        newest.set(session.directory, session)
+      }
+      for (const [directory, session] of newest) {
+        prefetchedTargets.set(directory, session.id)
+        sessionListCache.set(directory, Promise.resolve({ data: [session] }))
+      }
+      return [...newest.values()]
+    })
+    .catch(() => [])
+}
+
 // Final navigation target for a project row: the prefetched latest session when
 // the prefetch resolved, otherwise the bare project shell (the empty
 // new-session route) as a safe fallback.

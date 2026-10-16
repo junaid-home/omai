@@ -417,6 +417,7 @@ export type NotFound = NotFoundError
 export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<Info[]>
   readonly listGlobal: (input?: GlobalListInput) => Effect.Effect<GlobalInfo[]>
+  readonly listLatestPerDirectory: () => Effect.Effect<GlobalInfo[]>
   readonly create: (input?: {
     parentID?: SessionID
     title?: string
@@ -561,6 +562,31 @@ const layer: Layer.Layer<
       })
     })
 
+    const projectsByID = Effect.fnUntraced(function* (rows: SessionRow[]) {
+      const ids = [...new Set(rows.map((row) => row.project_id))]
+      const projects = new Map<string, ProjectInfo>()
+      if (ids.length > 0) {
+        const items = yield* db
+          .select({ id: ProjectTable.id, name: ProjectTable.name, worktree: ProjectTable.worktree })
+          .from(ProjectTable)
+          .where(inArray(ProjectTable.id, ids))
+          .pipe(Effect.orDie)
+        for (const item of items) {
+          projects.set(item.id, {
+            id: item.id,
+            name: item.name ?? undefined,
+            worktree: item.worktree,
+          })
+        }
+      }
+      return projects
+    })
+
+    const globalInfo = Effect.fnUntraced(function* (rows: SessionRow[]) {
+      const projects = yield* projectsByID(rows)
+      return rows.map((row) => ({ ...fromRow(row), project: projects.get(row.project_id) ?? null }))
+    })
+
     const listGlobal = Effect.fn("Session.listGlobal")(function* (input?: GlobalListInput) {
       const conditions: SQL[] = []
       if (input?.directory) conditions.push(eq(SessionTable.directory, input.directory))
@@ -581,23 +607,17 @@ const layer: Layer.Layer<
         .orderBy(desc(SessionTable.time_updated), desc(SessionTable.id))
         .limit(input?.limit ?? 100)
         .pipe(Effect.orDie)
-      const ids = [...new Set(rows.map((row) => row.project_id))]
-      const projects = new Map<string, ProjectInfo>()
-      if (ids.length > 0) {
-        const items = yield* db
-          .select({ id: ProjectTable.id, name: ProjectTable.name, worktree: ProjectTable.worktree })
-          .from(ProjectTable)
-          .where(inArray(ProjectTable.id, ids))
-          .pipe(Effect.orDie)
-        for (const item of items) {
-          projects.set(item.id, {
-            id: item.id,
-            name: item.name ?? undefined,
-            worktree: item.worktree,
-          })
-        }
-      }
-      return rows.map((row) => ({ ...fromRow(row), project: projects.get(row.project_id) ?? null }))
+      return yield* globalInfo(rows)
+    })
+
+    const listLatestPerDirectory = Effect.fn("Session.listLatestPerDirectory")(function* () {
+      const rows = yield* db
+        .selectDistinctOn([SessionTable.directory])
+        .from(SessionTable)
+        .where(and(isNull(SessionTable.parent_id), isNull(SessionTable.time_archived)))
+        .orderBy(SessionTable.directory, desc(SessionTable.time_updated), desc(SessionTable.id))
+        .pipe(Effect.orDie)
+      return yield* globalInfo(rows)
     })
 
     const children = Effect.fn("Session.children")(function* (parentID: SessionID) {
@@ -914,6 +934,7 @@ const layer: Layer.Layer<
     return Service.of({
       list,
       listGlobal,
+      listLatestPerDirectory,
       create,
       fork,
       touch,

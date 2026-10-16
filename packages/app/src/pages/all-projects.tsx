@@ -20,7 +20,7 @@ import { DialogOpenPath } from "@/components/dialog-open-path"
 import {
   hasProjectPrefetch,
   openProjectImmediate,
-  prefetchProjectSessions,
+  prefetchProjectTargets,
   prefetchedProjectHref,
   prefetchedProjectTarget,
 } from "@/utils/open-project"
@@ -151,13 +151,38 @@ export default function AllProjectsPage() {
     return projects.slice(start, start + ITEMS_PER_PAGE)
   })
 
-  const openProject = (directory: string) => {
+  const openProject = async (directory: string) => {
     server.projects.open(directory)
     server.projects.touch(directory)
     layout.sidebar.close()
     setOpening(directory)
 
-    openProjectImmediate(
+    // The prefetch already resolved this project's newest session; navigate to
+    // the canonical URL directly rather than trusting a possibly stale anchor
+    // href that still points at the legacy directory route.
+    const prefetched = prefetchedProjectTarget(directory)
+    if (prefetched) {
+      navigate(sessionHref(server.key, prefetched))
+      return
+    }
+
+    // Otherwise reuse the batch summary already in flight for the project list
+    // instead of booting a second session list just for this click. The summary
+    // is remembered in the sync store, so the target route resolves the
+    // directory synchronously and does not flash the full-screen loader.
+    const target = await serverSync()
+      .project.targets()
+      .then((result) =>
+        (result.data.sessions ?? []).find(
+          (session) => session.directory === directory && !session.time?.archived,
+        ),
+      )
+    if (target) {
+      navigate(sessionHref(server.key, target.id))
+      return
+    }
+
+    void openProjectImmediate(
       directory,
       navigate,
       (id) => sessionHref(server.key, id),
@@ -166,30 +191,38 @@ export default function AllProjectsPage() {
     )
   }
 
+  // Rows render immediately; the prefetch only upgrades their links once the
+  // batch request lands.
+  const [targetsReady, setTargetsReady] = createSignal(0)
+
+  const projectHref = (directory: string) => {
+    targetsReady()
+    return prefetchedProjectHref(directory, server.key)
+  }
+
   // Resolve visible projects' latest sessions up front so rows are plain links;
-  // session-less projects keep resolving at click time so browsing or searching
+  // Session-less projects keep resolving at click time so browsing or searching
   // does not eagerly create sessions.
   createEffect(() => {
-    paginatedProjects()
-      .filter((project) => !hasProjectPrefetch(project.worktree))
-      .forEach((project) => {
-        prefetchProjectSessions(project.worktree, () =>
-          serverSDK().client.session.list({ directory: project.worktree }),
-        ).catch(() => {})
-      })
+    const directories = paginatedProjects()
+      .map((project) => project.worktree)
+      .filter((directory) => !hasProjectPrefetch(directory))
+    if (directories.length === 0) return
+    void prefetchProjectTargets(directories, () => serverSync().project.targets()).then((sessions) => {
+      const sync = serverSync()
+      for (const session of sessions) sync.session.remember(session)
+      setTargetsReady((version) => version + 1)
+    })
   })
 
-  // Shared row/card click: navigate as a link when the target was prefetched,
-  // otherwise fall back to the async open flow (which shows the spinner).
+  // Shared row/card click: resolve to the canonical session URL directly so a
+  // stale anchor href never sends the click through the legacy directory route.
+  // Modifier and middle clicks keep the default anchor behavior (new tab).
   const handleOpen = (directory: string, event: MouseEvent) => {
-    if (!prefetchedProjectTarget(directory)) {
-      event.preventDefault()
-      openProject(directory)
-      return
-    }
-    server.projects.open(directory)
-    server.projects.touch(directory)
-    layout.sidebar.close()
+    if (event.defaultPrevented || event.button !== 0) return
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    event.preventDefault()
+    void openProject(directory)
   }
 
   const openNewProjectDialog = () => {
@@ -375,7 +408,7 @@ export default function AllProjectsPage() {
                   return (
                     <div class="flex items-center w-full rounded-lg text-13-mono text-text-base hover:bg-surface-raised-base-hover transition-colors group">
                       <A
-                        href={prefetchedProjectHref(project.worktree, server.key)}
+                        href={projectHref(project.worktree)}
                         class="flex items-center gap-3 flex-1 text-left px-3 py-2.5 cursor-pointer"
                         onClick={(event) => handleOpen(project.worktree, event)}
                       >
@@ -432,7 +465,7 @@ export default function AllProjectsPage() {
                     </Show>
                     <div class="p-3 cursor-pointer flex items-start justify-between">
                       <A
-                        href={prefetchedProjectHref(project.worktree, server.key)}
+                        href={projectHref(project.worktree)}
                         class="flex flex-col gap-0.5 min-w-0 flex-1 cursor-pointer"
                         onClick={(event) => handleOpen(project.worktree, event)}
                       >

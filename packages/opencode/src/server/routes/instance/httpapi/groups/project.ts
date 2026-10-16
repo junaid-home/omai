@@ -1,4 +1,5 @@
 import { Project } from "@/project/project"
+import { Session } from "@/session/session"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
@@ -23,6 +24,11 @@ const UpdatePayload = Schema.Struct({
   commands: Schema.optional(Project.Info.fields.commands),
 })
 
+const ProjectOverview = Schema.Struct({
+  projects: Schema.Array(Project.Info),
+  sessions: Schema.Array(Session.GlobalInfo),
+}).annotate({ identifier: "ProjectOverview" })
+
 export const ProjectApi = HttpApi.make("project")
   .add(
     HttpApiGroup.make("project")
@@ -45,6 +51,17 @@ export const ProjectApi = HttpApi.make("project")
             identifier: "project.current",
             summary: "Get current project",
             description: "Retrieve the currently active project that OMAI+ is working with.",
+          }),
+        ),
+        HttpApiEndpoint.get("summary", `${root}/summary`, {
+          query: WorkspaceRoutingQuery,
+          success: described(ProjectOverview, "Projects with their latest sessions"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "project.summary",
+            summary: "Get projects summary",
+            description:
+              "Retrieve every project together with the newest active session for each working directory in a single response.",
           }),
         ),
         HttpApiEndpoint.post("initGit", `${root}/git/init`, {

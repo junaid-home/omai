@@ -236,6 +236,8 @@ import type {
   ProjectInitGitResponses,
   ProjectListErrors,
   ProjectListResponses,
+  ProjectSummaryErrors,
+  ProjectSummaryResponses,
   ProjectUpdateErrors,
   ProjectUpdateResponses,
   PromptInput,
@@ -4254,6 +4256,36 @@ export class Project extends HeyApiClient {
     )
     return (options?.client ?? this.client).get<ProjectCurrentResponses, ProjectCurrentErrors, ThrowOnError>({
       url: "/project/current",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get projects summary
+   *
+   * Retrieve every project together with the newest active session for each working directory in a single response.
+   */
+  public summary<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<ProjectSummaryResponses, ProjectSummaryErrors, ThrowOnError>({
+      url: "/project/summary",
       ...options,
       ...params,
     })
