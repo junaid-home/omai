@@ -10,8 +10,22 @@ data:
         '' close;
     }
 
+    # Origin TLS. Cloudflare terminates the public certificate and re-encrypts to
+    # this LoadBalancer when the omai.ch zone's SSL mode is "Full". In that mode
+    # the origin certificate is not verified, so this self-signed one (created by
+    # k8s/self-signed-cert.sh and mounted from the omai-app-tls secret) is enough.
+    # Without a :443 listener Cloudflare has nothing to connect to and answers
+    # 521 (Web Server Is Down). Use a Cloudflare Origin CA certificate instead if
+    # the zone is ever switched to "Full (strict)".
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1h;
+
     server {
         listen 80;
+        listen 443 ssl;
+        ssl_certificate /etc/nginx/ssl/tls.crt;
+        ssl_certificate_key /etc/nginx/ssl/tls.key;
         server_name _;
         root /usr/share/nginx/html;
         index index.html;
@@ -62,6 +76,9 @@ data:
     # ERR_SSL_VERSION_OR_CIPHER_MISMATCH. One level of subdomain is required.
     server {
         listen 80;
+        listen 443 ssl;
+        ssl_certificate /etc/nginx/ssl/tls.crt;
+        ssl_certificate_key /etc/nginx/ssl/tls.key;
         server_name preview.omai.ch;
 
         location / {

@@ -35,6 +35,8 @@ kubectl apply -f "$SCRIPT_DIR/secret-storage.yml"
 # secretKeyRef. Without it the pod stays in CreateContainerConfigError.
 kubectl apply -f "$SCRIPT_DIR/secret-cloudflare.yml"
 kubectl apply -f "$SCRIPT_DIR/postgres.yml"
+# The origin TLS secret omai-app mounts, so it must exist before app-deployment.
+"$SCRIPT_DIR/self-signed-cert.sh"
 kubectl apply -f "$SCRIPT_DIR/configmap-nginx.yml"
 kubectl apply -f "$SCRIPT_DIR/configmap-opencode.yml"
 kubectl apply -f "$SCRIPT_DIR/opencode-deployment.yml"
@@ -52,6 +54,7 @@ for i in {1..60}; do
     echo ""
     echo "==> Deployment complete!"
     echo "    Frontend: http://${EXTERNAL_IP}"
+    echo "    Origin:   https://${EXTERNAL_IP} (self-signed; public TLS is at Cloudflare)"
     echo "    Backend:  http://${EXTERNAL_IP}/global/health"
     exit 0
   fi

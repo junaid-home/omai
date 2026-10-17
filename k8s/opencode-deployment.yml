@@ -32,9 +32,11 @@
 #   hostname distinct from the app origin. The listener stays on loopback inside
 #   the pod and k8s/configmap-nginx.yml proxies the preview host to it.
 #
-# TLS terminates at Cloudflare, not in this cluster. omai-app is a LoadBalancer on
-# port 80 and the nginx config forwards $http_x_forwarded_proto, so the public
-# origins below must be the Cloudflare-proxied hostnames.
+# Public TLS terminates at Cloudflare; the origin also listens on :443 with a
+# self-signed certificate (k8s/self-signed-cert.sh) because the zone's SSL mode
+# is "Full", which re-encrypts to the origin. nginx forwards
+# $http_x_forwarded_proto, so the public origins below must be the
+# Cloudflare-proxied hostnames.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

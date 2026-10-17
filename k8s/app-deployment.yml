@@ -21,6 +21,7 @@ spec:
           imagePullPolicy: Always
           ports:
             - containerPort: 80
+            - containerPort: 443
           resources:
             requests:
               memory: "64Mi"
@@ -48,10 +49,16 @@ spec:
             - name: nginx-config
               mountPath: /etc/nginx/conf.d/default.conf
               subPath: default.conf
+            - name: nginx-tls
+              mountPath: /etc/nginx/ssl
+              readOnly: true
       volumes:
         - name: nginx-config
           configMap:
             name: omai-nginx-config
+        - name: nginx-tls
+          secret:
+            secretName: omai-app-tls
 ---
 apiVersion: v1
 kind: Service
@@ -67,6 +74,11 @@ spec:
   selector:
     app: omai-app
   ports:
-    - port: 80
+    - name: http
+      port: 80
       targetPort: 80
+      protocol: TCP
+    - name: https
+      port: 443
+      targetPort: 443
       protocol: TCP
