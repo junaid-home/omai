@@ -177,15 +177,6 @@ const scenarios: Scenario[] = [
     },
     "status",
   ),
-  http.protected.get("/project/summary", "project.summary").json(
-    200,
-    (body) => {
-      object(body)
-      check(Array.isArray(body.projects), "projects summary should return a projects array")
-      check(Array.isArray(body.sessions), "projects summary should return a sessions array")
-    },
-    "status",
-  ),
   http.protected
     .patch("/project/{projectID}", "project.update")
     .mutating()

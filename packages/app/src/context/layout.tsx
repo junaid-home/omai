@@ -578,13 +578,26 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       }
     })
 
+    let sessionFrame: number | undefined
+    let sessionTimer: number | undefined
+
     onMount(() => {
-      // Resolve every open project's newest session from a single batch request
-      // instead of a session list per project. Directories that render sessions
-      // load their full lists on demand.
-      void serverSync().project.primeTargets(
-        server.projects.list().map((project) => project.worktree),
-      )
+      sessionFrame = requestAnimationFrame(() => {
+        sessionFrame = undefined
+        sessionTimer = window.setTimeout(() => {
+          sessionTimer = undefined
+          void Promise.all(
+            server.projects.list().map((project) => {
+              return serverSync().project.loadSessions(project.worktree)
+            }),
+          )
+        }, 0)
+      })
+    })
+
+    onCleanup(() => {
+      if (sessionFrame !== undefined) cancelAnimationFrame(sessionFrame)
+      if (sessionTimer !== undefined) window.clearTimeout(sessionTimer)
     })
 
     return {

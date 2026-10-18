@@ -19,7 +19,7 @@ import { useDirectoryPicker } from "@/components/directory-picker"
 import { DialogOpenPath } from "@/components/dialog-open-path"
 import {
   openProjectImmediate,
-  prefetchProjectTargets,
+  prefetchProjectSessions,
   prefetchedProjectHref,
   prefetchedProjectTarget,
 } from "@/utils/open-project"
@@ -83,60 +83,31 @@ export default function ProjectsPage() {
     return showAll() ? projects : projects.slice(0, INITIAL_SHOW)
   })
 
-  // Rows render immediately from local state; the prefetch only upgrades their
-  // links to point at a resolved session. Bumping this signal re-evaluates the
-  // hrefs once the batch request lands.
-  const [targetsReady, setTargetsReady] = createSignal(0)
-
-  const projectHref = (directory: string) => {
-    targetsReady()
-    return prefetchedProjectHref(directory, server.key)
-  }
+  const [prefetched, setPrefetched] = createSignal(recentProjects().length === 0)
 
   onMount(() => {
-    const directories = recentProjects()
-      .slice(0, INITIAL_SHOW)
-      .map((project) => project.worktree)
-    if (directories.length === 0) return
-    void prefetchProjectTargets(directories, () => serverSync().project.targets()).then((sessions) => {
-      const sync = serverSync()
-      for (const session of sessions) sync.session.remember(session)
-      setTargetsReady((version) => version + 1)
-    })
+    const targets = recentProjects().slice(0, INITIAL_SHOW)
+    if (targets.length === 0) return
+    void Promise.allSettled(
+      targets.map((project) =>
+        prefetchProjectSessions(
+          project.worktree,
+          () => serverSDK().client.session.list({ directory: project.worktree }),
+          () => serverSDK().client.session.create({ directory: project.worktree }),
+        ).then((result) => {
+          for (const session of result.data ?? []) serverSync().session.remember(session)
+        }),
+      ),
+    ).then(() => setPrefetched(true))
   })
 
-  const openProject = async (directory: string) => {
+  const openProject = (directory: string) => {
     server.projects.open(directory)
     server.projects.touch(directory)
     layout.sidebar.close()
     setOpening(directory)
 
-    // The prefetch already resolved this project's newest session; navigate to
-    // the canonical URL directly rather than trusting a possibly stale anchor
-    // href that still points at the legacy directory route.
-    const prefetched = prefetchedProjectTarget(directory)
-    if (prefetched) {
-      navigate(sessionHref(server.key, prefetched))
-      return
-    }
-
-    // Otherwise reuse the batch summary already in flight for the project list
-    // instead of booting a second session list just for this click. The summary
-    // is remembered in the sync store, so the target route resolves the
-    // directory synchronously and does not flash the full-screen loader.
-    const target = await serverSync()
-      .project.targets()
-      .then((result) =>
-        (result.data.sessions ?? []).find(
-          (session) => session.directory === directory && !session.time?.archived,
-        ),
-      )
-    if (target) {
-      navigate(sessionHref(server.key, target.id))
-      return
-    }
-
-    void openProjectImmediate(
+    openProjectImmediate(
       directory,
       navigate,
       (id) => sessionHref(server.key, id),
@@ -235,108 +206,121 @@ export default function ProjectsPage() {
   }
 
   return (
-    <div class="mx-auto mt-14 w-full px-4">
-      <div class="flex justify-center mb-10">
-        <BrandLogo size="extra-large" />
-      </div>
-
-      <div class="w-full flex flex-col gap-3 max-w-2xl mx-auto">
-        <div class="flex gap-2 items-center justify-between w-full pl-1">
-          <div class="text-13-regular text-text-weak">{language.t("projects.title")}</div>
-          <div class="flex gap-2">
-            <Button
-              size="normal"
-              variant="secondary"
-              icon="folder-add-left"
-              class="pl-2 pr-3"
-              onClick={openNewProjectDialog}
-            >
-              {language.t("projects.new")}
-            </Button>
-            <Button
-              icon="folder"
-              size="normal"
-              variant="secondary"
-              class="pl-2 pr-3"
-              onClick={() => navigate("/projects/all")}
-            >
-              {language.t("projects.all")}
-            </Button>
-          </div>
+    <Show
+      when={prefetched()}
+      fallback={
+        <div class="flex w-full flex-1 flex-col items-center justify-center">
+          <BrandLogo size="large" class="opacity-50 animate-pulse" />
+        </div>
+      }
+    >
+      <div class="mx-auto mt-14 w-full px-4">
+        <div class="flex justify-center mb-10">
+          <BrandLogo size="extra-large" />
         </div>
 
-        <div class="h-px bg-border-weaker-base" />
-
-        <Show
-          when={visibleProjects().length > 0}
-          fallback={
-            <div class="mt-30 mx-auto flex flex-col items-center gap-3">
-              <Icon name="folder-add-left" size="large" />
-              <div class="flex flex-col gap-1 items-center justify-center">
-                <div class="text-14-medium text-text-strong">{language.t("projects.empty.title")}</div>
-                <div class="text-12-regular text-text-weak">{language.t("projects.empty.description")}</div>
-              </div>
+        <div class="w-full flex flex-col gap-3 max-w-2xl mx-auto">
+          <div class="flex gap-2 items-center justify-between w-full pl-1">
+            <div class="text-13-regular text-text-weak">{language.t("projects.title")}</div>
+            <div class="flex gap-2">
+              <Button
+                size="normal"
+                variant="secondary"
+                icon="folder-add-left"
+                class="pl-2 pr-3"
+                onClick={openNewProjectDialog}
+              >
+                {language.t("projects.new")}
+              </Button>
+              <Button
+                icon="folder"
+                size="normal"
+                variant="secondary"
+                class="pl-2 pr-3"
+                onClick={() => navigate("/projects/all")}
+              >
+                {language.t("projects.all")}
+              </Button>
             </div>
-          }
-        >
-          <ul class="flex flex-col gap-1">
-            <For each={visibleProjects()}>
-              {(project) => (
-                <div class="flex items-center w-full rounded-lg text-13-mono text-text-base hover:bg-surface-raised-base-hover transition-colors group">
-                  <A
-                    href={projectHref(project.worktree)}
-                    class="flex items-center gap-3 flex-1 text-left px-3 py-2.5 cursor-pointer"
-                    onClick={(event) => {
-                      if (event.defaultPrevented || event.button !== 0) return
-                      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-                      event.preventDefault()
-                      void openProject(project.worktree)
-                    }}
-                  >
-                    <Icon
-                      name="folder"
-                      size="small"
-                      class="text-icon-weak group-hover:text-icon-base shrink-0 transition-colors"
-                    />
-                    <span class="truncate grow">{project.worktree}</span>
-                    <Show when={opening() === project.worktree}>
-                      <LoaderV2 class="shrink-0 text-text-weak" />
-                    </Show>
-                  </A>
-                  <DropdownMenu>
-                    <DropdownMenu.Trigger
-                      as={IconButton}
-                      icon="dot-grid"
-                      variant="ghost"
-                      size="small"
-                      class="mr-1 shrink-0"
-                    />
-                    <DropdownMenu.Portal>
-                      <DropdownMenu.Content>
-                        <DropdownMenu.Item onSelect={() => deleteProject(project.worktree)}>
-                          <DropdownMenu.ItemLabel>{language.t("common.delete")}</DropdownMenu.ItemLabel>
-                        </DropdownMenu.Item>
-                      </DropdownMenu.Content>
-                    </DropdownMenu.Portal>
-                  </DropdownMenu>
-                </div>
-              )}
-            </For>
-          </ul>
-        </Show>
-
-        <Show when={recentProjects().length > INITIAL_SHOW}>
-          <div class="flex justify-center mt-1">
-            <button
-              type="button"
-              class="text-12-regular cursor-pointer mb-4 text-text-weak hover:text-text-base transition-colors"
-              onClick={() => navigate("/projects/all")}
-            >
-              {language.t("projects.showAll", { count: recentProjects().length })}
-            </button>
           </div>
-        </Show>
+
+          <div class="h-px bg-border-weaker-base" />
+
+          <Show
+            when={visibleProjects().length > 0}
+            fallback={
+              <div class="mt-30 mx-auto flex flex-col items-center gap-3">
+                <Icon name="folder-add-left" size="large" />
+                <div class="flex flex-col gap-1 items-center justify-center">
+                  <div class="text-14-medium text-text-strong">{language.t("projects.empty.title")}</div>
+                  <div class="text-12-regular text-text-weak">{language.t("projects.empty.description")}</div>
+                </div>
+              </div>
+            }
+          >
+            <ul class="flex flex-col gap-1">
+              <For each={visibleProjects()}>
+                {(project) => (
+                  <div class="flex items-center w-full rounded-lg text-13-mono text-text-base hover:bg-surface-raised-base-hover transition-colors group">
+                    <A
+                      href={prefetchedProjectHref(project.worktree, server.key)}
+                      class="flex items-center gap-3 flex-1 text-left px-3 py-2.5 cursor-pointer"
+                      onClick={(event) => {
+                        if (!prefetchedProjectTarget(project.worktree)) {
+                          event.preventDefault()
+                          openProject(project.worktree)
+                          return
+                        }
+                        server.projects.open(project.worktree)
+                        server.projects.touch(project.worktree)
+                        layout.sidebar.close()
+                      }}
+                    >
+                      <Icon
+                        name="folder"
+                        size="small"
+                        class="text-icon-weak group-hover:text-icon-base shrink-0 transition-colors"
+                      />
+                      <span class="truncate grow">{project.worktree}</span>
+                      <Show when={opening() === project.worktree}>
+                        <LoaderV2 class="shrink-0 text-text-weak" />
+                      </Show>
+                    </A>
+                    <DropdownMenu>
+                      <DropdownMenu.Trigger
+                        as={IconButton}
+                        icon="dot-grid"
+                        variant="ghost"
+                        size="small"
+                        class="mr-1 shrink-0"
+                      />
+                      <DropdownMenu.Portal>
+                        <DropdownMenu.Content>
+                          <DropdownMenu.Item onSelect={() => deleteProject(project.worktree)}>
+                            <DropdownMenu.ItemLabel>{language.t("common.delete")}</DropdownMenu.ItemLabel>
+                          </DropdownMenu.Item>
+                        </DropdownMenu.Content>
+                      </DropdownMenu.Portal>
+                    </DropdownMenu>
+                  </div>
+                )}
+              </For>
+            </ul>
+          </Show>
+
+          <Show when={recentProjects().length > INITIAL_SHOW}>
+            <div class="flex justify-center mt-1">
+              <button
+                type="button"
+                class="text-12-regular cursor-pointer mb-4 text-text-weak hover:text-text-base transition-colors"
+                onClick={() => navigate("/projects/all")}
+              >
+                {language.t("projects.showAll", { count: recentProjects().length })}
+              </button>
+            </div>
+          </Show>
+        </div>
       </div>
-    </div>
+    </Show>
   )
 }

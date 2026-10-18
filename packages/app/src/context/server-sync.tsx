@@ -5,7 +5,6 @@ import type {
   Path,
   Project,
   ProviderAuthResponse,
-  Session,
 } from "@opencode-ai/sdk/v2/client"
 import { showToast } from "@/utils/toast"
 import { getFilename } from "@opencode-ai/core/util/path"
@@ -211,48 +210,6 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
   })
 
   const session = createServerSession(serverSDK.client, { scope: serverSDK.scope, persist: persisted })
-
-  // One batch request replaces a session list per open project. The short cache
-  // lets the layout and the projects page share the same in-flight response
-  // instead of issuing their own copies.
-  type ProjectTargets = { data: { sessions: Session[] } }
-  const targetCache = new Map<string, { at: number; promise: Promise<ProjectTargets> }>()
-  const TARGET_CACHE_MS = 2_000
-
-  function targets(): Promise<ProjectTargets> {
-    const scope = String(serverSDK.scope)
-    const cached = targetCache.get(scope)
-    if (cached && Date.now() - cached.at < TARGET_CACHE_MS) return cached.promise
-    const promise: Promise<ProjectTargets> = serverSDK.client
-      .project.summary()
-      .then((result) => {
-        const sessions = (result.data?.sessions ?? []) as Session[]
-        batch(() => {
-          for (const info of sessions) session.remember(info)
-        })
-        return { data: { sessions } }
-      })
-      .catch(() => ({ data: { sessions: [] as Session[] } }))
-    targetCache.set(scope, { at: Date.now(), promise })
-    return promise
-  }
-
-  // Seed the newest session into each requested project's child store so passive
-  // readers (recent-project ordering) have data without a session list per
-  // directory. Full lists still load on demand when a project is opened.
-  async function primeTargets(directories: string[]) {
-    if (directories.length === 0) return
-    const wanted = new Set(directories)
-    const sessions = (await targets()).data.sessions.filter((info) => wanted.has(info.directory))
-    if (sessions.length === 0) return
-    batch(() => {
-      for (const info of sessions) {
-        const [store, setStore] = children.child(info.directory, { bootstrap: false })
-        if (store.session.some((item) => item.id === info.id)) continue
-        setStore("session", [info, ...store.session])
-      }
-    })
-  }
 
   const children = createChildStoreManager({
     owner,
@@ -494,8 +451,6 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
 
   const projectApi = {
     loadSessions,
-    targets,
-    primeTargets,
     meta(directory: string, patch: ProjectMeta) {
       children.projectMeta(directory, patch)
     },

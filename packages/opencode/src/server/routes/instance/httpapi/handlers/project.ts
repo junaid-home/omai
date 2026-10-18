@@ -1,7 +1,6 @@
 import * as InstanceState from "@/effect/instance-state"
 import { InstanceStore } from "@/project/instance-store"
 import { Project } from "@/project/project"
-import { Session } from "@/session/session"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -14,17 +13,9 @@ export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", 
     const svc = yield* Project.Service
     const project = yield* ProjectV2.Service
     const store = yield* InstanceStore.Service
-    const session = yield* Session.Service
 
     const list = Effect.fn("ProjectHttpApi.list")(function* () {
       return yield* svc.list()
-    })
-
-    const summary = Effect.fn("ProjectHttpApi.summary")(function* () {
-      const [projects, sessions] = yield* Effect.all([svc.list(), session.listLatestPerDirectory()], {
-        concurrency: 2,
-      })
-      return { projects, sessions }
     })
 
     const current = Effect.fn("ProjectHttpApi.current")(function* () {
@@ -111,7 +102,6 @@ export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", 
     return handlers
       .handle("list", list)
       .handle("current", current)
-      .handle("summary", summary)
       .handle("initGit", initGit)
       .handle("update", update)
       .handle("remove", remove)
