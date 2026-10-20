@@ -236,11 +236,11 @@ spec:
                   key: CLOUDFLARE_ACCOUNT_ID
           resources:
             requests:
-              memory: "4Gi"
-              cpu: "500m"
+              memory: "12Gi"
+              cpu: "1000m"
             limits:
-              memory: "8Gi"
-              cpu: "1800m"
+              memory: "25Gi"
+              cpu: "5500m"
           volumeMounts:
             # omai-data is intentionally not mounted: central mode moves
             # Global.Path.data to $OPENCODE_STORAGE_ROOT/data, so
