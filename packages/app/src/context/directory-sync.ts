@@ -26,12 +26,12 @@ export const createDirSyncContext = (
 ) => {
   const client = serverSDK.createClient({ directory, throwOnError: true })
   const current = createMemo(() => serverSync.child(directory, { mcp: true }))
-  const absolute = (path: string) => (current()[0].path.directory + "/" + path).replace("//", "/")
+  const absolute = (path: string) => ((current()[0]?.path?.directory ?? "") + "/" + path).replace("//", "/")
   const data = new Proxy({} as State, {
     get(_, property: keyof State) {
       if (property === "session_working") return serverSync.session.data.session_working.bind(serverSync.session.data)
       if (sessionFields.has(property)) return serverSync.session.data[property as keyof typeof serverSync.session.data]
-      return current()[0][property]
+      return current()[0]?.[property]
     },
   })
   const set = ((...input: unknown[]) => {

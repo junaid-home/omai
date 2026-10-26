@@ -20,7 +20,7 @@ COPY ./ ./
 # Slim down workspace - only include packages needed for frontend build
 # Remove lockfile and whitelist only app and its dependencies
 RUN rm -f bun.lock && \
-    bun -e 'var p=JSON.parse(require("fs").readFileSync("package.json","utf8"));p.workspaces.packages=["packages/app","packages/ui","packages/sdk/js","packages/plugin","packages/script","packages/core","packages/schema","packages/session-ui","packages/llm","packages/http-recorder","packages/effect-drizzle-sqlite","packages/effect-sqlite-node"];p.devDependencies={"prettier":"3.6.2"};require("fs").writeFileSync("package.json",JSON.stringify(p,null,2))'
+    bun -e 'var p=JSON.parse(require("fs").readFileSync("package.json","utf8"));p.workspaces.packages=["packages/app","packages/ui","packages/sdk/js","packages/plugin","packages/script","packages/core","packages/schema","packages/session-ui","packages/llm","packages/http-recorder","packages/effect-drizzle-sqlite","packages/effect-sqlite-node"];p.devDependencies={"prettier":"3.6.2"};delete p.patchedDependencies;require("fs").writeFileSync("package.json",JSON.stringify(p,null,2))'
 
 # Install dependencies, skipping postinstall scripts
 RUN bun install --ignore-scripts
@@ -43,5 +43,11 @@ COPY --from=builder /app/packages/app/dist /usr/share/nginx/html
 # Copy custom nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Port 80 accessible via network_mode: host
-CMD ["nginx", "-g", "daemon off;"]
+# Runtime entrypoint: allow overriding the control-plane (backend) host via
+# the BACKEND_HOST env var so the frontend can be deployed as a separate
+# service from the control plane (defaults to 127.0.0.1 for local dev).
+COPY entrypoint-web.sh /usr/local/bin/entrypoint-web.sh
+RUN chmod +x /usr/local/bin/entrypoint-web.sh
+
+# Port 80
+CMD ["/usr/local/bin/entrypoint-web.sh"]

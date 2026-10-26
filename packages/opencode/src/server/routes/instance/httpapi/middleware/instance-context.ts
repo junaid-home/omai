@@ -5,6 +5,7 @@ import { Effect, Layer } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import { decodeDirectory, WorkspaceRouteContext } from "./workspace-routing"
+import { vmProjectsRoot } from "@/control-plane/vm-projects"
 
 export class InstanceContextMiddleware extends HttpApiMiddleware.Service<
   InstanceContextMiddleware,
@@ -19,11 +20,16 @@ function provideInstanceContext<E>(
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, E, WorkspaceRouteContext> {
   return Effect.gen(function* () {
     const route = yield* WorkspaceRouteContext
-    const directory = yield* Effect.tryPromise(() => CentralStorage.resolveWorkspace(decodeDirectory(route.directory))).pipe(
-      Effect.option,
-    )
-    if (directory._tag === "None") return HttpServerResponse.empty({ status: 403 })
-    const ctx = yield* store.load({ directory: directory.value })
+    const decoded = decodeDirectory(route.directory)
+    const vmRoot = (yield* Effect.sync(() => vmProjectsRoot())) as string | undefined
+    const directory =
+      vmRoot && (decoded === vmRoot || decoded.startsWith(vmRoot + "/"))
+        ? decoded
+        : yield* Effect.tryPromise(() => CentralStorage.resolveWorkspace(decoded).pipe(Effect.option)).pipe(
+            Effect.map((opt) => (opt._tag === "Some" ? opt.value : undefined)),
+          )
+    if (!directory) return HttpServerResponse.empty({ status: 403 })
+    const ctx = yield* store.load({ directory })
     return yield* effect.pipe(
       Effect.provideService(InstanceRef, ctx),
       Effect.provideService(WorkspaceRef, route.workspaceID),

@@ -540,6 +540,7 @@ export async function bootstrapCentralState(input: { url: string; fetch: typeof 
     mode: "central",
     url: base,
     workspaceRoot,
+    projectsRoot,
     google,
     user: identity,
     client: createCentralState({ url: base, userID: identity.id, fetch: requestFetch }),
