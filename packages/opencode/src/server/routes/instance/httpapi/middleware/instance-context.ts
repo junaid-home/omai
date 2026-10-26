@@ -4,7 +4,7 @@ import { InstanceStore } from "@/project/instance-store"
 import { Effect, Layer } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
-import { WorkspaceRouteContext } from "./workspace-routing"
+import { decodeDirectory, WorkspaceRouteContext } from "./workspace-routing"
 
 export class InstanceContextMiddleware extends HttpApiMiddleware.Service<
   InstanceContextMiddleware,
@@ -13,21 +13,13 @@ export class InstanceContextMiddleware extends HttpApiMiddleware.Service<
   }
 >()("@opencode/ExperimentalHttpApiInstanceContext") {}
 
-function decode(input: string): string {
-  try {
-    return decodeURIComponent(input)
-  } catch {
-    return input
-  }
-}
-
 function provideInstanceContext<E>(
   effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E>,
   store: InstanceStore.Interface,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, E, WorkspaceRouteContext> {
   return Effect.gen(function* () {
     const route = yield* WorkspaceRouteContext
-    const directory = yield* Effect.tryPromise(() => CentralStorage.resolveWorkspace(decode(route.directory))).pipe(
+    const directory = yield* Effect.tryPromise(() => CentralStorage.resolveWorkspace(decodeDirectory(route.directory))).pipe(
       Effect.option,
     )
     if (directory._tag === "None") return HttpServerResponse.empty({ status: 403 })

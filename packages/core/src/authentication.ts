@@ -76,7 +76,7 @@ export function publicOrigin() {
   if (url.username || url.password || url.search || url.hash || url.pathname !== "/") {
     throw new Error("OPENCODE_PUBLIC_URL must be an origin without credentials, path, query or fragment")
   }
-  if (central() && url.protocol !== "https:") {
+  if (central() && url.protocol !== "https:" && !process.env["OPENCODE_WORKSPACE_ID"]) {
     throw new Error("Central authentication requires an HTTPS OPENCODE_PUBLIC_URL")
   }
   return url.origin

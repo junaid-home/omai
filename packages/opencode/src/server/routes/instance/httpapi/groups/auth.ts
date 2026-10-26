@@ -73,6 +73,7 @@ export const AuthApi = HttpApi.make("auth").add(
         success: Schema.Struct({
           mode: Schema.Literals(["central", "local"]),
           workspaceRoot: Schema.optional(Schema.String),
+          projectsRoot: Schema.optional(Schema.String),
           google: Schema.Boolean,
         }),
       }),

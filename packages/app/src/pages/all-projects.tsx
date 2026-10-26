@@ -16,14 +16,9 @@ import { useServerSync } from "@/context/server-sync"
 import { useServerSDK } from "@/context/server-sdk"
 import { useAuth } from "@/context/auth"
 import { useDirectoryPicker } from "@/components/directory-picker"
+import { BrandLogo } from "@/components/brand-logo"
 import { DialogOpenPath } from "@/components/dialog-open-path"
-import {
-  hasProjectPrefetch,
-  openProjectImmediate,
-  prefetchProjectSessions,
-  prefetchedProjectHref,
-  prefetchedProjectTarget,
-} from "@/utils/open-project"
+import { openProjectImmediate, projectHref } from "@/utils/open-project"
 import { sessionHref } from "@/utils/session-route"
 
 type ViewMode = "grid" | "list"
@@ -125,9 +120,14 @@ export default function AllProjectsPage() {
   const allProjects = createMemo(() => {
     const projects = server.projects.list()
     if (centralRuntime.get().mode === "central") return projects
+    const projectsRoot = centralRuntime.get().projectsRoot
+    const vmWorkspacePrefix = projectsRoot ? `${projectsRoot}/workspace` : "/home/runner/workspace"
     const username = auth.user()?.username
-    if (!username) return projects
-    return projects.filter((p) => p.worktree.includes(`/${username}/projects/`))
+    return projects.filter((p) => {
+      if (p.worktree.startsWith(vmWorkspacePrefix)) return true
+      if (!username) return true
+      return p.worktree.includes(`/${username}/projects/`)
+    })
   })
 
   const filteredProjects = createMemo(() => {
@@ -166,30 +166,9 @@ export default function AllProjectsPage() {
     )
   }
 
-  // Resolve visible projects' latest sessions up front so rows are plain links;
-  // session-less projects keep resolving at click time so browsing or searching
-  // does not eagerly create sessions.
-  createEffect(() => {
-    paginatedProjects()
-      .filter((project) => !hasProjectPrefetch(project.worktree))
-      .forEach((project) => {
-        prefetchProjectSessions(project.worktree, () =>
-          serverSDK().client.session.list({ directory: project.worktree }),
-        ).catch(() => {})
-      })
-  })
-
-  // Shared row/card click: navigate as a link when the target was prefetched,
-  // otherwise fall back to the async open flow (which shows the spinner).
   const handleOpen = (directory: string, event: MouseEvent) => {
-    if (!prefetchedProjectTarget(directory)) {
-      event.preventDefault()
-      openProject(directory)
-      return
-    }
-    server.projects.open(directory)
-    server.projects.touch(directory)
-    layout.sidebar.close()
+    event.preventDefault()
+    openProject(directory)
   }
 
   const openNewProjectDialog = () => {
@@ -375,7 +354,7 @@ export default function AllProjectsPage() {
                   return (
                     <div class="flex items-center w-full rounded-lg text-13-mono text-text-base hover:bg-surface-raised-base-hover transition-colors group">
                       <A
-                        href={prefetchedProjectHref(project.worktree, server.key)}
+                        href={projectHref(project.worktree)}
                         class="flex items-center gap-3 flex-1 text-left px-3 py-2.5 cursor-pointer"
                         onClick={(event) => handleOpen(project.worktree, event)}
                       >
@@ -426,13 +405,15 @@ export default function AllProjectsPage() {
                       />
                     </div>
                     <Show when={opening() === project.worktree}>
-                      <div class="absolute inset-0 z-10 flex items-center justify-center bg-surface-base/75">
-                        <LoaderV2 class="text-text-weak" />
+                      <div class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-surface-base/85 backdrop-blur-sm">
+                        <BrandLogo size="large" class="animate-pulse" />
+                        <LoaderV2 class="text-text-weak" width={24} height={24} />
+                        <span class="text-13-regular text-text-weak">{language.t("projects.opening")}</span>
                       </div>
                     </Show>
                     <div class="p-3 cursor-pointer flex items-start justify-between">
                       <A
-                        href={prefetchedProjectHref(project.worktree, server.key)}
+                        href={projectHref(project.worktree)}
                         class="flex flex-col gap-0.5 min-w-0 flex-1 cursor-pointer"
                         onClick={(event) => handleOpen(project.worktree, event)}
                       >

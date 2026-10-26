@@ -11,6 +11,7 @@ import { effectiveSettingsPermissions, type Role } from "@opencode-ai/core/user/
 import { requestToken, sameOrigin, sessionCookie } from "@opencode-ai/server/authentication"
 import { RootHttpApi } from "../api"
 import { AuthLoginInput, AuthSignupInput } from "../groups/auth"
+import { vmProjectsRoot } from "@/control-plane/vm-projects"
 import { generateToken, TOKEN_LIFETIME_MS } from "@/auth/jwt"
 import { effectiveRole } from "@/auth/role"
 import { hashPassword, verifyPassword } from "@/user"
@@ -180,6 +181,7 @@ export const authHandlers = HttpApiBuilder.group(RootHttpApi, "auth", (handlers)
         Effect.succeed({
           mode: Authentication.central() ? ("central" as const) : ("local" as const),
           workspaceRoot: CentralStorage.workspaceRoot(),
+          projectsRoot: vmProjectsRoot(),
           google: googleCredentials() !== undefined,
         }),
       )

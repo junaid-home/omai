@@ -624,6 +624,7 @@ export const dict = {
   "home.projects": "Projects",
 
   "projects.title": "Projects",
+  "projects.opening": "Starting project…",
   "projects.empty.title": "No projects yet",
   "projects.empty.description": "Open a local project to get started",
   "projects.delete.title": "Delete Project",

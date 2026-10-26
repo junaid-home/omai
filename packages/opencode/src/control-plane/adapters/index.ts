@@ -1,9 +1,31 @@
+import { createHmac } from "node:crypto"
+import { Authentication } from "@opencode-ai/core/authentication"
 import type { ProjectV2 } from "@opencode-ai/core/project"
+import { configFromEnv, northflankAdapter } from "@opencode-ai/northflank"
 import type { WorkspaceAdapter, WorkspaceAdapterEntry } from "../types"
 import { WorktreeAdapter } from "./worktree"
 
 const BUILTIN: Record<string, WorkspaceAdapter> = {
   worktree: WorktreeAdapter,
+  ...(process.env["NORTHFLANK_API_TOKEN"]
+    ? { northflank: northflankAdapter(northflankConfig()) as WorkspaceAdapter }
+    : {}),
+}
+
+// The control plane dials a workspace VM with a deployment credential and no
+// user session (sync, history and replay originate there), so the VM
+// authenticates those calls against the same value. Deriving it from the
+// signing secret keeps it stable across restarts without new configuration;
+// NORTHFLANK_VM_PASSWORD overrides it, and a deployment without a signing
+// secret has no VM dial credential — VMs cannot serve without one.
+function northflankConfig() {
+  const config = configFromEnv(process.env)
+  return { ...config, vmPassword: config.vmPassword ?? vmDialPassword() }
+}
+
+function vmDialPassword() {
+  const secret = Authentication.secret("OPENCODE_JWT_SECRET")
+  return secret ? createHmac("sha256", secret).update("workspace-vm-dial").digest("base64url") : undefined
 }
 
 const state = new Map<ProjectV2.ID, Map<string, WorkspaceAdapter>>()

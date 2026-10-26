@@ -410,7 +410,7 @@ describe("workspace HttpApi", () => {
         const forwarded = proxied.filter((item) => new URL(item.url).pathname === "/base/config")
         expect(forwarded).toEqual([
           {
-            url: `http://127.0.0.1:${remote.port}/base/config?keep=yes`,
+            url: `http://127.0.0.1:${remote.port}/base/config?keep=yes&directory=${encodeURIComponent(dir)}`,
             method: "PATCH",
             headers: expect.objectContaining({
               "content-type": "application/json",
@@ -483,7 +483,7 @@ describe("workspace HttpApi", () => {
         expect(JSON.parse(responseBody)).toEqual({ proxied: true, path: `/base/session/${session.id}/message` })
         expect(proxied.filter((item) => new URL(item.url).pathname === `/base/session/${session.id}/message`)).toEqual([
           expect.objectContaining({
-            url: `http://127.0.0.1:${remote.port}/base/session/${session.id}/message`,
+            url: `http://127.0.0.1:${remote.port}/base/session/${session.id}/message?directory=${encodeURIComponent(dir)}`,
             method: "POST",
           }),
         ])
@@ -492,7 +492,7 @@ describe("workspace HttpApi", () => {
         expect(aborted.status).toBe(200)
         expect(proxied.filter((item) => new URL(item.url).pathname === `/base/session/${session.id}/abort`)).toEqual([
           expect.objectContaining({
-            url: `http://127.0.0.1:${remote.port}/base/session/${session.id}/abort`,
+            url: `http://127.0.0.1:${remote.port}/base/session/${session.id}/abort?directory=${encodeURIComponent(dir)}`,
             method: "POST",
             body: "",
           }),

@@ -181,7 +181,11 @@ export async function extract(data: Uint8Array, destination: string): Promise<nu
     const target = path.resolve(destination)
     const parent = await prepareParent(target)
     await assertEmptyDestination(target)
-    staging = await mkdtemp(path.join(parent, ".opencode-import-"))
+    // Stage inside the target so files are moved on the same filesystem
+    // (the target may be a separate volume mount, which forbids cross-device
+    // rename from the parent directory).
+    await mkdir(target, { recursive: true })
+    staging = await mkdtemp(path.join(target, ".omai-import-"))
     const links: { name: string; target: string }[] = []
     let expanded = 0
     let count = 0
@@ -245,7 +249,15 @@ export async function extract(data: Uint8Array, destination: string): Promise<nu
     }
     await assertEmptyDestination(target)
     if ((await realpath(parent)) !== parent) throw new Error("Project destination changed during import")
-    await rename(staging, target)
+    // The destination may be a pre-existing volume mount point (MicroVM),
+    // which cannot be replaced by rename. Materialise it and move the staged
+    // contents into it instead.
+    await mkdir(target, { recursive: true })
+    const stagedEntries = await readdir(staging)
+    for (const entry of stagedEntries) {
+      await rename(path.join(staging, entry), path.join(target, entry))
+    }
+    await rm(staging, { recursive: true, force: true }).catch(() => {})
     staging = undefined
     return count
   } finally {
@@ -387,7 +399,14 @@ export async function assertEmptyDestination(target: string) {
     throw error
   })
   if (!info) return
-  if (!info.isDirectory() || (await readdir(target)).length)
+  // Fresh ext4 volume mount points contain a `lost+found` directory owned by
+  // root. Staging directories (.omai-import-*) may also be present from a
+  // previous interrupted import. Treat a directory containing only those
+  // entries as empty so project creation can proceed on MicroVM-backed volumes.
+  const entries = (await readdir(target)).filter(
+    (name) => name !== "lost+found" && !name.startsWith(".omai-import-"),
+  )
+  if (!info.isDirectory() || entries.length)
     throw new Error("Project destination must be a new or empty directory")
 }
 

@@ -1,5 +1,6 @@
 import { CentralStorage } from "@opencode-ai/core/storage/central"
 import { Authentication } from "@opencode-ai/core/authentication"
+import { vmProjectsRoot } from "@opencode-ai/core/control-plane/vm-projects"
 import { Effect, FileSystem, Option } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 
@@ -56,13 +57,25 @@ export function publicRequest(method: string, pathname: string) {
   return pathname.startsWith("/assets/")
 }
 
-/** Transport boundary for the combined legacy/v2 server, including raw media and preview routes. */
+export function machineAuthorized(headers: Readonly<Record<string, string | undefined>>) {
+  if (!process.env["OPENCODE_WORKSPACE_ID"]) return false
+  const password = process.env["OPENCODE_SERVER_PASSWORD"]
+  if (!password) return false
+  const encoded = /^Basic ([^\s]+)$/i.exec(headers.authorization ?? "")?.[1]
+  if (!encoded) return false
+  const decoded = Buffer.from(encoded, "base64").toString("utf8")
+  const separator = decoded.indexOf(":")
+  if (separator < 0) return false
+  return (
+    decoded.slice(0, separator) === (process.env["OPENCODE_SERVER_USERNAME"] ?? "omai") &&
+    decoded.slice(separator + 1) === password
+  )
+}
+
 export const middleware = HttpRouter.middleware(
   Effect.gen(function* () {
     const service = yield* Effect.serviceOption(Authentication.Service)
     if (!Authentication.central()) {
-      // Local installs allow anonymous access, but a present session cookie still
-      // resolves a principal so role-gated admin endpoints can authorize.
       if (Option.isNone(service)) return (effect) => effect
       return (effect) =>
         Effect.gen(function* () {
@@ -91,17 +104,20 @@ export const middleware = HttpRouter.middleware(
         const bounded = effect.pipe(Effect.provideService(HttpServerRequest.MaxBodySize, FileSystem.Size(limit)))
         if (!sameOrigin(request)) return HttpServerResponse.empty({ status: 403 })
         if (publicRequest(request.method, url.pathname)) return yield* bounded
-        // CORS preflight cannot execute endpoint handlers. The CORS transport middleware answers it.
         if (request.method === "OPTIONS") return HttpServerResponse.empty({ status: 204 })
         const token = requestToken(request.headers)
-        if (!token || Option.isNone(service)) return HttpServerResponse.empty({ status: 401 })
+        if (!token || Option.isNone(service)) {
+          if (machineAuthorized(request.headers)) return yield* bounded
+          return HttpServerResponse.empty({ status: 401 })
+        }
         const principal = yield* service.value.authenticate(token.token)
         if (!principal) return HttpServerResponse.empty({ status: 401 })
+        const vmRoot = vmProjectsRoot()
         const directories = [
           url.searchParams.get("directory"),
           url.searchParams.get("location[directory]"),
           request.headers["x-opencode-directory"],
-        ].filter((value): value is string => Boolean(value))
+        ].filter((value): value is string => Boolean(value) && !isVmPath(vmRoot, decoded(value)))
         for (const value of directories) {
           const safe = yield* Effect.tryPromise(() => CentralStorage.resolveWorkspace(decodeURIComponent(value))).pipe(
             Effect.option,
@@ -113,5 +129,18 @@ export const middleware = HttpRouter.middleware(
   }),
   { global: true },
 )
+
+function decoded(value: string | null | undefined): string {
+  try {
+    return decodeURIComponent(value ?? "")
+  } catch {
+    return value ?? ""
+  }
+}
+
+function isVmPath(vmRoot: string | undefined, value: string) {
+  if (!vmRoot) return process.env["OPENCODE_WORKSPACE_ID"] !== undefined && value.startsWith("/home/runner/")
+  return value === vmRoot || value.startsWith(vmRoot + "/")
+}
 
 export * as AuthenticationHttp from "./authentication"

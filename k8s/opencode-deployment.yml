@@ -234,6 +234,38 @@ spec:
                 secretKeyRef:
                   name: omai-cloudflare-credentials
                   key: CLOUDFLARE_ACCOUNT_ID
+
+            # Northflank MicroVM workspaces. The control plane (this pod) routes
+            # project traffic into per-project VMs; OPENCODE_WORKSPACE_ID stays
+            # unset so this instance serves every workspace. Registration is
+            # gated on the token, so the adapter is inert until the secret exists:
+            #   kubectl create secret generic omai-northflank-credentials \
+            #     --from-literal=NORTHFLANK_API_TOKEN=... \
+            #     --from-literal=NORTHFLANK_PROJECT_ID=omai
+            - name: NORTHFLANK_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: omai-northflank-credentials
+                  key: NORTHFLANK_API_TOKEN
+                  optional: true
+            - name: NORTHFLANK_PROJECT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: omai-northflank-credentials
+                  key: NORTHFLANK_PROJECT_ID
+                  optional: true
+            - name: OPENCODE_WORKSPACE_ADAPTER
+              value: northflank
+            # create() must outlast a cold VM boot: the first-open request holds
+            # until the VM's sync stream connects or this budget elapses.
+            - name: OPENCODE_WORKSPACE_CREATE_TIMEOUT_MS
+              value: "95000"
+            - name: OPENCODE_WORKSPACE_SWEEP_MS
+              value: "5000"
+            - name: NORTHFLANK_WAKE_TIMEOUT_MS
+              value: "90000"
+            - name: OPENCODE_WORKSPACE_IDLE_MS
+              value: "60000"
           resources:
             requests:
               memory: "12Gi"

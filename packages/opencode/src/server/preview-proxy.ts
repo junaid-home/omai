@@ -5,6 +5,8 @@ import { ProxyUtil } from "@/server/proxy-util"
 
 const PREVIEW_PROXY_PREFIX = "/global/preview/proxy/"
 
+export const PREVIEW_RELAY_HEADER = "x-opencode-preview-relay"
+
 export function previewProxyTarget(url: URL): { port: number; path: string } | undefined {
   if (!url.pathname.startsWith(PREVIEW_PROXY_PREFIX)) return undefined
   const segments = url.pathname.split("/")
@@ -17,8 +19,6 @@ export function proxyBase(port: number): string {
   return `${PREVIEW_PROXY_PREFIX}${port}/`
 }
 
-// Rebase absolute-path asset URLs (e.g. Vite's `/@vite/client`, `/src/main.tsx`)
-// onto the preview proxy path and anchor relative URLs with a <base> tag.
 export function rewritePreviewHtml(body: string, base: string): string {
   let html = body.replace(/(\b(?:src|href)=")\/(?!\/)/g, (_m, prefix) => `${prefix}${base}`)
   if (!/<base\b/i.test(html)) {
@@ -28,13 +28,6 @@ export function rewritePreviewHtml(body: string, base: string): string {
   return html
 }
 
-// Rebase absolute-path module specifiers (e.g. Vite's `/src/main.tsx`,
-// `/node_modules/.vite/deps/react.js`, `/@vite/client`, `/@fs/...`) onto the
-// preview proxy path. Dev servers normalize every import to a root-absolute URL,
-// which would otherwise resolve against the origin root and bypass the proxy.
-// Only module-specifier positions are touched (`from`, `import`, `import(`,
-// `new URL(..., import.meta.url)`) so ordinary string literals like client-side
-// route paths are left alone.
 function rewritePreviewModule(body: string, base: string): string {
   return body
     .replace(/(\bfrom\s*["'])\/(?!\/)/g, `$1${base}`)
@@ -42,30 +35,26 @@ function rewritePreviewModule(body: string, base: string): string {
     .replace(/(\bnew\s+URL\s*\(\s*["'])\/(?!\/)/g, `$1${base}`)
 }
 
-// Preview proxy requests run inside the HttpApi app (short-circuiting the UI
-// catch-all) so that exactly one request listener responds; the raw Node server
-// callback only handles paths the app never sees. HTML/JS payloads are buffered
-// and rewritten so absolute asset URLs resolve through the proxy path; everything
-// else streams through untouched. Nothing may be cached: preview ports are stable
-// but their content changes on every edit, and there is no HMR/websocket
-// bridging — a manual refresh of the preview picks up the latest build. Preview
-// dev servers gzip responses, but the app's fetch-based HttpClient transparently
-// decompresses those bodies (while leaving `content-encoding` behind), so the
-// buffered bytes are always plain text; the stale encoding/framing headers are
-// stripped below.
 export function previewProxyResponse(
   client: HttpClient.HttpClient,
   request: HttpServerRequest.HttpServerRequest,
   target: { port: number; path: string },
   bridge?: string,
+  upstream?: { origin: string; headers?: HeadersInit },
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, never, never> {
-  const url = `http://localhost:${target.port}${target.path}`
+  const baseOrigin = upstream?.origin ?? `http://localhost:${target.port}`
+  const url = upstream
+    ? `${upstream.origin}/global/preview/proxy/${target.port}${target.path}`
+    : `http://localhost:${target.port}${target.path}`
   const base = proxyBase(target.port)
-  const host = { host: `localhost:${target.port}` }
   return Effect.gen(function* () {
-    const upstreamHeaders = ProxyUtil.headers(request.headers as HeadersInit, host)
+    const dial = new Headers(upstream?.headers)
+    if (upstream) dial.set(PREVIEW_RELAY_HEADER, "1")
+    const upstreamHeaders = ProxyUtil.headers(request.headers as HeadersInit, { host: new URL(baseOrigin).host })
     upstreamHeaders.delete("cookie")
     upstreamHeaders.delete("authorization")
+    for (const [key, value] of dial.entries()) upstreamHeaders.set(key, value)
+    const relay = request.headers[PREVIEW_RELAY_HEADER] !== undefined
     const response = yield* client.execute(
       HttpClientRequest.make(request.method as never)(url, {
         headers: upstreamHeaders,
@@ -73,8 +62,8 @@ export function previewProxyResponse(
       }),
     )
     const contentType = response.headers["content-type"] ?? ""
-    const isHtml = contentType.includes("text/html")
-    const isJavaScript = /javascript/.test(contentType)
+    const isHtml = !relay && contentType.includes("text/html")
+    const isJavaScript = !relay && /javascript/.test(contentType)
     if (isHtml || isJavaScript) {
       const chunks = yield* response.stream.pipe(Stream.runCollect)
       const body = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)))

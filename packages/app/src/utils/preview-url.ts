@@ -4,7 +4,6 @@ export function previewUrl(value: string, applicationOrigin: string, central: bo
     const url = new URL(value)
     if (
       !["http:", "https:"].includes(url.protocol) ||
-      url.origin === applicationOrigin ||
       url.username ||
       url.password
     ) {

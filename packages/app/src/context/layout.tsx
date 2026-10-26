@@ -163,6 +163,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
     const serverSync = useServerSync()
     const server = useServer()
     const tabs = useTabs()
+    const heartbeats = new Map<string, ReturnType<typeof setInterval>>()
     const platform = usePlatform()
     const location = useLocation()
     const route = createMemo(() => {
@@ -443,7 +444,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
     }
 
     function enrich(project: { worktree: string; expanded: boolean }) {
-      const [childStore] = serverSync().child(project.worktree, { bootstrap: true })
+      const [childStore] = serverSync().child(project.worktree, { bootstrap: false })
       const projectID = childStore.project
       const metadata = projectID
         ? serverSync().data.project.find((x) => x.id === projectID)
@@ -578,28 +579,6 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       }
     })
 
-    let sessionFrame: number | undefined
-    let sessionTimer: number | undefined
-
-    onMount(() => {
-      sessionFrame = requestAnimationFrame(() => {
-        sessionFrame = undefined
-        sessionTimer = window.setTimeout(() => {
-          sessionTimer = undefined
-          void Promise.all(
-            server.projects.list().map((project) => {
-              return serverSync().project.loadSessions(project.worktree)
-            }),
-          )
-        }, 0)
-      })
-    })
-
-    onCleanup(() => {
-      if (sessionFrame !== undefined) cancelAnimationFrame(sessionFrame)
-      if (sessionTimer !== undefined) window.clearTimeout(sessionTimer)
-    })
-
     return {
       route,
       ready,
@@ -631,11 +610,27 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         }),
         open(directory: string) {
           const root = rootFor(directory)
-          if (server.projects.list().find((x) => x.worktree === root)) return
-          void serverSync().project.loadSessions(root)
-          server.projects.open(root)
+          if (!server.projects.list().find((x) => x.worktree === root)) {
+            void serverSync().project.loadSessions(root)
+            server.projects.open(root)
+          }
+          if (!heartbeats.has(root)) {
+            const sdk = serverSdk()
+            if (sdk) {
+              const handle = setInterval(() => {
+                void sdk.client.path.get({ directory: root }).catch(() => {})
+              }, 30_000)
+              heartbeats.set(root, handle)
+            }
+          }
         },
         close(directory: string) {
+          const root = rootFor(directory)
+          const handle = heartbeats.get(root)
+          if (handle) {
+            clearInterval(handle)
+            heartbeats.delete(root)
+          }
           server.projects.close(directory)
         },
         expand(directory: string) {

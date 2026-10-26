@@ -7,6 +7,7 @@ import "@/server/event"
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
 import { ForbiddenError } from "../errors"
+import { WorkspaceRoutingMiddleware, WorkspaceRoutingQuery } from "../middleware/workspace-routing"
 import { described } from "./metadata"
 
 const GlobalHealth = Schema.Struct({
@@ -186,10 +187,13 @@ export const GlobalApi = HttpApi.make("global").add(
         }),
       ),
       HttpApiEndpoint.post("fileCreate", GlobalPaths.fileCreate, {
+        query: WorkspaceRoutingQuery,
         payload: GlobalFileCreateInput,
         success: described(GlobalFileCreateResult, "Directory created, zip extracted, and git repository initialized"),
         error: HttpApiError.BadRequest,
-      }).annotateMerge(
+      })
+        .middleware(WorkspaceRoutingMiddleware)
+        .annotateMerge(
         OpenApi.annotations({
           identifier: "global.file.create",
           summary: "Create directory, optionally extract a zip, and initialize git",
@@ -202,6 +206,7 @@ export const GlobalApi = HttpApi.make("global").add(
         success: Schema.Struct({ url: Schema.String }),
       }),
       HttpApiEndpoint.post("previewStart", GlobalPaths.previewStart, {
+        query: WorkspaceRoutingQuery,
         payload: Schema.Struct({ directory: Schema.String }),
         success: Schema.Struct({
           success: Schema.Boolean,
@@ -209,7 +214,9 @@ export const GlobalApi = HttpApi.make("global").add(
           framework: Schema.optional(Schema.String),
           error: Schema.optional(Schema.String),
         }),
-      }).annotateMerge(
+      })
+        .middleware(WorkspaceRoutingMiddleware)
+        .annotateMerge(
         OpenApi.annotations({
           identifier: "global.preview.start",
           summary: "Start preview dev server",
@@ -217,9 +224,12 @@ export const GlobalApi = HttpApi.make("global").add(
         }),
       ),
       HttpApiEndpoint.post("previewStop", GlobalPaths.previewStop, {
+        query: WorkspaceRoutingQuery,
         payload: Schema.Struct({ directory: Schema.String }),
         success: Schema.Struct({ success: Schema.Boolean }),
-      }).annotateMerge(
+      })
+        .middleware(WorkspaceRoutingMiddleware)
+        .annotateMerge(
         OpenApi.annotations({
           identifier: "global.preview.stop",
           summary: "Stop preview dev server",
@@ -227,12 +237,15 @@ export const GlobalApi = HttpApi.make("global").add(
         }),
       ),
       HttpApiEndpoint.get("previewStatus", GlobalPaths.previewStatus, {
+        query: WorkspaceRoutingQuery,
         success: Schema.Struct({
           running: Schema.Boolean,
           port: Schema.optional(Schema.Number),
           framework: Schema.optional(Schema.String),
         }),
-      }).annotateMerge(
+      })
+        .middleware(WorkspaceRoutingMiddleware)
+        .annotateMerge(
         OpenApi.annotations({
           identifier: "global.preview.status",
           summary: "Get preview status",
@@ -240,9 +253,12 @@ export const GlobalApi = HttpApi.make("global").add(
         }),
       ),
       HttpApiEndpoint.post("previewHeartbeat", GlobalPaths.previewHeartbeat, {
+        query: WorkspaceRoutingQuery,
         payload: Schema.Struct({ directory: Schema.String }),
         success: Schema.Struct({ success: Schema.Boolean }),
-      }).annotateMerge(
+      })
+        .middleware(WorkspaceRoutingMiddleware)
+        .annotateMerge(
         OpenApi.annotations({
           identifier: "global.preview.heartbeat",
           summary: "Keep preview dev server alive",
@@ -251,6 +267,7 @@ export const GlobalApi = HttpApi.make("global").add(
         }),
       ),
       HttpApiEndpoint.post("previewAudit", GlobalPaths.previewAudit, {
+        query: WorkspaceRoutingQuery,
         payload: Schema.Struct({
           directory: Schema.String,
           formFactor: Schema.optional(Schema.Union([Schema.Literal("mobile"), Schema.Literal("desktop")])),
@@ -260,7 +277,9 @@ export const GlobalApi = HttpApi.make("global").add(
           result: Schema.optional(LighthouseAuditResult),
           error: Schema.optional(Schema.String),
         }),
-      }).annotateMerge(
+      })
+        .middleware(WorkspaceRoutingMiddleware)
+        .annotateMerge(
         OpenApi.annotations({
           identifier: "global.preview.audit",
           summary: "Audit the preview with Google Lighthouse",

@@ -13,7 +13,7 @@ COPY . .
 
 # Remove lockfile and whitelist only packages needed for server build
 RUN rm -f bun.lock && \
-    bun -e 'var p=JSON.parse(require("fs").readFileSync("package.json","utf8"));p.workspaces.packages=["packages/opencode","packages/app","packages/script","packages/plugin","packages/sdk/js","packages/core","packages/server","packages/protocol","packages/schema","packages/session-ui","packages/llm","packages/codemode","packages/tui","packages/http-recorder","packages/effect-drizzle-sqlite","packages/effect-sqlite-node","packages/ui"];p.devDependencies={"prettier":"3.6.2"};require("fs").writeFileSync("package.json",JSON.stringify(p,null,2))'
+    bun -e 'var p=JSON.parse(require("fs").readFileSync("package.json","utf8"));p.workspaces.packages=["packages/opencode","packages/app","packages/script","packages/plugin","packages/sdk/js","packages/core","packages/server","packages/protocol","packages/schema","packages/session-ui","packages/llm","packages/codemode","packages/tui","packages/http-recorder","packages/effect-drizzle-sqlite","packages/effect-sqlite-node","packages/ui","packages/northflank"];p.devDependencies={"prettier":"3.6.2"};require("fs").writeFileSync("package.json",JSON.stringify(p,null,2))'
 
 # Install dependencies
 RUN bun install --ignore-scripts
@@ -75,13 +75,27 @@ ENV OPENCODE_HOST=${OPENCODE_HOST}
 ENV OPENCODE_SERVER_PORT=${OPENCODE_SERVER_PORT}
 ENV OPENCODE_FRONTEND_PORT=${OPENCODE_FRONTEND_PORT}
 
-# Create entrypoint script
-RUN printf '#!/bin/sh\nset -e\nsudo mkdir -p /home/runner/.local/share/opencode /home/runner/.local/state /home/runner/.cache/opencode /home/runner/.config/opencode /home/runner/workspace/projects\nsudo chown -R runner:runner /home/runner/.local /home/runner/.cache /home/runner/.config /home/runner/workspace /root\nexec omai serve --hostname 0.0.0.0 --cors "http://${OPENCODE_HOST}" --cors "http://${OPENCODE_HOST}:${OPENCODE_FRONTEND_PORT}" --cors "https://${OPENCODE_HOST}" --cors "https://${OPENCODE_HOST}:${OPENCODE_FRONTEND_PORT}" --port ${OPENCODE_SERVER_PORT}\n' \
-    > /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/entrypoint.sh
+# Create entrypoint script. No sudo: hardened containers (Northflank MicroVMs)
+# set no_new_privs, sudo refuses to elevate, and set -e would abort before serve
+# ever starts. mkdir works as root and as runner (the paths are under
+# runner's home); the chown only matters when root pre-created the tree and is
+# skipped silently when unprivileged.
+COPY <<'ENTRYPOINT' /usr/local/bin/entrypoint.sh
+#!/bin/sh
+set -e
+mkdir -p /home/runner/.local/share/opencode /home/runner/.local/state /home/runner/.cache/opencode /home/runner/.config/opencode /home/runner/workspace 2>/dev/null || true
+chown -R runner:runner /home/runner/.local /home/runner/.cache /home/runner/.config /home/runner/workspace /root 2>/dev/null || true
+find /home/runner/workspace -mindepth 1 -maxdepth 1 -name lost+found -type d -exec rm -rf {} + 2>/dev/null || true
+su runner -c "git config --global --add safe.directory '*'" 2>/dev/null || true
+if [ -n "$OPENCODE_PROJECT_NAME" ]; then
+  printf "export PS1='runner@%s:\w\$ '\n" "$OPENCODE_PROJECT_NAME" > /etc/profile.d/omai-prompt.sh
+  printf "export PS1='runner@%s:\w\$ '\n" "$OPENCODE_PROJECT_NAME" >> /home/runner/.bashrc
+  chown runner:runner /home/runner/.bashrc /etc/profile.d/omai-prompt.sh 2>/dev/null || true
+  chmod 644 /etc/profile.d/omai-prompt.sh
+  hostname "$OPENCODE_PROJECT_NAME" 2>/dev/null || true
+fi
+exec runuser -u runner -- env HOME=/home/runner omai serve --hostname 0.0.0.0 --cors "http://${OPENCODE_HOST}" --cors "http://${OPENCODE_HOST}:${OPENCODE_FRONTEND_PORT}" --cors "https://${OPENCODE_HOST}" --cors "https://${OPENCODE_HOST}:${OPENCODE_FRONTEND_PORT}" --port ${OPENCODE_SERVER_PORT}
+ENTRYPOINT
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# Set up workspace as runner user
-USER runner
-WORKDIR /home/runner
-
-# Ports accessible via network_mode: host
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

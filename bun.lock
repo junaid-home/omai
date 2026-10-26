@@ -559,6 +559,15 @@
         "@typescript/native-preview": "catalog:",
       },
     },
+    "packages/northflank": {
+      "name": "@opencode-ai/northflank",
+      "version": "1.18.4",
+      "devDependencies": {
+        "@tsconfig/bun": "catalog:",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+      },
+    },
     "packages/opencode": {
       "name": "opencode",
       "version": "1.18.4",
@@ -601,6 +610,7 @@
         "@openauthjs/openauth": "catalog:",
         "@opencode-ai/codemode": "workspace:*",
         "@opencode-ai/llm": "workspace:*",
+        "@opencode-ai/northflank": "workspace:*",
         "@opencode-ai/plugin": "workspace:*",
         "@opencode-ai/protocol": "workspace:*",
         "@opencode-ai/schema": "workspace:*",
@@ -2022,6 +2032,8 @@
     "@opencode-ai/httpapi-codegen": ["@opencode-ai/httpapi-codegen@workspace:packages/httpapi-codegen"],
 
     "@opencode-ai/llm": ["@opencode-ai/llm@workspace:packages/llm"],
+
+    "@opencode-ai/northflank": ["@opencode-ai/northflank@workspace:packages/northflank"],
 
     "@opencode-ai/plugin": ["@opencode-ai/plugin@workspace:packages/plugin"],
 

@@ -3,6 +3,8 @@ import { showToast } from "@/utils/toast"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { useLocation, useNavigate, useParams } from "@solidjs/router"
 import { type Accessor, createEffect, createMemo, createResource, onCleanup, type ParentProps, Show } from "solid-js"
+import { LoaderV2 } from "@opencode-ai/ui/v2/loader-v2"
+import { BrandLogo } from "@/components/brand-logo"
 import { useLanguage } from "@/context/language"
 import { LocalProvider } from "@/context/local"
 import { SDKProvider } from "@/context/sdk"
@@ -25,6 +27,7 @@ export function DirectoryDataProvider(
   const navigate = useNavigate()
   const params = useParams()
   const sync = useSync()
+  const language = useLanguage()
   const serverSync = useServerSync()
   const directory = () => (typeof props.directory === "function" ? props.directory() : props.directory)
   const slug = createMemo(() => base64Encode(directory()))
@@ -64,14 +67,23 @@ export function DirectoryDataProvider(
   return (
     <Show when={directory()} keyed>
       {(directory) => (
-        <DataProvider
-          data={sync().data}
-          directory={directory}
-          onNavigateToSession={(sessionID: string) => navigate(href(sessionID))}
-          onSessionHref={href}
-        >
-          <LocalProvider>{props.children}</LocalProvider>
-        </DataProvider>
+        <div class="relative h-full w-full">
+          <DataProvider
+            data={sync().data}
+            directory={directory}
+            onNavigateToSession={(sessionID: string) => navigate(href(sessionID))}
+            onSessionHref={href}
+          >
+            <LocalProvider>{props.children}</LocalProvider>
+          </DataProvider>
+          <Show when={sync().status === "loading"}>
+            <div class="absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-surface-base/85 backdrop-blur-sm">
+              <BrandLogo size="large" class="animate-pulse" />
+              <LoaderV2 class="text-text-weak" width={24} height={24} />
+              <span class="text-13-regular text-text-weak">Starting project…</span>
+            </div>
+          </Show>
+        </div>
       )}
     </Show>
   )

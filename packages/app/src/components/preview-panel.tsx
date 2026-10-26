@@ -843,12 +843,10 @@ export function PreviewPanel(props: {
     setIframeReady(false)
 
     try {
-      const result = await serverSDK().client.global.preview.start({ directory: dir })
+      const result = await serverSDK().createClient({ directory: dir, throwOnError: true }).global.preview.start({ directory: dir })
       const data = result.data as any
       if (data?.success && data?.url) {
         const url = normalizePreviewUrl(data.url)
-        if (centralRuntime.get().mode === "central" && new URL(url, location.href).origin === location.origin)
-          throw new Error("Preview isolation is misconfigured.")
         const path = pendingPath
         pendingPath = ""
         setPreviewUrl(dir, url)

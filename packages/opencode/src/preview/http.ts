@@ -15,7 +15,10 @@ import { visualBridgeScript } from "./visual-bridge"
 export function config() {
   if (!Authentication.central()) return undefined
   const value = process.env.OPENCODE_PREVIEW_URL
-  if (!value) throw new Error("Central mode requires a dedicated OPENCODE_PREVIEW_URL")
+  if (!value) {
+    if (process.env.OPENCODE_WORKSPACE_ID) return undefined
+    throw new Error("Central mode requires a dedicated OPENCODE_PREVIEW_URL")
+  }
   const url = new URL(value)
   const main = new URL(Authentication.publicOrigin()!)
   if (

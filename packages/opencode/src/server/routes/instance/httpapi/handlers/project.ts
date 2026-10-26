@@ -1,5 +1,6 @@
 import * as InstanceState from "@/effect/instance-state"
 import { InstanceStore } from "@/project/instance-store"
+import { Workspace } from "@/control-plane/workspace"
 import { Project } from "@/project/project"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { Effect } from "effect"
@@ -13,6 +14,7 @@ export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", 
     const svc = yield* Project.Service
     const project = yield* ProjectV2.Service
     const store = yield* InstanceStore.Service
+    const workspaceSvc = yield* Workspace.Service
 
     const list = Effect.fn("ProjectHttpApi.list")(function* () {
       return yield* svc.list()
@@ -81,6 +83,10 @@ export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", 
         (directory) => store.disposeDirectory(directory),
         { discard: true },
       )
+      // Tear down any VM-backed workspaces (and their services/volumes) for
+      // this project so deleting the project also deletes the microVM.
+      const workspaces = yield* workspaceSvc.list(target)
+      yield* Effect.forEach(workspaces, (ws) => workspaceSvc.remove(ws.id).pipe(Effect.ignore), { discard: true })
       yield* svc.remove(ctx.params.projectID).pipe(
         Effect.catchTag("Project.NotFoundError", (error) =>
           Effect.fail(

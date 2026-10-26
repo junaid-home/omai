@@ -60,7 +60,12 @@ export function DialogOpenPath(props: DialogOpenPathProps) {
 
   const homeDir = createMemo(() => serverSync().data.path.home || "/root")
   const projectsBase = createMemo(() => {
-    if (centralRuntime.get().mode === "central") return centralRuntime.get().workspaceRoot
+    const runtime = centralRuntime.get()
+    const projectsRoot = runtime.projectsRoot
+    if (projectsRoot) {
+      return `${projectsRoot}/workspace`
+    }
+    if (runtime.mode === "central") return runtime.workspaceRoot
     const username = auth.user()?.username || "default"
     return `${homeDir()}/workspace/${username}/projects`
   })
@@ -141,6 +146,7 @@ export function DialogOpenPath(props: DialogOpenPathProps) {
         setUploadPercent(0)
         const url = new URL(`${serverSDK().url}/global/file/create`)
         url.searchParams.set("path", projectPath)
+        url.searchParams.set("directory", projectPath)
         const headers: Record<string, string> = { "Content-Type": "application/octet-stream" }
         const http = serverSDK().server.http
         if (http.password) {
@@ -158,9 +164,21 @@ export function DialogOpenPath(props: DialogOpenPathProps) {
         }
       } else {
         setLoadingMessage(language.t("dialog.createProject.step.directory"))
-        const result = await serverSDK().client.global.file.create({ path: projectPath })
-        if (result.error) {
-          const err = result.error as { errors?: { message?: string }[] }
+        const url = new URL(`${serverSDK().url}/global/file/create`)
+        url.searchParams.set("path", projectPath)
+        url.searchParams.set("directory", projectPath)
+        const headers: Record<string, string> = { "Content-Type": "application/json" }
+        const http = serverSDK().server.http
+        if (http.password) {
+          headers.Authorization = `Basic ${authTokenFromCredentials({
+            username: http.username,
+            password: http.password,
+          })}`
+        }
+        const response = await fetch(url.toString(), { method: "POST", headers, body: JSON.stringify({ path: projectPath }), credentials: "include" })
+        const body = await response.json().catch(() => ({}))
+        if (!response.ok || (body as { success?: boolean }).success === false) {
+          const err = body as { errors?: { message?: string }[] }
           const msg = err?.errors?.[0]?.message || language.t("dialog.createProject.error.createFailed")
           throw new Error(msg)
         }

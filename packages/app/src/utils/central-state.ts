@@ -431,6 +431,7 @@ type Runtime = {
   mode: "local" | "central"
   url?: string
   workspaceRoot?: string
+  projectsRoot?: string
   google?: boolean
   user?: AuthUser
   client?: CentralState
@@ -445,7 +446,7 @@ export const centralRuntime = {
     anonymous.clear()
     Object.assign(
       runtime,
-      { url: undefined, workspaceRoot: undefined, google: undefined, user: undefined, client: undefined },
+      { url: undefined, workspaceRoot: undefined, projectsRoot: undefined, google: undefined, user: undefined, client: undefined },
       input,
     )
   },
@@ -483,8 +484,12 @@ export async function bootstrapCentralState(input: { url: string; fetch: typeof 
   }
   if (input.requireCentral && config.mode !== "central")
     throw new Error("This deployment requires central server storage.")
+  const projectsRoot =
+    "projectsRoot" in config && typeof config.projectsRoot === "string"
+      ? config.projectsRoot.replace(/\/+$/, "")
+      : undefined
   if (config.mode === "local") {
-    centralRuntime.configure({ mode: "local", url: base })
+    centralRuntime.configure({ mode: "local", url: base, projectsRoot })
     return
   }
   const workspaceRoot =
@@ -498,7 +503,7 @@ export async function bootstrapCentralState(input: { url: string; fetch: typeof 
     signal: AbortSignal.timeout(15_000),
   })
   if (session.status === 401) {
-    centralRuntime.configure({ mode: "central", url: base, workspaceRoot, google })
+    centralRuntime.configure({ mode: "central", url: base, workspaceRoot, projectsRoot, google })
     return
   }
   if (!session.ok) throw new Error("Your server session could not be verified. Reconnect to continue.")

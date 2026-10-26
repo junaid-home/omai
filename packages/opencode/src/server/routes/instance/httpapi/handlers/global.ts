@@ -19,6 +19,7 @@ import { Installation } from "@/installation"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { gitInitRepo } from "@/project/project"
+import { vmProjectsRoot } from "@/control-plane/vm-projects"
 import { Effect, Layer, Queue, Schema } from "effect"
 import * as Stream from "effect/Stream"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
@@ -33,6 +34,7 @@ import { startDevServer, stopDevServer, getDevServerStatus, touchDevServer } fro
 import { captureAndStoreThumbnail } from "@/preview/capture"
 import { auditPreview } from "@/preview/lighthouse"
 import { ProjectArchive } from "@/server/project-archive"
+import { Project } from "@/project/project"
 
 function asError(err: unknown): Error {
   if (typeof err === "object" && err !== null && "message" in err) {
@@ -109,6 +111,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     const fs = yield* FSUtil.Service
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const bridge = yield* EffectBridge.make()
+    const projectSvc = yield* Project.Service
 
     const health = Effect.fn("GlobalHttpApi.health")(function* () {
       const available = yield* Effect.all(
@@ -237,11 +240,25 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
 
           if (!projectPath) return HttpServerResponse.empty({ status: 400 })
           const requestedPath = projectPath
-          const safePath = yield* Effect.tryPromise(() => CentralStorage.resolveWorkspace(requestedPath)).pipe(
-            Effect.option,
-          )
-          if (safePath._tag === "None") return HttpServerResponse.empty({ status: 403 })
-          projectPath = safePath.value
+          const vmRoot = vmProjectsRoot()
+          let resolvedPath = requestedPath
+          const isVmPath = !!vmRoot && requestedPath.startsWith(`${vmRoot}/`)
+          if (isVmPath) {
+            const root = path.resolve(vmRoot!)
+            const target = path.resolve(requestedPath)
+            const relative = path.relative(root, target)
+            if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
+              return HttpServerResponse.empty({ status: 403 })
+            }
+            resolvedPath = target
+          } else {
+            const safePath = yield* Effect.tryPromise(() => CentralStorage.resolveWorkspace(requestedPath)).pipe(
+              Effect.option,
+            )
+            if (safePath._tag === "None") return HttpServerResponse.empty({ status: 403 })
+            resolvedPath = safePath.value
+          }
+          projectPath = resolvedPath
 
           if (zipData && zipData.length > ProjectArchive.limits.archiveBytes) {
             return HttpServerResponse.jsonUnsafe(
@@ -271,7 +288,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
             Effect.provideService(FSUtil.Service, fs),
             Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
             Effect.map(() => null as Error | null),
-            Effect.catch((err) => Effect.succeed(asError(err))),
+            Effect.catchDefect((defect) => Effect.succeed(asError(defect))),
           )
           if (gitInit) {
             return HttpServerResponse.jsonUnsafe(
@@ -279,6 +296,8 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
               { status: 400 },
             )
           }
+
+          yield* projectSvc.fromDirectory(projectPath).pipe(Effect.ignore)
           return HttpServerResponse.jsonUnsafe({ success: true, path: projectPath, files: extracted.files, git: true })
         }),
       )
@@ -317,8 +336,6 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
               { success: false, error: "Dev server failed to start" },
               { status: 400 },
             )
-          // Capture the thumbnail immediately when the webserver starts: it is captured when
-          // missing or stale and skipped when the existing one is still fresh.
           void captureAndStoreThumbnail(safePath.value).catch(() => {})
           const hostname = process.env.OPENCODE_HOST || status.hostname || "localhost"
           const proto = ctx.request.headers["x-forwarded-proto"] ?? "http"
@@ -329,7 +346,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
             const principal = yield* Authentication.Current
             if (!principal) return HttpServerResponse.empty({ status: 401 })
             if (isolated.public) {
-              const url = `${isolated.origin}/global/preview/proxy/${status.port}`
+              const url = `${isolated.origin}/global/preview/proxy/${status.port}${process.env.OPENCODE_WORKSPACE_ID ? `?workspace=${encodeURIComponent(process.env.OPENCODE_WORKSPACE_ID)}` : ""}`
               return HttpServerResponse.jsonUnsafe(
                 { success: true, url, framework: start.result.framework },
                 { headers: { "Cache-Control": "no-store" } },
@@ -344,13 +361,16 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
                 origin: isolated.origin,
               })
               .pipe(Effect.orDie)
-            const url = `${isolated.origin}/global/preview/proxy/${status.port}/?ticket=${encodeURIComponent(grant.token)}`
+            const url = `${isolated.origin}/global/preview/proxy/${status.port}/?ticket=${encodeURIComponent(grant.token)}${process.env.OPENCODE_WORKSPACE_ID ? `&workspace=${encodeURIComponent(process.env.OPENCODE_WORKSPACE_ID)}` : ""}`
             return HttpServerResponse.jsonUnsafe(
               { success: true, url, framework: start.result.framework },
               { headers: { "Cache-Control": "no-store" } },
             )
           }
-          const url = `${scheme}://${host}/global/preview/proxy/${status.port}`
+          const publicOrigin = (() => { try { return Authentication.publicOrigin() } catch { return undefined } })()
+          const url = publicOrigin
+            ? `${publicOrigin}/global/preview/proxy/${status.port}${process.env.OPENCODE_WORKSPACE_ID ? `?workspace=${encodeURIComponent(process.env.OPENCODE_WORKSPACE_ID)}` : ""}`
+            : `${scheme}://${host}/global/preview/proxy/${status.port}${process.env.OPENCODE_WORKSPACE_ID ? `?workspace=${encodeURIComponent(process.env.OPENCODE_WORKSPACE_ID)}` : ""}`
           return HttpServerResponse.jsonUnsafe({ success: true, url, framework: start.result.framework })
         }),
       )
@@ -421,8 +441,15 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle(
         "previewHeartbeat",
         Effect.fn("GlobalHttpApi.previewHeartbeat")(function* (ctx: { payload: { directory: string } }) {
-          const directory = yield* Effect.promise(() => CentralStorage.resolveWorkspace(ctx.payload.directory))
-          touchDevServer(directory)
+          const vmRoot = vmProjectsRoot() || (process.env["OPENCODE_WORKSPACE_ID"] ? "/home/runner" : undefined)
+          const safePath =
+            vmRoot && (ctx.payload.directory === vmRoot || ctx.payload.directory.startsWith(vmRoot + "/"))
+              ? ctx.payload.directory
+              : yield* Effect.tryPromise(() => CentralStorage.resolveWorkspace(ctx.payload.directory)).pipe(Effect.option).pipe(
+                  Effect.map((opt) => (opt._tag === "Some" ? opt.value : undefined)),
+                )
+          if (!safePath) return HttpServerResponse.empty({ status: 403 })
+          touchDevServer(safePath)
           return { success: true }
         }),
       )

@@ -27,9 +27,6 @@ const servers = new Map<string, DevServer>()
 const slugToDir = new Map<string, string>()
 const locks = new Map<string, Promise<{ sessionId: string; port: number; framework: string }>>()
 const portMap = new Map<string, number>()
-// Clients that shared an in-flight start promise without bumping the running
-// server's refs. Merged into server.refs when the start settles so a stop from
-// one owner can't SIGKILL a server another owner still depends on.
 const pendingRefs = new Map<string, number>()
 let sweepTimer: ReturnType<typeof setInterval> | undefined
 
@@ -116,7 +113,9 @@ function getInstallCommand(packageManager: string): string {
 async function installDependencies(directory: string, packageManager: string): Promise<void> {
   if (hasNodeModules(directory)) return
   const cmd = getInstallCommand(packageManager)
-  await CentralStorage.check()
+  const { vmProjectsRoot } = await import("@/control-plane/vm-projects")
+  const vmRoot = vmProjectsRoot() || (process.env.OPENCODE_WORKSPACE_ID ? "/home/runner" : undefined)
+  if (!vmRoot || !directory.startsWith(`${vmRoot}/`)) await CentralStorage.check()
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("Install timed out")), INSTALL_TIMEOUT_MS)
     const child = spawn("sh", ["-c", cmd], {
@@ -214,7 +213,6 @@ function forceKillAndWait(child: ChildProcessType, timeoutMs = 3000): Promise<vo
   })
 }
 
-/** Dispose only processes owned by this runtime; never sweep unrelated listening ports. */
 export async function initPreview(): Promise<void> {
   for (const server of servers.values()) terminateServer(server)
 }
@@ -223,7 +221,11 @@ export async function startDevServer(
   directory: string,
 ): Promise<{ sessionId: string; port: number; framework: string }> {
   scheduleSweep()
-  directory = await CentralStorage.resolveWorkspace(directory)
+  const { vmProjectsRoot } = await import("@/control-plane/vm-projects")
+  const vmRoot = vmProjectsRoot() || (process.env.OPENCODE_WORKSPACE_ID ? "/home/runner" : undefined)
+  if (!vmRoot || !directory.startsWith(`${vmRoot}/`)) {
+    directory = await CentralStorage.resolveWorkspace(directory)
+  }
   const existing = servers.get(directory)
   if (existing && existing.status === "running" && existing.port > 0) {
     existing.refs++
@@ -264,7 +266,16 @@ async function startDevServerInner(directory: string): Promise<{ sessionId: stri
   }
 
   const projectInfo = await detectProject(directory)
-  if (!projectInfo) throw new Error("No dev server command found. Add a 'dev' script to package.json.")
+  if (!projectInfo) {
+    let listing = ""
+    try {
+      const { readdirSync } = await import("fs")
+      listing = readdirSync(directory).join(", ")
+    } catch (e) {
+      listing = `cannot read dir: ${e instanceof Error ? e.message : e}`
+    }
+    throw new Error(`No dev server command found. Add a 'dev' script to package.json. (dir: ${directory}, contents: ${listing})`)
+  }
 
   if (projectInfo.framework !== "static") {
     await installDependencies(directory, projectInfo.packageManager)
@@ -283,7 +294,9 @@ async function startDevServerInner(directory: string): Promise<{ sessionId: stri
     BROWSER: "none",
   }
   const command = appendHostFlag(projectInfo.command, projectInfo.packageManager, port, projectInfo)
-  await CentralStorage.check()
+  const { vmProjectsRoot: vmr2 } = await import("@/control-plane/vm-projects")
+  const vmRoot2 = vmr2() || (process.env.OPENCODE_WORKSPACE_ID ? "/home/runner" : undefined)
+  if (!vmRoot2 || !directory.startsWith(`${vmRoot2}/`)) await CentralStorage.check()
   const child = spawn("sh", ["-c", command], { cwd: directory, env, stdio: ["ignore", "pipe", "pipe"], detached: true })
 
   const server: DevServer = {
@@ -432,7 +445,6 @@ export function getDevServerStatus(directory: string): {
   return { running: true, hostname: server.hostname, port: server.port, framework: server.projectInfo.framework }
 }
 
-/** Proxy only ports registered to a running workspace process, never arbitrary localhost services. */
 export function previewDirectoryForPort(port: number) {
   for (const server of servers.values()) {
     if (

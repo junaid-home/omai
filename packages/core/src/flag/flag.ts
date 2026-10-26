@@ -33,7 +33,6 @@ export const Flag = {
   OPENCODE_SERVER_USERNAME: process.env["OPENCODE_SERVER_USERNAME"],
   OPENCODE_DISABLE_FFF: fff === undefined ? process.platform === "win32" : truthy("OPENCODE_DISABLE_FFF"),
 
-  // Experimental
   OPENCODE_EXPERIMENTAL_FILEWATCHER: Config.boolean("OPENCODE_EXPERIMENTAL_FILEWATCHER").pipe(
     Config.withDefault(false),
   ),
@@ -49,8 +48,14 @@ export const Flag = {
   OPENCODE_WORKSPACE_ID: process.env["OPENCODE_WORKSPACE_ID"],
   OPENCODE_EXPERIMENTAL_WORKSPACES: enabledByExperimental("OPENCODE_EXPERIMENTAL_WORKSPACES"),
 
-  // Evaluated at access time (not module load) because tests, the CLI, and
-  // external tooling set these env vars at runtime.
+  get OPENCODE_WORKSPACE_ADAPTER() {
+    return process.env["OPENCODE_WORKSPACE_ADAPTER"]
+  },
+
+  get OPENCODE_VM_PROJECTS_ROOT() {
+    return process.env["OPENCODE_VM_PROJECTS_ROOT"]
+  },
+
   get OPENCODE_DISABLE_PROJECT_CONFIG() {
     return truthy("OPENCODE_DISABLE_PROJECT_CONFIG")
   },

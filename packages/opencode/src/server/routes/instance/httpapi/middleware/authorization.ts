@@ -1,4 +1,5 @@
 import { Authentication } from "@opencode-ai/core/authentication"
+import { machineAuthorized } from "@opencode-ai/server/authentication"
 import { ServerAuth } from "@/server/auth"
 import { Effect, Encoding, Layer, Redacted } from "effect"
 import { HttpEffect, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
@@ -138,6 +139,7 @@ export const authorizationLayer = Layer.effect(
             ].includes(pathname)
           )
             return yield* effect
+          if (machineAuthorized(request.headers)) return yield* effect
           const principal = yield* Authentication.Current
           if (!principal) return yield* new HttpApiError.Unauthorized({})
           return yield* effect
@@ -166,6 +168,7 @@ export const ptyConnectAuthorizationLayer = Layer.effect(
           const pathname = new URL(request.url, "http://localhost").pathname
           if (["/auth/login", "/auth/signup", "/auth/config", "/global/health", "/global/live"].includes(pathname))
             return yield* effect
+          if (machineAuthorized(request.headers)) return yield* effect
           const principal = yield* Authentication.Current
           if (!principal) return yield* new HttpApiError.Unauthorized({})
           return yield* effect

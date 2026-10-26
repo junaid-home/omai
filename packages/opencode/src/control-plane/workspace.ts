@@ -14,6 +14,7 @@ import { EventV2 } from "@opencode-ai/core/event"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventSequenceTable, EventTable } from "@opencode-ai/core/event/sql"
 import { FSUtil } from "@opencode-ai/core/fs-util"
+import { Flag } from "@opencode-ai/core/flag/flag"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { Slug } from "@opencode-ai/core/util/slug"
@@ -134,9 +135,13 @@ export interface Interface {
   readonly list: (project: Project.Info) => Effect.Effect<Info[]>
   readonly syncList: (project: Project.Info) => Effect.Effect<void>
   readonly get: (id: WorkspaceV2.ID) => Effect.Effect<Info | undefined>
+  readonly getByDirectory: (directory: string) => Effect.Effect<Info | undefined>
+  readonly all: () => Effect.Effect<Info[]>
   readonly remove: (id: WorkspaceV2.ID) => Effect.Effect<Info | undefined>
   readonly status: () => Effect.Effect<ConnectionStatus[]>
   readonly isSyncing: (workspaceID: WorkspaceV2.ID) => Effect.Effect<boolean>
+  /** True only once the sync stream is actually connected to the remote target. */
+  readonly isSynced: (workspaceID: WorkspaceV2.ID) => Effect.Effect<boolean>
   readonly waitForSync: (
     workspaceID: WorkspaceV2.ID,
     state: Record<string, number>,
@@ -144,6 +149,7 @@ export interface Interface {
     timeout?: number,
   ) => Effect.Effect<void, WaitForSyncError>
   readonly startWorkspaceSyncing: (projectID: ProjectV2.ID) => Effect.Effect<void>
+  readonly startSync: (workspace: Info) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Workspace") {}
@@ -362,9 +368,24 @@ const layer = Layer.effect(
     })
 
     const syncWorkspaceLoop = Effect.fn("Workspace.syncWorkspaceLoop")(function* (space: Info) {
-      const target = yield* WorkspaceAdapterRuntime.target(space)
-
-      if (target.type === "local") return
+      let target: Target | null = null
+      for (let i = 0; i < 60; i++) {
+        target = yield* WorkspaceAdapterRuntime.target(space).pipe(
+          Effect.catch((error) => Effect.succeed(null)),
+        )
+        if (target) break
+        yield* Effect.sleep("2 seconds")
+      }
+      if (!target) {
+        setStatus(space.id, "error")
+        return
+      }
+      // Local targets resolve their status inline: this loop returns for them
+      // below without ever connecting, and create() waits on connected|error.
+      if (target.type === "local") {
+        setStatus(space.id, (yield* fs.existsSafe(target.directory)) ? "connected" : "error")
+        return
+      }
 
       let attempt = 0
 
@@ -390,6 +411,10 @@ const layer = Layer.effect(
 
           setStatus(space.id, "connected")
 
+          // A suspended (or crashed) MicroVM drops the stream abruptly; treat
+          // an interrupted stream as a disconnect so this loop survives and
+          // retries, reconnecting once the VM resumes, instead of dying and
+          // leaving the workspace unsyncable until a full restart.
           yield* parseSSE(stream, (evt) =>
             Effect.gen(function* () {
               if (!evt || typeof evt !== "object" || !("payload" in evt)) return
@@ -424,6 +449,13 @@ const layer = Layer.effect(
                 })
               }
             }),
+          ).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("workspace sync stream interrupted", {
+                workspaceID: space.id,
+                error: errorData(cause),
+              }),
+            ),
           )
 
           setStatus(space.id, "disconnected")
@@ -437,12 +469,17 @@ const layer = Layer.effect(
     })
 
     const startSync = Effect.fn("Workspace.startSync")(function* (space: Info) {
-      if (!flags.experimentalWorkspaces) return
+      if (!flags.experimentalWorkspaces && !Flag.OPENCODE_WORKSPACE_ADAPTER) return
 
+      const exists = yield* FiberMap.has(syncFibers, space.id)
+      if (exists && connections.get(space.id)?.status !== "error") return
+
+      // Local targets resolve their status inline: the sync loop returns for
+      // them without ever connecting, and create() waits on connected|error
+      // before handing the workspace back.
       const target = yield* WorkspaceAdapterRuntime.target(space).pipe(
         Effect.catch((error) =>
           Effect.gen(function* () {
-            setStatus(space.id, "error")
             yield* Effect.logWarning("workspace target failed", {
               workspaceID: space.id,
               error: errorData(error),
@@ -451,17 +488,13 @@ const layer = Layer.effect(
           }),
         ),
       )
-      if (!target) return
-
-      if (target.type === "local") {
+      if (target?.type === "local") {
         setStatus(space.id, (yield* fs.existsSafe(target.directory)) ? "connected" : "error")
         return
       }
-
-      const exists = yield* FiberMap.has(syncFibers, space.id)
-      if (exists && connections.get(space.id)?.status !== "error") return
-
-      setStatus(space.id, "disconnected")
+      // An unresolved target still runs the loop (which retries resolution),
+      // but reports the failure now so create() does not block on its budget.
+      setStatus(space.id, target ? "disconnected" : "error")
 
       yield* FiberMap.run(
         syncFibers,
@@ -530,25 +563,49 @@ const layer = Layer.effect(
         OTEL_EXPORTER_OTLP_HEADERS: process.env.OTEL_EXPORTER_OTLP_HEADERS,
         OTEL_EXPORTER_OTLP_ENDPOINT: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
         OTEL_RESOURCE_ATTRIBUTES: process.env.OTEL_RESOURCE_ATTRIBUTES,
+        // The VM's serve needs its database identity: whoever provisions the
+        // per-VM schema + restricted role sets these before create and they
+        // ride to the instance. Migrator credentials never leave the control
+        // plane. (Per-VM provisioning wiring is Phase F; until then a shared
+        // control-plane role is forwarded as-is.)
+        OPENCODE_DATABASE_URL: process.env.OPENCODE_DATABASE_URL,
+        OPENCODE_DATABASE_SCHEMA: process.env.OPENCODE_DATABASE_SCHEMA,
+        OPENCODE_INSTANCE_ID: process.env.OPENCODE_INSTANCE_ID,
+        OPENCODE_DATA_KEY: process.env.OPENCODE_DATA_KEY,
+        // The VM boots the same central transport as the control plane
+        // (central() is true as soon as the database URL is set), and the
+        // proxy forwards the browser's Origin and session cookie verbatim.
+        // So the VM must share the deployment origin for sameOrigin() checks
+        // and hold the signing key to verify the forwarded token. Previews are
+        // excluded on purpose: OPENCODE_PREVIEW_URL routes to the control
+        // plane's preview listener, and a workspace has no public hostname of
+        // its own to expose one on.
+        OPENCODE_PUBLIC_URL: process.env.OPENCODE_PUBLIC_URL,
+        OPENCODE_JWT_SECRET: process.env.OPENCODE_JWT_SECRET,
+        OPENCODE_SERVER_PORT: process.env.OPENCODE_SERVER_PORT ?? "4096",
+        OPENCODE_FRONTEND_PORT: process.env.OPENCODE_FRONTEND_PORT ?? "80",
+        OPENCODE_SERVER_PROTOCOL: process.env.OPENCODE_SERVER_PROTOCOL ?? "http",
+        OPENCODE_HOST: process.env.OPENCODE_HOST ?? "0.0.0.0",
       }
 
       yield* WorkspaceAdapterRuntime.create(adapter, config, env)
-      yield* Effect.all(
-        [
-          waitEvent({
-            timeout: TIMEOUT,
-            fn(event) {
-              if (event.workspace === info.id && event.payload.type === Event.Status.type) {
-                const { status } = event.payload.properties
-                return status === "error" || status === "connected"
-              }
-              return false
-            },
-          }),
-          startSync(info),
-        ],
-        { concurrency: 2, discard: true },
-      )
+      // The sync loop must outlive the create fence: a cold MicroVM can boot
+      // slower than the fence waits, and `Effect.all` would interrupt
+      // `startSync` before it forks the loop fiber — stranding the workspace
+      // with no sync fiber at all, so every later request fails with
+      // "broken sync connection" forever. Fork it detached; the loop retries
+      // with backoff until the VM answers.
+      yield* startSync(info).pipe(Effect.forkDetach({ startImmediately: true }))
+      yield* waitEvent({
+        timeout: createTimeout(),
+        fn(event) {
+          if (event.workspace === info.id && event.payload.type === Event.Status.type) {
+            const { status } = event.payload.properties
+            return status === "error" || status === "connected"
+          }
+          return false
+        },
+      })
 
       return info
     })
@@ -781,6 +838,21 @@ const layer = Layer.effect(
       return fromRow(row)
     })
 
+    const getByDirectory = Effect.fn("Workspace.getByDirectory")(function* (directory: string) {
+      const row = yield* db
+        .select()
+        .from(WorkspaceTable)
+        .where(eq(WorkspaceTable.directory, directory))
+        .pipe(Database.first)
+        .pipe(Effect.orDie)
+      if (!row) return
+      return fromRow(row)
+    })
+
+    const all = Effect.fn("Workspace.all")(function* () {
+      return (yield* db.select().from(WorkspaceTable).pipe(Effect.orDie)).map(fromRow)
+    })
+
     const remove = Effect.fn("Workspace.remove")(function* (id: WorkspaceV2.ID) {
       const sessions = yield* db
         .select({ id: SessionTable.id, parentID: SessionTable.parent_id })
@@ -824,6 +896,15 @@ const layer = Layer.effect(
     const isSyncing = Effect.fn("Workspace.isSyncing")(function* (workspaceID: WorkspaceV2.ID) {
       const exists = yield* FiberMap.has(syncFibers, workspaceID)
       return exists && connections.get(workspaceID)?.status !== "error"
+    })
+
+    // Readiness for proxying: a live fiber is not enough, because a fiber is
+    // already running while the target is still booting (every connect failure
+    // keeps the loop alive in retry). Only a connected stream proves the
+    // remote is answering requests.
+    const isSynced = Effect.fn("Workspace.isSynced")(function* (workspaceID: WorkspaceV2.ID) {
+      const exists = yield* FiberMap.has(syncFibers, workspaceID)
+      return exists && connections.get(workspaceID)?.status === "connected"
     })
 
     const waitForSync = Effect.fn("Workspace.waitForSync")(function* (
@@ -878,16 +959,28 @@ const layer = Layer.effect(
       list,
       syncList,
       get,
+      getByDirectory,
+      all,
       remove,
       status,
       isSyncing,
+      isSynced,
       waitForSync,
       startWorkspaceSyncing,
+      startSync,
     })
   }),
 )
 
 const TIMEOUT = 5000
+
+// create() blocks until the workspace's sync stream connects, which for a
+// cold MicroVM boot takes far longer than the default fence wait. Deployments
+// extend this via OPENCODE_WORKSPACE_CREATE_TIMEOUT_MS (wake budget).
+function createTimeout() {
+  const value = Number(process.env["OPENCODE_WORKSPACE_CREATE_TIMEOUT_MS"] ?? TIMEOUT)
+  return Number.isFinite(value) && value > 0 ? value : TIMEOUT
+}
 
 type HistoryEvent = {
   id: string

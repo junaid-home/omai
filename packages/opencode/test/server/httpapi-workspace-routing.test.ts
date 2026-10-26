@@ -19,6 +19,7 @@ import { registerAdapter } from "../../src/control-plane/adapters"
 import { WorkspaceV2 } from "@opencode-ai/core/workspace"
 import type { WorkspaceAdapter } from "../../src/control-plane/types"
 import { Workspace } from "../../src/control-plane/workspace"
+import { Lifecycle } from "../../src/control-plane/lifecycle"
 import { WorkspaceTable } from "@opencode-ai/core/control-plane/workspace.sql"
 import { Database } from "@opencode-ai/core/database/database"
 import { Project } from "../../src/project/project"
@@ -38,9 +39,16 @@ import { testEffect } from "../lib/effect"
 
 const testStateLayer = Layer.effectDiscard(
   Effect.gen(function* () {
+    // A repo .env that enables the Northflank adapter would make workspace
+    // auto-provisioning inside these tests create real VMs; keep it off for
+    // the lifetime of the suite and restore it afterwards.
+    const previous = process.env.OPENCODE_WORKSPACE_ADAPTER
+    process.env.OPENCODE_WORKSPACE_ADAPTER = ""
     yield* Effect.promise(() => resetDatabase())
     yield* Effect.addFinalizer(() =>
       Effect.promise(async () => {
+        if (previous === undefined) delete process.env.OPENCODE_WORKSPACE_ADAPTER
+        else process.env.OPENCODE_WORKSPACE_ADAPTER = previous
         await resetDatabase()
       }),
     )
@@ -71,7 +79,7 @@ type TestHandler<E, R> = (
 ) => Effect.Effect<HttpServerResponse.HttpServerResponse, E, R>
 
 const workspaceRoutingTestLayer = workspaceRoutingLayer.pipe(
-  Layer.provide([Socket.layerWebSocketConstructorGlobal, FetchHttpClient.layer]),
+  Layer.provide([Socket.layerWebSocketConstructorGlobal, FetchHttpClient.layer, Lifecycle.layer]),
 )
 
 const serverUrl = HttpServer.HttpServer.use((server) => Effect.succeed(HttpServer.formatAddress(server.address)))
@@ -108,10 +116,21 @@ const remoteAdapter = (directory: string, url: string, headers?: HeadersInit): W
   target: () => ({ type: "remote" as const, url, headers }),
 })
 
-const eventStreamResponse = () =>
-  HttpServerResponse.text('data: {"payload":{"type":"server.connected","properties":{}}}\n\n', {
-    contentType: "text/event-stream",
-  })
+const eventStreamResponse = () => {
+  const encoder = new TextEncoder()
+  return HttpServerResponse.fromWeb(
+    new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          // Keep the stream open: production targets hold this connection for
+          // the process lifetime, and a finished stream reads as a disconnect.
+          controller.enqueue(encoder.encode(":\n\n"))
+        },
+      }),
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    ),
+  )
+}
 
 const syncResponse = (request: HttpServerRequest.HttpServerRequest) => {
   const url = requestURL(request)
@@ -364,8 +383,12 @@ describe("HttpApi workspace routing middleware", () => {
         remove: () => Effect.die("unused"),
         status: () => Effect.die("unused"),
         isSyncing: () => Effect.succeed(true),
+        isSynced: () => Effect.succeed(true),
         waitForSync: (id, state) => Ref.set(waited, { workspaceID: id, state }),
         startWorkspaceSyncing: () => Effect.die("unused"),
+        getByDirectory: () => Effect.succeed(undefined),
+        all: () => Effect.succeed([]),
+        startSync: () => Effect.void,
       })
 
       yield* HttpApiBuilder.layer(ProbeApi).pipe(

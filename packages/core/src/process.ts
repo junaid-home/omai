@@ -53,6 +53,7 @@ export type Interface = ChildProcessSpawner["Service"] & {
     command: ChildProcess.Command,
     options?: RunStreamOptions,
   ) => Stream.Stream<string, AppProcessError>
+  readonly running: Effect.Effect<number>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/AppProcess") {}
@@ -142,6 +143,22 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner
 
+    let children = 0
+    const spawn = (command: ChildProcess.Command) =>
+      Effect.acquireRelease(
+        spawner.spawn(command).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              children += 1
+            }),
+          ),
+        ),
+        () =>
+          Effect.sync(() => {
+            children -= 1
+          }),
+      )
+
     const runCommand = (command: ChildProcess.Command, options?: RunOptions) => {
       const description = describeCommand(command)
       const collect = Effect.scoped(
@@ -150,7 +167,7 @@ const layer = Layer.effect(
             try: () => CentralStorage.check(),
             catch: (cause) => wrapError(description, cause),
           })
-          const handle = yield* spawner.spawn(command)
+          const handle = yield* spawn(command)
           if (options?.combineOutput) {
             const [output, exitCode] = yield* Effect.all(
               [collectStream(handle.all, options.maxOutputBytes), handle.exitCode],
@@ -228,7 +245,7 @@ const layer = Layer.effect(
             try: () => CentralStorage.check(),
             catch: (cause) => wrapError(description, cause),
           })
-          const handle = yield* spawner.spawn(command)
+          const handle = yield* spawn(command)
           const stderrFiber = yield* Effect.forkScoped(
             collectStream(handle.stderr, options?.maxErrorBytes).pipe(Effect.map((x) => x.buffer.toString("utf8"))),
           )
@@ -261,7 +278,7 @@ const layer = Layer.effect(
       )
     }
 
-    return Service.of({ ...spawner, run, runStream })
+    return Service.of({ ...spawner, run, runStream, running: Effect.sync(() => children) })
   }),
 )
 

@@ -1,7 +1,10 @@
+import { AppProcess } from "@opencode-ai/core/process"
+import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { listAdapters } from "@/control-plane/adapters"
 import { Workspace } from "@/control-plane/workspace"
 import * as InstanceState from "@/effect/instance-state"
 import { Vcs } from "@/project/vcs"
+import { getDevServerStatus } from "@/preview/server"
 import { Cause, Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
@@ -57,6 +60,19 @@ export const workspaceHandlers = HttpApiBuilder.group(InstanceHttpApi, "workspac
       return (yield* workspace.status()).filter((item) => ids.has(item.workspaceID))
     })
 
+    const busy = Effect.fn("WorkspaceHttpApi.busy")(function* () {
+      const instance = yield* InstanceState.context
+      const execution = yield* SessionExecution.Service
+      const appProcess = yield* AppProcess.Service
+      const reasons: string[] = []
+      const active = yield* execution.active
+      if (active.size > 0) reasons.push(`sessions:${active.size}`)
+      const running = yield* appProcess.running
+      if (running > 0) reasons.push(`processes:${running}`)
+      if (getDevServerStatus(instance.directory).running) reasons.push("preview")
+      return { busy: reasons.length > 0, reasons }
+    })
+
     const remove = Effect.fn("WorkspaceHttpApi.remove")(function* (ctx: { params: { id: Workspace.Info["id"] } }) {
       return yield* workspace.remove(ctx.params.id)
     })
@@ -96,6 +112,7 @@ export const workspaceHandlers = HttpApiBuilder.group(InstanceHttpApi, "workspac
       .handle("create", create)
       .handle("syncList", syncList)
       .handle("status", status)
+      .handle("busy", busy)
       .handle("remove", remove)
       .handle("warp", warp)
   }),

@@ -453,7 +453,7 @@ export const LocalWorkspace = (props: {
   const queryOptions = useQueryOptions()
   const language = useLanguage()
   const workspace = createMemo(() => {
-    const [store, setStore] = serverSync().child(props.project.worktree)
+    const [store, setStore] = serverSync().child(props.project.worktree, { bootstrap: false })
     return { store, setStore }
   })
   const slug = createMemo(() => base64Encode(props.project.worktree))

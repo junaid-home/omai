@@ -18,7 +18,7 @@ import {
   HttpServerResponse,
 } from "effect/unstable/http"
 import * as Socket from "effect/unstable/socket/Socket"
-import { previewProxyResponse, previewProxyTarget } from "@/server/preview-proxy"
+import { previewProxyHttpMiddleware } from "@/server/preview-proxy-middleware"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import * as Observability from "@opencode-ai/core/observability"
 import { Account } from "@/account/account"
@@ -28,6 +28,7 @@ import { BackgroundJob } from "@/background/job"
 import { Command } from "@/command"
 import { Checkpoint } from "@/checkpoint"
 import { Config } from "@/config/config"
+import { Lifecycle } from "@/control-plane/lifecycle"
 import { Workspace } from "@/control-plane/workspace"
 import { Env } from "@/env"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -70,6 +71,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { MoveSession } from "@opencode-ai/core/control-plane/move-session"
 import { Database } from "@opencode-ai/core/database/database"
 import { AppNodeBuilderV1 } from "@/effect/app-node-builder-v1"
+import { AppProcess } from "@opencode-ai/core/process"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { RuntimeOwnership } from "@/server/runtime-ownership"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
@@ -165,7 +167,9 @@ const authOnlyRouterLayer = authorizationRouterMiddleware.layer.pipe(Layer.provi
 const httpApiAuthLayer = authorizationLayer.pipe(Layer.provide(ServerAuth.Config.layer))
 const ptyConnectHttpApiAuthLayer = ptyConnectAuthorizationLayer.pipe(Layer.provide(ServerAuth.Config.layer))
 const serverHttpApiAuthLayer = serverAuthorizationLayer.pipe(Layer.provide(ServerAuth.Config.layer))
-const workspaceRoutingLive = workspaceRoutingLayer.pipe(Layer.provide(Socket.layerWebSocketConstructorGlobal))
+const workspaceRoutingLive = workspaceRoutingLayer.pipe(
+  Layer.provide([Socket.layerWebSocketConstructorGlobal, Lifecycle.layer]),
+)
 const rootApiRoutes = HttpApiBuilder.layer(RootHttpApi).pipe(
   Layer.provide([
     controlHandlers,
@@ -177,7 +181,7 @@ const rootApiRoutes = HttpApiBuilder.layer(RootHttpApi).pipe(
     userStateHandlers,
   ]),
   Layer.provide(schemaErrorLayer),
-  Layer.provide(httpApiAuthLayer),
+  Layer.provide([httpApiAuthLayer, workspaceRoutingLive]),
 )
 const eventApiRoutes = HttpApiBuilder.layer(EventApi).pipe(
   Layer.provide(eventHandlers),
@@ -218,26 +222,6 @@ const serverRoutes = HttpApiBuilder.layer(Api).pipe(
   Layer.provide(PluginPtyEnvironment.layer),
   Layer.provide([serverHttpApiAuthLayer, v2SchemaErrorLayer]),
 )
-
-// Preview proxy requests must be answered by exactly one listener. The raw Node
-// server callback and effect's request listener both fire on the same http.Server,
-// so proxying preview traffic here short-circuits the UI catch-all instead of
-// racing it (either responder can win, serving the wrong app). Everything else
-// flows through. Preview has no HMR/websocket bridging: a manual refresh of the
-// preview picks up the latest build from the dev server.
-const previewProxyHttpMiddleware = HttpRouter.middleware<{ handles: unknown }>()(
-  Effect.gen(function* () {
-    const client = yield* HttpClient.HttpClient
-    return (effect) =>
-      Effect.gen(function* () {
-        const request = yield* HttpServerRequest.HttpServerRequest
-        const target = previewProxyTarget(new URL(request.url, "http://localhost"))
-        if (!target) return yield* effect
-        if (Authentication.central()) return HttpServerResponse.empty({ status: 404 })
-        return yield* previewProxyResponse(client, request, target)
-      })
-  }),
-).layer
 
 // `OpenApi.fromApi` is non-trivial; defer until /doc is actually hit so
 // processes that never serve it (CLI, scripts) don't pay at module load.
@@ -281,6 +265,7 @@ const app = LayerNode.group([
   Env.node,
   Git.node,
   Ripgrep.node,
+  AppProcess.node,
   Storage.node,
   Snapshot.node,
   Checkpoint.node,
@@ -361,7 +346,7 @@ export function createRoutes(
     Layer.provide(locationLayer),
     Layer.provide(PtyEnvironment.layer),
     Layer.provide(
-      AppNodeBuilderV1.build(SessionV2.node, [
+      AppNodeBuilderV1.build(LayerNode.group([SessionV2.node, SessionExecution.node]), [
         [LocationServiceMap.node, locationServiceMapV2],
         [SessionExecution.node, SessionExecutionLocal.node],
       ]),

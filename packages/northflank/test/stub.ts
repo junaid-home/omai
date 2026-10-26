@@ -1,0 +1,150 @@
+import type { ServicePort } from "../src/client.js"
+
+type Service = {
+  id: string
+  name: string
+  payload: Record<string, unknown>
+  paused: boolean
+  variables?: Record<string, string | undefined>
+}
+
+type Volume = { id: string; name: string; payload: Record<string, unknown> }
+
+export type RecordedRequest = { method: string; path: string; authorization?: string; body?: unknown }
+
+/**
+ * Real local HTTP server emulating the Northflank REST API surface the
+ * adapter uses. Tests assert against recorded requests and server state —
+ * no module mocks.
+ */
+export function northflankStub(input?: { dns?: string; token?: string }) {
+  const services = new Map<string, Service>()
+  const volumes = new Map<string, Volume>()
+  const requests: RecordedRequest[] = []
+
+  const token = input?.token ?? "nf-test-token"
+  const dns = input?.dns ?? "127.0.0.1:4096"
+  const json = (data: unknown, status = 200) => Response.json(data, { status })
+  const fail = (status: number, message: string) => json({ error: { message } }, status)
+
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      const url = new URL(request.url)
+      const path = url.pathname
+      const method = request.method
+      const body = request.body ? await request.json().catch(() => undefined) : undefined
+      requests.push({
+        method,
+        path,
+        authorization: request.headers.get("authorization") ?? undefined,
+        ...(body === undefined ? {} : { body }),
+      })
+
+      if (request.headers.get("authorization") !== `Bearer ${token}`)
+        return fail(401, "The token used to authenticate does not have permission to access this endpoint.")
+
+      // /v1/projects/{project}/{kind}/{id}/{action}
+      const segments = path.split("/").filter(Boolean)
+      if (segments[0] !== "v1" || segments[1] !== "projects") return fail(404, "Not found")
+      const [kind, id, action] = segments.slice(3)
+      const payload = body as Record<string, unknown> | undefined
+
+      if (kind === "services" && id === "deployment" && method === "POST") {
+        const name = payload?.["name"] as string | undefined
+        const plan = (payload?.["billing"] as { deploymentPlan?: string } | undefined)?.deploymentPlan
+        if (!name || !plan) return fail(400, "Request failed payload validation - see details.")
+        const serviceID = name.toLowerCase().replace(/[^a-z0-9-]+/g, "-")
+        if (services.has(serviceID)) return fail(409, `Service '${name}' already exists`)
+        services.set(serviceID, { id: serviceID, name, payload: payload ?? {}, paused: false })
+        return json({ data: { id: serviceID, name } })
+      }
+
+      if (kind === "services" && id && !action) {
+        const service = services.get(id)
+        if (!service) return fail(404, `Could not find service '${id}'`)
+        if (method === "GET") return json({ data: { ...service.payload, id: service.id, name: service.name } })
+        if (method === "DELETE") {
+          services.delete(id)
+          return json({ data: {} })
+        }
+      }
+
+      if (kind === "services" && id && action === "runtime-environment" && method === "POST") {
+        const service = services.get(id)
+        if (!service) return fail(404, `Could not find service '${id}'`)
+        service.variables = payload?.["variables"] as Record<string, string | undefined> | undefined
+        return json({ data: {} })
+      }
+
+      if (kind === "services" && id && action === "ports") {
+        if (!services.has(id)) return fail(404, `Could not find service '${id}'`)
+        const ports: ServicePort[] = [{ name: "p01", internalPort: 4096, public: true, dns }]
+        return json({ data: { ports } })
+      }
+
+      if (kind === "services" && id && (action === "pause" || action === "resume")) {
+        const service = services.get(id)
+        if (!service) return fail(404, `Could not find service '${id}'`)
+        if (action === "resume" && !service.paused) return fail(400, "Could not resume as service is not paused")
+        service.paused = action === "pause"
+        return json({ data: {} })
+      }
+
+      if (kind === "services" && id === undefined && method === "GET")
+        return json({ data: { services: [...services.values()] } })
+
+      if (kind === "volumes" && id === undefined && method === "GET") return json({ data: [...volumes.values()] })
+
+      if (kind === "volumes" && id === undefined && method === "POST") {
+        const name = payload?.["name"] as string | undefined
+        if (!name) return fail(400, "Request failed payload validation - see details.")
+        const volumeID = name.toLowerCase().replace(/[^a-z0-9-]+/g, "-")
+        volumes.set(volumeID, { id: volumeID, name, payload: payload ?? {} })
+        return json({ data: { id: volumeID, name } })
+      }
+
+      if (kind === "volumes" && id && action === "attach") {
+        if (!volumes.has(id)) return fail(404, `Could not find volume '${id}'`)
+        return json({ data: {} })
+      }
+
+      if (kind === "volumes" && id && !action && method === "DELETE") {
+        volumes.delete(id)
+        return json({ data: {} })
+      }
+
+      return fail(404, `No stub route: ${method} ${path}`)
+    },
+  })
+
+  return {
+    apiBase: `http://127.0.0.1:${server.port}/v1`,
+    token,
+    services,
+    volumes,
+    requests,
+    stop: () => server.stop(true),
+  }
+}
+
+/** Stand-in for the OpenCode server running inside the MicroVM. */
+export function vmStub() {
+  const report = { busy: false, reasons: [] as string[] }
+  const server = Bun.serve({
+    port: 0,
+    fetch(request) {
+      if (new URL(request.url).pathname === "/experimental/workspace/busy") return Response.json(report)
+      return new Response(null, { status: 404 })
+    },
+  })
+  return {
+    host: `127.0.0.1:${server.port}`,
+    setBusy(busy: boolean, reasons: string[] = []) {
+      report.busy = busy
+      report.reasons = reasons
+    },
+    crash: () => server.stop(true),
+    stop: () => server.stop(true),
+  }
+}

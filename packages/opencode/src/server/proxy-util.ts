@@ -16,6 +16,7 @@ function sanitize(out: Headers) {
   out.delete("accept-encoding")
   out.delete("x-opencode-directory")
   out.delete("x-opencode-workspace")
+  for (const key of [...out.keys()]) if (key.startsWith("sec-websocket-")) out.delete(key)
 }
 
 export function headers(input: Request | HeadersInit | Record<string, string>, extra?: HeadersInit) {

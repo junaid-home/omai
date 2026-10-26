@@ -21,6 +21,7 @@ import { AppProcess } from "@opencode-ai/core/process"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { CentralStorage } from "@opencode-ai/core/storage/central"
+import { vmProjectsRoot } from "@/control-plane/vm-projects"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -141,12 +142,15 @@ export const gitInitRepo = Effect.fn("Project.gitInitRepo")(function* (directory
   // A zip upload can carry its own repository; drop any existing .git so the
   // project always starts from a fresh repository with an initial commit.
   yield* fs.remove(path.join(directory, ".git"), { recursive: true, force: true }).pipe(Effect.ignore)
-  const init = yield* runGit(["init", "--quiet"], { cwd: directory })
+  // Volume mount points are owned by root while the server runs as a
+  // non-root user, so git would otherwise reject the directory as having
+  // "dubious ownership". Allow it explicitly for this repository.
+  const init = yield* runGit(["-c", "safe.directory=*", "init", "--quiet"], { cwd: directory })
   if (init.code !== 0) {
     throw new Error(init.stderr.trim() || init.text.trim() || "Failed to initialize git repository")
   }
-  yield* runGit(["add", "-A"], { cwd: directory })
-  const commit = yield* runGit(["commit", "--quiet", "--allow-empty", "-m", "Initial commit"], {
+  yield* runGit(["-c", "safe.directory=*", "add", "-A"], { cwd: directory })
+  const commit = yield* runGit(["-c", "safe.directory=*", "commit", "--quiet", "--allow-empty", "-m", "Initial commit"], {
     cwd: directory,
     env: {
       GIT_AUTHOR_NAME: "OMAI",
@@ -443,8 +447,10 @@ const layer = Layer.effect(
       if (!row) return yield* new NotFoundError({ projectID: id })
 
       const worktree = FSUtil.resolve(row.worktree)
+      const vmRoot = vmProjectsRoot()
+      const isVmPath = !!vmRoot && worktree.startsWith(`${vmRoot}/`)
       const root = CentralStorage.workspaceRoot()
-      if (root) {
+      if (root && !isVmPath) {
         yield* Effect.promise(() => CentralStorage.resolveUnder(root, worktree)).pipe(
           Effect.catch(() =>
             Effect.fail(
@@ -455,7 +461,7 @@ const layer = Layer.effect(
             ),
           ),
         )
-      } else if (worktree === "/" || worktree === os.homedir()) {
+      } else if (!isVmPath && (worktree === "/" || worktree === os.homedir())) {
         return yield* new InvalidTargetError({
           projectID: id,
           message: `Refusing to delete a protected directory: ${worktree}`,

@@ -43,6 +43,11 @@ export type WorkspaceAdapterContext = {
   readonly workspaceID?: WorkspaceV2.ID
 }
 
+export type WorkspaceBusyReport = {
+  readonly busy: boolean
+  readonly reasons: readonly string[]
+}
+
 export type WorkspaceAdapter = {
   name: string
   description: string
@@ -56,4 +61,7 @@ export type WorkspaceAdapter = {
   list?(context?: WorkspaceAdapterContext): WorkspaceListedInfo[] | Promise<WorkspaceListedInfo[]>
   remove(info: WorkspaceInfo, context?: WorkspaceAdapterContext): Promise<void>
   target(info: WorkspaceInfo, context?: WorkspaceAdapterContext): Target | Promise<Target>
+  start?(info: WorkspaceInfo, context?: WorkspaceAdapterContext): Promise<void>
+  stop?(info: WorkspaceInfo, context?: WorkspaceAdapterContext): Promise<void>
+  busy?(info: WorkspaceInfo, context?: WorkspaceAdapterContext): Promise<WorkspaceBusyReport>
 }

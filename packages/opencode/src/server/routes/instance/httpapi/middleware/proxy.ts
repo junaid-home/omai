@@ -2,6 +2,7 @@ import { ProxyUtil } from "@/server/proxy-util"
 import { Effect, Stream } from "effect"
 import { HttpBody, HttpClient, HttpClientRequest, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import * as Socket from "effect/unstable/socket/Socket"
+import WebSocket from "ws"
 import { WebSocketTracker } from "../websocket-tracker"
 
 export function requestBody(request: HttpServerRequest.HttpServerRequest) {
@@ -14,13 +15,28 @@ export function requestBody(request: HttpServerRequest.HttpServerRequest) {
 export function websocket(
   request: HttpServerRequest.HttpServerRequest,
   target: string | URL,
+  extra?: HeadersInit,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, never, Socket.WebSocketConstructor> {
   return Effect.scoped(
     Effect.gen(function* () {
       const inbound = yield* Effect.orDie(request.upgrade)
-      const outbound = yield* Socket.makeWebSocket(ProxyUtil.websocketTargetURL(target), {
-        protocols: ProxyUtil.websocketProtocols(request.headers),
-      })
+      const protocols = ProxyUtil.websocketProtocols(request.headers)
+      const headers = ProxyUtil.headers(request.headers as HeadersInit, extra)
+
+      const dialHeaders = Object.fromEntries(headers.entries())
+      const outbound = yield* Object.keys(dialHeaders).length === 0
+        ? Socket.makeWebSocket(ProxyUtil.websocketTargetURL(target), { protocols })
+        : Socket.fromWebSocket(
+            Effect.acquireRelease(
+              Effect.sync(
+                () =>
+                  new WebSocket(ProxyUtil.websocketTargetURL(target), protocols, {
+                    headers: dialHeaders,
+                  }) as unknown as globalThis.WebSocket,
+              ),
+              (socket) => Effect.sync(() => socket.close(1000)),
+            ),
+          )
       const writeInbound = yield* inbound.writer
       const writeOutbound = yield* outbound.writer
       const closeSocket = (socket: Socket.Socket, write: (event: Socket.CloseEvent) => Effect.Effect<void, unknown>) =>

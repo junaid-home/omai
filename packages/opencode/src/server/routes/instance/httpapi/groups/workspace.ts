@@ -17,6 +17,12 @@ export const WarpPayload = Schema.Struct({
   copyChanges: Workspace.SessionWarpInput.fields.copyChanges,
 })
 
+/** Aggregated activity report for the workspace this instance serves. */
+export const BusyReport = Schema.Struct({
+  busy: Schema.Boolean,
+  reasons: Schema.Array(Schema.String),
+})
+
 export class ApiWorkspaceWarpError extends Schema.ErrorClass<ApiWorkspaceWarpError>("WorkspaceWarpError")(
   {
     name: Schema.Literal("WorkspaceWarpError"),
@@ -42,6 +48,7 @@ export const WorkspacePaths = {
   list: root,
   syncList: `${root}/sync-list`,
   status: `${root}/status`,
+  busy: `${root}/busy`,
   remove: `${root}/:id`,
   warp: `${root}/warp`,
 } as const
@@ -100,6 +107,17 @@ export const WorkspaceApi = HttpApi.make("workspace")
             identifier: "experimental.workspace.status",
             summary: "Workspace status",
             description: "Get connection status for workspaces in the current project.",
+          }),
+        ),
+        HttpApiEndpoint.get("busy", WorkspacePaths.busy, {
+          query: WorkspaceRoutingQuery,
+          success: described(BusyReport, "Workspace busy report"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.workspace.busy",
+            summary: "Workspace busy report",
+            description:
+              "Aggregated activity (sessions, processes, preview dev server) used to decide whether the workspace may be suspended.",
           }),
         ),
         HttpApiEndpoint.delete("remove", WorkspacePaths.remove, {

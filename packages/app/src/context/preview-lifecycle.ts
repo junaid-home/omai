@@ -36,7 +36,7 @@ export function usePreviewLifecycle(directory: () => string) {
     activeSessions.delete(dir)
     previewUrls.delete(dir)
     try {
-      await serverSDK().client.global.preview.stop({ directory: dir })
+      await serverSDK().createClient({ directory: dir, throwOnError: true }).global.preview.stop({ directory: dir })
     } catch {}
   }
 
@@ -46,7 +46,7 @@ export function usePreviewLifecycle(directory: () => string) {
     activeSessions.set(dir, refs)
     if (refs > 1) return
     try {
-      const result = await serverSDK().client.global.preview.start({ directory: dir })
+      const result = await serverSDK().createClient({ directory: dir, throwOnError: true }).global.preview.start({ directory: dir })
       const data = result.data as any
       if (data?.success && data?.url) {
         previewUrls.set(dir, normalizePreviewUrl(data.url))
@@ -60,7 +60,8 @@ export function usePreviewLifecycle(directory: () => string) {
     if (!dir) return
     const heartbeat = setInterval(() => {
       serverSDK()
-        .client.global.preview.heartbeat({ directory: dir })
+        .createClient({ directory: dir, throwOnError: true })
+        .global.preview.heartbeat({ directory: dir })
         .catch(() => {})
     }, HEARTBEAT_INTERVAL_MS)
     onCleanup(() => clearInterval(heartbeat))
