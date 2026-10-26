@@ -6,6 +6,7 @@ import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import { decodeDirectory, WorkspaceRouteContext } from "./workspace-routing"
 import { vmProjectsRoot } from "@/control-plane/vm-projects"
+import { Flag } from "@opencode-ai/core/flag/flag"
 
 export class InstanceContextMiddleware extends HttpApiMiddleware.Service<
   InstanceContextMiddleware,
@@ -21,13 +22,13 @@ function provideInstanceContext<E>(
   return Effect.gen(function* () {
     const route = yield* WorkspaceRouteContext
     const decoded = decodeDirectory(route.directory)
-    const vmRoot = (yield* Effect.sync(() => vmProjectsRoot())) as string | undefined
-    const directory =
-      vmRoot && (decoded === vmRoot || decoded.startsWith(vmRoot + "/"))
-        ? decoded
-        : yield* Effect.tryPromise(() => CentralStorage.resolveWorkspace(decoded).pipe(Effect.option)).pipe(
-            Effect.map((opt) => (opt._tag === "Some" ? opt.value : undefined)),
-          )
+    const vmRoot = Flag.OPENCODE_WORKSPACE_ADAPTER ? vmProjectsRoot() : undefined
+    const isVmPath = !!vmRoot && !!decoded && (decoded === vmRoot || decoded.startsWith(vmRoot + "/"))
+    const directory = isVmPath
+      ? decoded
+      : yield* Effect.tryPromise(() => CentralStorage.resolveWorkspace(decoded ?? "").pipe(Effect.option)).pipe(
+          Effect.map((opt) => (opt._tag === "Some" ? opt.value : undefined)),
+        )
     if (!directory) return HttpServerResponse.empty({ status: 403 })
     const ctx = yield* store.load({ directory })
     return yield* effect.pipe(
