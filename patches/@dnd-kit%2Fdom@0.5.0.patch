@@ -1,0 +1,44 @@
+diff --git a/index.cjs b/index.cjs
+index f132ea74a0dc8e612a16ad5a3200af4cf517f3d7..3f8771d6b43e3c1f26bd2d1a7e25f9ec3a026818 100644
+--- a/index.cjs
++++ b/index.cjs
+@@ -2197,6 +2197,17 @@ var DragDropManager = class extends abstract.DragDropManager {
+       modifiers
+     }));
+   }
++  get plugins() {
++    return super.plugins;
++  }
++  set plugins(plugins) {
++    super.plugins = [
++      ScrollListener,
++      Scroller,
++      StyleInjector,
++      ...plugins
++    ];
++  }
+ };
+ var _element_dec, _handle_dec, _c, _init5, _handle, _element;
+ var Draggable = class extends (_c = abstract.Draggable, _handle_dec = [state.reactive], _element_dec = [state.reactive], _c) {
+diff --git a/index.js b/index.js
+index 3791186e08d435e2217ed2380d49e9ce83f41e8b..ce8b08e50a314d9b2e17f767a6cfd939d6b165f8 100644
+--- a/index.js
++++ b/index.js
+@@ -2196,6 +2196,17 @@ var DragDropManager = class extends DragDropManager$1 {
+       modifiers
+     }));
+   }
++  get plugins() {
++    return super.plugins;
++  }
++  set plugins(plugins) {
++    super.plugins = [
++      ScrollListener,
++      Scroller,
++      StyleInjector,
++      ...plugins
++    ];
++  }
+ };
+ var _element_dec, _handle_dec, _c, _init5, _handle, _element;
+ var Draggable = class extends (_c = Draggable$1, _handle_dec = [reactive], _element_dec = [reactive], _c) {

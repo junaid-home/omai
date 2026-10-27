@@ -20,7 +20,7 @@ COPY ./ ./
 # Slim down workspace - only include packages needed for frontend build
 # Remove lockfile and whitelist only app and its dependencies
 RUN rm -f bun.lock && \
-    bun -e 'var p=JSON.parse(require("fs").readFileSync("package.json","utf8"));p.workspaces.packages=["packages/app","packages/ui","packages/sdk/js","packages/plugin","packages/script","packages/core","packages/schema","packages/session-ui","packages/llm","packages/http-recorder","packages/effect-drizzle-sqlite","packages/effect-sqlite-node"];p.devDependencies={"prettier":"3.6.2"};delete p.patchedDependencies;require("fs").writeFileSync("package.json",JSON.stringify(p,null,2))'
+    bun -e 'var p=JSON.parse(require("fs").readFileSync("package.json","utf8"));p.workspaces.packages=["packages/app","packages/ui","packages/sdk/js","packages/plugin","packages/script","packages/core","packages/schema","packages/session-ui","packages/llm","packages/http-recorder","packages/effect-drizzle-sqlite","packages/effect-sqlite-node"];p.devDependencies={"prettier":"3.6.2"};p.patchedDependencies={"@dnd-kit/dom@0.5.0":"patches/@dnd-kit%2Fdom@0.5.0.patch"};require("fs").writeFileSync("package.json",JSON.stringify(p,null,2))'
 
 # Install dependencies, skipping postinstall scripts
 RUN bun install --ignore-scripts
