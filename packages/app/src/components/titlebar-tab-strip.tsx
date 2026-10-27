@@ -227,7 +227,7 @@ export function TitlebarTabStrip(props: {
           ]}
           modifiers={[RestrictToHorizontalAxis, RestrictToElement.configure({ element: () => listRef })]}
           plugins={(defaults) => [
-            ...defaults.filter((plugin) => plugin !== Accessibility),
+            ...defaults.filter((plugin) => plugin !== Accessibility).filter(Boolean),
             Feedback.configure({ dropAnimation: null }),
           ]}
           onDragStart={(event) => {

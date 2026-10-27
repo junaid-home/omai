@@ -1015,7 +1015,7 @@ export function SessionSidePanel(props: {
                         RestrictToElement.configure({ element: () => tabList ?? null }),
                       ]}
                       plugins={(defaults) => [
-                        ...defaults.filter((plugin) => plugin !== Accessibility),
+                        ...defaults.filter((plugin) => plugin !== Accessibility).filter(Boolean),
                                     Feedback.configure({ dropAnimation: null }),
                       ]}
                       onDragEnd={(event) => {
