@@ -2,7 +2,7 @@ import { createEffect, createMemo, createResource, createRoot, For, onCleanup, o
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { DragDropProvider, PointerSensor } from "@dnd-kit/solid"
 import { isSortable, useSortable } from "@dnd-kit/solid/sortable"
-import { Accessibility, AutoScroller, Feedback, PointerActivationConstraints, Scroller } from "@dnd-kit/dom"
+import { Accessibility, Feedback, PointerActivationConstraints } from "@dnd-kit/dom"
 import { RestrictToHorizontalAxis } from "@dnd-kit/abstract/modifiers"
 import { RestrictToElement } from "@dnd-kit/dom/modifiers"
 import { arrayMove } from "@dnd-kit/helpers"
@@ -227,9 +227,7 @@ export function TitlebarTabStrip(props: {
           ]}
           modifiers={[RestrictToHorizontalAxis, RestrictToElement.configure({ element: () => listRef })]}
           plugins={(defaults) => [
-            ...defaults.filter((plugin) => plugin !== Accessibility && plugin !== AutoScroller),
-            Scroller,
-            AutoScroller.configure({ acceleration: 8, threshold: { x: 0.05, y: 0 } }),
+            ...defaults.filter((plugin) => plugin !== Accessibility),
             Feedback.configure({ dropAnimation: null }),
           ]}
           onDragStart={(event) => {
