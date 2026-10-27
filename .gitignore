@@ -36,3 +36,4 @@ tsconfig.tsbuildinfo
 **/.mimocode
 .test-results/
 *-plan.md
+graphify-out/*

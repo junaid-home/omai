@@ -15,7 +15,8 @@ import { createStore } from "solid-js/store"
 import { createMediaQuery } from "@solid-primitives/media"
 import { DragDropProvider as DndKitProvider, PointerSensor } from "@dnd-kit/solid"
 import { isSortable } from "@dnd-kit/solid/sortable"
-import { Accessibility, Feedback, PointerActivationConstraints } from "@dnd-kit/dom"
+import { PointerActivationConstraints } from "@dnd-kit/dom"
+import { tabStripPlugins } from "@/utils/dnd-kit-plugins"
 import { RestrictToHorizontalAxis } from "@dnd-kit/abstract/modifiers"
 import { RestrictToElement } from "@dnd-kit/dom/modifiers"
 import {
@@ -1014,10 +1015,7 @@ export function SessionSidePanel(props: {
                         RestrictToHorizontalAxis,
                         RestrictToElement.configure({ element: () => tabList ?? null }),
                       ]}
-          plugins={(defaults) =>
-            Array.isArray(defaults)
-              ? [...defaults.filter((plugin) => plugin && plugin !== Accessibility), Feedback.configure({ dropAnimation: null })]
-              : [Feedback.configure({ dropAnimation: null })]}
+          plugins={tabStripPlugins}
                       onDragEnd={(event) => {
                         const source = event.operation.source
                         if (event.canceled || !isSortable(source) || source.initialIndex === source.index) return

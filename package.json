@@ -156,7 +156,6 @@
     "@modelcontextprotocol/sdk@1.29.0": "patches/@modelcontextprotocol%2Fsdk@1.29.0.patch",
     "effect@4.0.0-beta.83": "patches/effect@4.0.0-beta.83.patch",
     "@tanstack/virtual-core@3.17.3": "patches/@tanstack%2Fvirtual-core@3.17.3.patch",
-    "@effect/sql-pg@4.0.0-beta.83": "patches/@effect%2Fsql-pg@4.0.0-beta.83.patch",
-    "@dnd-kit/dom@0.5.0": "patches/@dnd-kit%2Fdom@0.5.0.patch"
+    "@effect/sql-pg@4.0.0-beta.83": "patches/@effect%2Fsql-pg@4.0.0-beta.83.patch"
   }
 }
