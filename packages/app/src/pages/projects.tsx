@@ -153,7 +153,7 @@ export default function ProjectsPage() {
                 onClick={() => {
                   if (deleting()) return
                   setDeleting(true)
-                  const project = serverSync().data.project.find((item) => item.worktree === directory)
+                  const project = (serverSync().data?.project ?? []).find((item) => item.worktree === directory)
                   void (async () => {
                     try {
                       if (project) {
@@ -164,7 +164,7 @@ export default function ProjectsPage() {
                         }
                         serverSync().set(
                           "project",
-                          serverSync().data.project.filter((item) => item.id !== project.id),
+                          (serverSync().data?.project ?? []).filter((item) => item.id !== project.id),
                         )
                       }
                       server.projects.close(directory)

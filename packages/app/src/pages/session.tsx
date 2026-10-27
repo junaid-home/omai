@@ -1033,7 +1033,7 @@ export default function Page() {
   }
 
   function upsert(next: Project) {
-    const list = serverSync().data.project
+    const list = serverSync().data?.project ?? []
     sync().set("project", next.id)
     const idx = list.findIndex((item) => item.id === next.id)
     if (idx >= 0) {
