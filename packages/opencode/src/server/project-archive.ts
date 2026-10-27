@@ -185,10 +185,10 @@ export async function extract(data: Uint8Array, destination: string): Promise<nu
     // (the target may be a separate volume mount, which forbids cross-device
     // rename from the parent directory).
     await mkdir(target, { recursive: true })
-    // Stage in the parent so a non-writable target (e.g. a volume mount point
-    // owned by another user) does not block extraction; the parent and target
-    // share a filesystem, so the final rename stays atomic.
-    staging = await mkdtemp(path.join(path.dirname(target), ".omai-import-"))
+    // Stage inside the target so files are moved on the same filesystem
+    // (the target may be a separate volume mount, which forbids cross-device
+    // rename from the parent directory).
+    staging = await mkdtemp(path.join(target, ".omai-import-"))
     const links: { name: string; target: string }[] = []
     let expanded = 0
     let count = 0
