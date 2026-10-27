@@ -242,10 +242,10 @@ export function TerminalPanelV2(props: { stacked?: boolean } = {}) {
               }),
             ]}
             modifiers={[RestrictToHorizontalAxis, RestrictToElement.configure({ element: () => tabList ?? null })]}
-            plugins={(defaults) => [
-              ...defaults.filter((plugin) => plugin !== Accessibility).filter(Boolean),
-                Feedback.configure({ dropAnimation: null }),
-            ]}
+          plugins={(defaults) =>
+            Array.isArray(defaults)
+              ? [...defaults.filter((plugin) => plugin && plugin !== Accessibility), Feedback.configure({ dropAnimation: null })]
+              : [Feedback.configure({ dropAnimation: null })]}
             onDragEnd={(event) => {
               const source = event.operation.source
               if (!event.canceled && isSortable(source) && source.initialIndex !== source.index) {
