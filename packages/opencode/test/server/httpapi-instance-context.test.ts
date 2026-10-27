@@ -13,6 +13,7 @@ import { Workspace } from "../../src/control-plane/workspace"
 import { InstanceRef, WorkspaceRef } from "../../src/effect/instance-ref"
 import { Project } from "../../src/project/project"
 import { Session } from "../../src/session/session"
+import { Lifecycle } from "../../src/control-plane/lifecycle"
 import { disposeMiddleware, markInstanceForDisposal } from "../../src/server/routes/instance/httpapi/lifecycle"
 import {
   InstanceContextMiddleware,
@@ -32,9 +33,16 @@ import { testEffect } from "../lib/effect"
 
 const testStateLayer = Layer.effectDiscard(
   Effect.gen(function* () {
+    // A repo .env that enables the Northflank adapter would make workspace
+    // auto-provisioning inside these tests create real VMs; keep it off for
+    // the lifetime of the suite and restore it afterwards.
+    const previous = process.env.OPENCODE_WORKSPACE_ADAPTER
+    process.env.OPENCODE_WORKSPACE_ADAPTER = ""
     yield* Effect.promise(() => resetDatabase())
     yield* Effect.addFinalizer(() =>
       Effect.promise(async () => {
+        if (previous === undefined) delete process.env.OPENCODE_WORKSPACE_ADAPTER
+        else process.env.OPENCODE_WORKSPACE_ADAPTER = previous
         await disposeAllInstances()
         await resetDatabase()
       }),
@@ -46,9 +54,11 @@ const workspaceLayer = workspaceLayerWithRuntimeFlags({ experimentalWorkspaces: 
 
 const it = testEffect(Layer.mergeAll(testStateLayer, NodeHttpServer.layerTest, NodeServices.layer, workspaceLayer))
 
+// Production provides Lifecycle next to the WebSocket constructor
+// (server.ts); workspaceRoutingLayer yields it while building the middleware.
 const instanceContextTestLayer = Layer.mergeAll(
   instanceContextLayer,
-  workspaceRoutingLayer.pipe(Layer.provide(Socket.layerWebSocketConstructorGlobal)),
+  workspaceRoutingLayer.pipe(Layer.provide([Socket.layerWebSocketConstructorGlobal, Lifecycle.layer])),
 )
 
 const localAdapter = (directory: string): WorkspaceAdapter => ({

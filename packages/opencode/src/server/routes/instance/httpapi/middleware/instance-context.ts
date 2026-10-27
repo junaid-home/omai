@@ -24,9 +24,13 @@ function provideInstanceContext<E>(
     const decoded = decodeDirectory(route.directory)
     const vmRoot = Flag.OPENCODE_WORKSPACE_ADAPTER ? vmProjectsRoot() : undefined
     const isVmPath = !!vmRoot && !!decoded && (decoded === vmRoot || decoded.startsWith(vmRoot + "/"))
+    // resolveWorkspace returns a Promise, so Effect.option must pipe the
+    // Effect (not the Promise): piping inside tryPromise throws
+    // "promise.pipe is not a function" and fails every non-VM request.
     const directory = isVmPath
       ? decoded
-      : yield* Effect.tryPromise(() => CentralStorage.resolveWorkspace(decoded ?? "").pipe(Effect.option)).pipe(
+      : yield* Effect.tryPromise(() => CentralStorage.resolveWorkspace(decoded ?? "")).pipe(
+          Effect.option,
           Effect.map((opt) => (opt._tag === "Some" ? opt.value : undefined)),
         )
     if (!directory) return HttpServerResponse.empty({ status: 403 })
