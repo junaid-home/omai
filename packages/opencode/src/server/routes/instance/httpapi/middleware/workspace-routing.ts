@@ -119,7 +119,18 @@ function shouldStayOnControlPlane(request: HttpServerRequest.HttpServerRequest, 
   // Project deletion must run on the control plane so it can tear down the
   // associated MicroVM workspace/service/volume, not just the DB row.
   if (request.method === "DELETE" && url.pathname.startsWith("/project/")) return true
+  // The session list filters by the project the serving instance resolves for
+  // the directory. The control plane has no copy of a VM's files, so it
+  // resolves VM paths to the global project and lists nothing; only the VM
+  // sees the git repository that owns the sessions.
+  if (request.method === "GET" && url.pathname === "/session" && isVmDirectory(request, url)) return false
   return isLocalWorkspaceRoute(request.method, url.pathname) || url.pathname.startsWith("/console")
+}
+
+function isVmDirectory(request: HttpServerRequest.HttpServerRequest, url: URL) {
+  const vmRoot = vmProjectsRoot()
+  const directory = url.searchParams.get("directory") || request.headers["x-opencode-directory"]
+  return !!vmRoot && !!directory && decodeDirectory(directory).startsWith(`${vmRoot}/`)
 }
 
 function resolveWorkspace(

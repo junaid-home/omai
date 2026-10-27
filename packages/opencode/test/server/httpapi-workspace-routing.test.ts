@@ -55,6 +55,22 @@ const testStateLayer = Layer.effectDiscard(
   }),
 )
 
+const scopedEnv = (values: Record<string, string>) =>
+  Effect.acquireRelease(
+    Effect.sync(() => {
+      const previous = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]))
+      Object.assign(process.env, values)
+      return previous
+    }),
+    (previous) =>
+      Effect.sync(() =>
+        Object.entries(previous).forEach(([key, value]) => {
+          if (value === undefined) delete process.env[key]
+          else process.env[key] = value
+        }),
+      ),
+  )
+
 const workspaceLayer = workspaceLayerWithRuntimeFlags({ experimentalWorkspaces: true })
 
 const it = testEffect(
@@ -495,6 +511,34 @@ describe("HttpApi workspace routing middleware", () => {
 
       expect(response.status).toBe(200)
       expect(yield* response.json).toEqual({ directory: process.cwd(), workspaceID: workspace.id })
+    }),
+  )
+
+  it.live("proxies the session list for a VM project directory into its workspace", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const project = yield* Project.use.fromDirectory(dir)
+      let forwarded: ProxiedRequest | undefined
+      const remoteUrl = yield* startRemoteWorkspaceHttpServer((request) => {
+        forwarded = request
+        return HttpServerResponse.json([{ id: "ses_vm" }])
+      })
+      const workspace = yield* createRemoteWorkspace({
+        dir,
+        projectID: project.project.id,
+        type: "vm-session-list-target",
+        url: `${remoteUrl}/base`,
+      })
+      // The control plane cannot see a VM's git repository, so only the VM
+      // resolves the project that owns the sessions under its directory.
+      yield* scopedEnv({ OPENCODE_WORKSPACE_ADAPTER: "vm-session-list-target", OPENCODE_VM_PROJECTS_ROOT: dir })
+      yield* serveProbe
+
+      const response = yield* HttpClient.get(`/session?directory=${encodeURIComponent(workspace.directory!)}`)
+
+      expect(response.status).toBe(200)
+      expect(yield* response.json).toEqual([{ id: "ses_vm" }])
+      expect(forwarded ? requestURL(forwarded).pathname : undefined).toBe("/base/session")
     }),
   )
 
