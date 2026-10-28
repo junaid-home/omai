@@ -172,8 +172,12 @@ export function createVisualBridge(input: {
       rejectRequests("The preview changed before the save completed.")
       queued.length = 0
       setState({ ready: false, selected: null, hovered: null, changes: [], error: "" })
-      const origin = new URL(iframe.src, location.href).origin
-      if (origin === location.origin || origin === "null") {
+      const source = new URL(iframe.src, location.href)
+      const origin = source.origin
+      // MicroVM previews have no dedicated origin: the control plane proxies
+      // them on the app's own origin under /global/preview/proxy/<port>.
+      const proxied = origin === location.origin && /^\/global\/preview\/proxy\/\d+(\/|$)/.test(source.pathname)
+      if ((origin === location.origin && !proxied) || origin === "null") {
         setState("error", "The hosted visual editor requires an isolated preview address.")
         return
       }
