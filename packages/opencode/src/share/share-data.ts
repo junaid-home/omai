@@ -25,13 +25,20 @@ export const read = Effect.fn("ShareData.read")(function* (shareID: string) {
   const messages = yield* session
     .messages({ sessionID })
     .pipe(Effect.catchTag("NotFoundError", () => Effect.succeed([])))
-  return [
+  // Sessions and parts carry optional fields as `undefined`, which is not a
+  // JSON value: the HTTP layer rejects the whole response. Emit exactly what
+  // the client would parse.
+  return toJson([
     { type: "session" as const, data: info },
     ...messages.map((item) => ({ type: "message" as const, data: item.info })),
     ...messages.flatMap((item) => item.parts.map((part) => ({ type: "part" as const, data: part }))),
     { type: "session_diff" as const, data: yield* session.diff(sessionID) },
     { type: "model" as const, data: [] },
-  ]
+  ])
 })
+
+function toJson<A>(value: A): A {
+  return JSON.parse(JSON.stringify(value))
+}
 
 export * as ShareData from "./share-data"

@@ -35,6 +35,8 @@ import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 
 const originalEnv = {
+  OPENCODE_WORKSPACE_CONNECT_TIMEOUT_MS: process.env.OPENCODE_WORKSPACE_CONNECT_TIMEOUT_MS,
+  OPENCODE_WORKSPACE_STREAM_IDLE_MS: process.env.OPENCODE_WORKSPACE_STREAM_IDLE_MS,
   OPENCODE_AUTH_CONTENT: process.env.OPENCODE_AUTH_CONTENT,
   OPENCODE_EXPERIMENTAL_WORKSPACES: process.env.OPENCODE_EXPERIMENTAL_WORKSPACES,
   OTEL_EXPORTER_OTLP_HEADERS: process.env.OTEL_EXPORTER_OTLP_HEADERS,
@@ -1154,6 +1156,129 @@ describe("workspace CRUD", () => {
 })
 
 describe("workspace sync state", () => {
+  it.instance(
+    "a sync connect the VM never answers fails fast instead of holding the workspace at connecting",
+    () =>
+      Effect.gen(function* () {
+        process.env.OPENCODE_WORKSPACE_CONNECT_TIMEOUT_MS = "300"
+        const instance = yield* requireInstance
+        const workspace = yield* Workspace.Service
+        // What Northflank's ingress does while a VM boots: accept, never answer.
+        const vm = Bun.serve({ port: 0, fetch: () => new Promise<Response>(() => {}) })
+        yield* Effect.addFinalizer(() => Effect.sync(() => vm.stop(true)))
+        const type = unique("hung-connect")
+        const info = workspaceInfo(instance.project.id, type)
+        yield* insertWorkspace(info)
+        registerAdapter(instance.project.id, type, remoteAdapter(`http://127.0.0.1:${vm.port}`).adapter)
+        yield* Effect.addFinalizer(() => workspace.remove(info.id).pipe(Effect.ignore))
+
+        yield* workspace.startSync(info)
+
+        yield* eventuallyEffect(
+          Effect.gen(function* () {
+            expect((yield* workspace.status()).find((item) => item.workspaceID === info.id)?.status).toBe("error")
+          }),
+          1500,
+        )
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "a reachable VM is ready to proxy before its history has been replayed",
+    () =>
+      Effect.gen(function* () {
+        const instance = yield* requireInstance
+        const workspace = yield* Workspace.Service
+        const encoder = new TextEncoder()
+        // Catching up on history replays every missed event into the database
+        // and can take a minute; requests are served by the VM meanwhile.
+        const vm = Bun.serve({
+          port: 0,
+          async fetch(request) {
+            const url = new URL(request.url)
+            if (url.pathname === "/sync/history") {
+              await Bun.sleep(3_000)
+              return Response.json([])
+            }
+            return new Response(
+              new ReadableStream({
+                start(controller) {
+                  controller.enqueue(encoder.encode(":\n\n"))
+                },
+              }),
+              { headers: { "content-type": "text/event-stream" } },
+            )
+          },
+        })
+        yield* Effect.addFinalizer(() => Effect.sync(() => vm.stop(true)))
+        const type = unique("slow-history")
+        const info = workspaceInfo(instance.project.id, type)
+        yield* insertWorkspace(info)
+        registerAdapter(instance.project.id, type, remoteAdapter(`http://127.0.0.1:${vm.port}`).adapter)
+        yield* Effect.addFinalizer(() => workspace.remove(info.id).pipe(Effect.ignore))
+
+        yield* workspace.startSync(info)
+
+        yield* eventuallyEffect(
+          Effect.gen(function* () {
+            expect(yield* workspace.isSynced(info.id)).toBe(true)
+          }),
+          1500,
+        )
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "a sync stream that goes silent counts as disconnected",
+    () =>
+      Effect.gen(function* () {
+        process.env.OPENCODE_WORKSPACE_STREAM_IDLE_MS = "400"
+        const instance = yield* requireInstance
+        const workspace = yield* Workspace.Service
+        const encoder = new TextEncoder()
+        // Opens, then never sends anything again: a VM that froze or paused
+        // without the connection closing.
+        const vm = Bun.serve({
+          port: 0,
+          fetch(request) {
+            const url = new URL(request.url)
+            if (url.pathname === "/sync/history") return Response.json([])
+            return new Response(
+              new ReadableStream({
+                start(controller) {
+                  controller.enqueue(encoder.encode(":\n\n"))
+                },
+              }),
+              { headers: { "content-type": "text/event-stream" } },
+            )
+          },
+        })
+        yield* Effect.addFinalizer(() => Effect.sync(() => vm.stop(true)))
+        const type = unique("silent-stream")
+        const info = workspaceInfo(instance.project.id, type)
+        yield* insertWorkspace(info)
+        registerAdapter(instance.project.id, type, remoteAdapter(`http://127.0.0.1:${vm.port}`).adapter)
+        yield* Effect.addFinalizer(() => workspace.remove(info.id).pipe(Effect.ignore))
+
+        yield* workspace.startSync(info)
+        yield* eventuallyEffect(
+          Effect.gen(function* () {
+            expect(yield* workspace.isSynced(info.id)).toBe(true)
+          }),
+        )
+
+        yield* eventuallyEffect(
+          Effect.gen(function* () {
+            expect(yield* workspace.isSynced(info.id)).toBe(false)
+          }),
+          1500,
+        )
+      }),
+    { git: true },
+  )
+
   it.instance(
     "startWorkspaceSyncing is disabled by the experimental workspace flag",
     () =>

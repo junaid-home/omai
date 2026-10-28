@@ -211,6 +211,8 @@ describe("ShareNext", () => {
           expect(items?.[0]).toMatchObject({ type: "session", data: { id: session.id, title: "shared work" } })
           expect(items?.filter((item) => item.type === "session")).toHaveLength(1)
           expect(JSON.stringify(items)).not.toContain(created.secret)
+          // Served as JSON: no `undefined` fields the HTTP encoder rejects.
+          expect(items).toStrictEqual(JSON.parse(JSON.stringify(items)))
           expect(yield* ShareData.read("missing1")).toBeUndefined()
         }).pipe(Effect.provide(integrationLayer(none))),
       { config: { share: { url: "https://web.omai.ch", mode: "manual" } } },

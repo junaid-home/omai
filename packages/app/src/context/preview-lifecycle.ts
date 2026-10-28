@@ -11,7 +11,11 @@ const previewUrls = new Map<string, string>()
 // proxied/HMR traffic also counts as activity). Background tabs clamp timers to
 // ~60s, so keep this at one minute: worst case a throttled tick lands at ~120s,
 // still short of the 180s eviction deadline.
-const HEARTBEAT_INTERVAL_MS = 60_000
+// This heartbeat is also what keeps an open project's MicroVM from being
+// suspended as idle, so it must arrive well inside the control plane's idle
+// window (OPENCODE_WORKSPACE_IDLE_MS); at 60s it raced a 60s window and the VM
+// was paused under an open tab.
+const HEARTBEAT_INTERVAL_MS = 30_000
 
 export function normalizePreviewUrl(url: string): string {
   return previewUrl(url, window.location.origin, centralRuntime.get().mode === "central")

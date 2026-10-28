@@ -176,6 +176,10 @@ const layer = Layer.effect(
     const fs = yield* FSUtil.Service
     const { db } = yield* Database.Service
     const connections = new Map<WorkspaceV2.ID, ConnectionStatus>()
+    // VMs whose event stream is open. Requests are served by the VM itself, so
+    // this — not the (possibly minute-long) local history replay that follows
+    // — is what makes a workspace ready to proxy.
+    const reachable = new Set<WorkspaceV2.ID>()
     const syncFibers = yield* FiberMap.make<WorkspaceV2.ID, void, SyncLoopError>()
 
     const setStatus = (id: WorkspaceV2.ID, status: ConnectionStatus["status"]) => {
@@ -198,19 +202,33 @@ const layer = Layer.effect(
       url: URL | string,
       headers: HeadersInit | undefined,
     ) {
-      const response = yield* http.execute(
-        HttpClientRequest.get(route(url, "/global/event"), {
-          headers: new Headers(headers),
-          accept: "text/event-stream",
-        }),
-      )
+      // A booting or resuming VM sits behind Northflank's ingress, which can
+      // hold a request open without answering for 30-60s. Without a bound the
+      // workspace stays "connecting" that long and the fast wake/boot retries
+      // (which only restart a failed loop) never get a turn.
+      const response = yield* http
+        .execute(
+          HttpClientRequest.get(route(url, "/global/event"), {
+            headers: new Headers(headers),
+            accept: "text/event-stream",
+          }),
+        )
+        .pipe(
+          Effect.timeoutOrElse({
+            duration: connectTimeoutMs(),
+            orElse: () => Effect.fail(new SyncHttpError({ message: "Workspace sync connect timed out", status: 504 })),
+          }),
+        )
       if (response.status < 200 || response.status >= 300) {
         return yield* new SyncHttpError({
           message: `Workspace sync HTTP failure: ${response.status}`,
           status: response.status,
         })
       }
-      return response.stream
+      // The VM heartbeats every 10s; a stream silent for longer froze or lost
+      // its VM without the connection closing, so end it and reconnect
+      // rather than keep reporting a dead workspace as connected.
+      return response.stream.pipe(Stream.timeout(streamIdleMs()))
     })
 
     const parseSSE = Effect.fn("Workspace.parseSSE")(function* (
@@ -337,12 +355,20 @@ const layer = Layer.effect(
           )
         : {}
 
-      const response = yield* http.execute(
-        HttpClientRequest.post(route(url, "/sync/history"), {
-          headers: new Headers(headers),
-          body: HttpBody.jsonUnsafe(state),
-        }),
-      )
+      const response = yield* http
+        .execute(
+          HttpClientRequest.post(route(url, "/sync/history"), {
+            headers: new Headers(headers),
+            body: HttpBody.jsonUnsafe(state),
+          }),
+        )
+        .pipe(
+          Effect.timeoutOrElse({
+            duration: historyTimeoutMs(),
+            orElse: () =>
+              Effect.fail(new SyncHttpError({ message: "Workspace history request timed out", status: 504 })),
+          }),
+        )
 
       if (response.status < 200 || response.status >= 300) {
         const body = yield* response.text
@@ -377,9 +403,7 @@ const layer = Layer.effect(
     const syncWorkspaceLoop = Effect.fn("Workspace.syncWorkspaceLoop")(function* (space: Info) {
       let target: Target | null = null
       for (let i = 0; i < 60; i++) {
-        target = yield* WorkspaceAdapterRuntime.target(space).pipe(
-          Effect.catch((error) => Effect.succeed(null)),
-        )
+        target = yield* WorkspaceAdapterRuntime.target(space).pipe(Effect.catch((error) => Effect.succeed(null)))
         if (target) break
         yield* Effect.sleep("2 seconds")
       }
@@ -400,9 +424,11 @@ const layer = Layer.effect(
         setStatus(space.id, "connecting")
 
         const stream = yield* connectSSE(target.url, target.headers).pipe(
+          Effect.tap(() => Effect.sync(() => reachable.add(space.id))),
           Effect.tap(() => syncHistory(space, target.url, target.headers)),
           Effect.catch((err) =>
             Effect.gen(function* () {
+              reachable.delete(space.id)
               setStatus(space.id, "error")
               yield* Effect.logWarning("failed to connect to global sync", {
                 workspace: space.name,
@@ -465,6 +491,7 @@ const layer = Layer.effect(
             ),
           )
 
+          reachable.delete(space.id)
           setStatus(space.id, "disconnected")
         }
 
@@ -524,6 +551,7 @@ const layer = Layer.effect(
 
     const stopSync = Effect.fn("Workspace.stopSync")(function* (id: WorkspaceV2.ID) {
       yield* FiberMap.remove(syncFibers, id)
+      reachable.delete(id)
       connections.delete(id)
     })
 
@@ -960,7 +988,7 @@ const layer = Layer.effect(
     // remote is answering requests.
     const isSynced = Effect.fn("Workspace.isSynced")(function* (workspaceID: WorkspaceV2.ID) {
       const exists = yield* FiberMap.has(syncFibers, workspaceID)
-      return exists && connections.get(workspaceID)?.status === "connected"
+      return exists && (reachable.has(workspaceID) || connections.get(workspaceID)?.status === "connected")
     })
 
     const waitForSync = Effect.fn("Workspace.waitForSync")(function* (
@@ -1037,6 +1065,15 @@ const TIMEOUT = 5000
 // create() blocks until the workspace's sync stream connects, which for a
 // cold MicroVM boot takes far longer than the default fence wait. Deployments
 // extend this via OPENCODE_WORKSPACE_CREATE_TIMEOUT_MS (wake budget).
+function millis(key: string, fallback: number) {
+  const value = Number(process.env[key] ?? fallback)
+  return Number.isFinite(value) && value > 0 ? value : fallback
+}
+
+const connectTimeoutMs = () => millis("OPENCODE_WORKSPACE_CONNECT_TIMEOUT_MS", 5_000)
+const historyTimeoutMs = () => millis("OPENCODE_WORKSPACE_HISTORY_TIMEOUT_MS", 15_000)
+const streamIdleMs = () => millis("OPENCODE_WORKSPACE_STREAM_IDLE_MS", 30_000)
+
 function createTimeout() {
   const value = Number(process.env["OPENCODE_WORKSPACE_CREATE_TIMEOUT_MS"] ?? TIMEOUT)
   return Number.isFinite(value) && value > 0 ? value : TIMEOUT
