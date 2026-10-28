@@ -23,7 +23,7 @@ export function configFromEnv(env: Record<string, string | undefined>): Northfla
     apiBase: env.NORTHFLANK_API_BASE ?? "https://api.northflank.com/v1",
     token: env.NORTHFLANK_API_TOKEN ?? "",
     project: env.NORTHFLANK_PROJECT_ID ?? env.NORTHFLANK_PROJECT ?? "omai",
-    image: env.NORTHFLANK_IMAGE ?? "jj123dev/omaiflank",
+    image: env.NORTHFLANK_IMAGE ?? "jj123dev/microvm",
     plan: env.NORTHFLANK_DEPLOYMENT_PLAN ?? "nf-compute-100-4",
     volumeSizeMB: Number(env.NORTHFLANK_VOLUME_SIZE_GB ?? 10) * 1024,
     port: Number(env.NORTHFLANK_SERVICE_PORT ?? 4096),

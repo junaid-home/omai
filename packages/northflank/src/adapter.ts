@@ -217,16 +217,26 @@ export function northflankAdapter(config: NorthflankConfig): WorkspaceAdapter {
   }
 }
 
-// Northflank caps service descriptions at 200 characters.
+// Northflank rejects a description over 200 characters or containing anything
+// outside this set (no "@", "+", "|", non-ASCII, ...), failing the whole create.
 const DESCRIPTION_MAX = 200
+const DESCRIPTION_DISALLOWED = /[^a-zA-Z0-9.,?\s\\/'"()[\];`%^&*\-_:!]/g
 
 /** Who and what the VM is for, so the Northflank dashboard is readable without the control plane. */
 function describe(info: WorkspaceInfo) {
   const owner = readOwner(info.extra)
-  const user = owner ? `user: ${owner.username}${owner.email ? ` (${owner.email})` : ""}` : undefined
-  const parts = ["OpenCode project MicroVM", user, `project: ${info.directory}`, `workspace: ${info.id}`]
-  const text = parts.filter((part) => part !== undefined).join(" · ")
-  return text.length <= DESCRIPTION_MAX ? text : `${text.slice(0, DESCRIPTION_MAX - 1)}…`
+  const email = owner?.email ? ` (${owner.email.replace("@", " at ")})` : ""
+  const parts = [
+    "OpenCode project MicroVM",
+    owner ? `user: ${owner.username}${email}` : undefined,
+    `project: ${info.directory}`,
+    `workspace: ${info.id}`,
+  ]
+  const text = parts
+    .filter((part) => part !== undefined)
+    .join("; ")
+    .replace(DESCRIPTION_DISALLOWED, "-")
+  return text.length <= DESCRIPTION_MAX ? text : `${text.slice(0, DESCRIPTION_MAX - 3)}...`
 }
 
 function readOwner(extra: unknown): { username: string; email?: string } | undefined {

@@ -346,3 +346,25 @@ describe("native PostgreSQL database contract", () => {
     }
   }, 10_000)
 })
+
+describe("PostgreSQL connection URL", () => {
+  test("spells out the SSL mode pg already applies, so it stops warning", () => {
+    for (const mode of ["prefer", "require", "verify-ca"]) {
+      const url = new URL(`postgresql://u:p@db.example.test:5432/app?sslmode=${mode}`)
+      expect(Database.explicitSslMode(url).searchParams.get("sslmode")).toBe("verify-full")
+    }
+  })
+
+  test("leaves other SSL modes and URLs without one untouched", () => {
+    for (const mode of ["disable", "verify-full", "no-verify"]) {
+      const url = new URL(`postgresql://u:p@db.example.test:5432/app?sslmode=${mode}`)
+      expect(Database.explicitSslMode(url).searchParams.get("sslmode")).toBe(mode)
+    }
+    expect(Database.explicitSslMode(new URL("postgresql://u:p@localhost/app")).searchParams.has("sslmode")).toBe(false)
+  })
+
+  test("keeps libpq-compat URLs as written", () => {
+    const url = new URL("postgresql://u:p@db.example.test/app?uselibpqcompat=true&sslmode=require")
+    expect(Database.explicitSslMode(url).searchParams.get("sslmode")).toBe("require")
+  })
+})

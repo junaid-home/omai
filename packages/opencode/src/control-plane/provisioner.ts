@@ -400,7 +400,15 @@ export const layer = Layer.effect(
     // Only a control plane provisions VMs. A VM shares the database (until
     // per-VM schemas land) but carries OPENCODE_WORKSPACE_ID, and must never
     // pick up the control plane's jobs.
-    if (reconciler.enabled && Flag.OPENCODE_WORKSPACE_ADAPTER && !Flag.OPENCODE_WORKSPACE_ID) {
+    // OPENCODE_PROVISION_RECONCILE is set only on the deployed control plane:
+    // a local `serve` pointed at the production database must never run (and
+    // race) the deployed control plane's jobs.
+    if (
+      reconciler.enabled &&
+      process.env["OPENCODE_PROVISION_RECONCILE"] === "true" &&
+      Flag.OPENCODE_WORKSPACE_ADAPTER &&
+      !Flag.OPENCODE_WORKSPACE_ID
+    ) {
       yield* reconcile.pipe(
         Effect.catchCause((cause) =>
           Effect.logWarning("workspace provision reconcile failed", { error: message(cause) }),

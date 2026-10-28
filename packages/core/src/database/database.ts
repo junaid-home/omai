@@ -59,6 +59,7 @@ export function layerFromConfig(config: Config) {
   if (url.protocol !== "postgres:" && url.protocol !== "postgresql:") {
     throw new Error("OPENCODE_DATABASE_URL must be a PostgreSQL connection URL")
   }
+  explicitSslMode(url)
   // Startup options apply to every pooled connection. Tables are additionally schema-qualified.
   url.searchParams.set(
     "options",
@@ -89,6 +90,19 @@ export function layerFromConfig(config: Config) {
     ),
     Layer.orDie,
   )
+}
+
+/**
+ * pg 8 already treats `prefer`, `require` and `verify-ca` as `verify-full` but
+ * warns on every connection that pg 9 will weaken them to libpq semantics.
+ * Spelling out `verify-full` keeps today's verification and silences that.
+ * URLs that opted into libpq semantics (`uselibpqcompat`) keep their mode.
+ */
+export function explicitSslMode(url: URL) {
+  const mode = url.searchParams.get("sslmode")
+  if (url.searchParams.get("uselibpqcompat") === "true") return url
+  if (mode === "prefer" || mode === "require" || mode === "verify-ca") url.searchParams.set("sslmode", "verify-full")
+  return url
 }
 
 /** Mounted secrets and direct environment configuration are mutually exclusive. Never include URL contents in errors. */

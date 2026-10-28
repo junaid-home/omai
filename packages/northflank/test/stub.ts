@@ -81,6 +81,13 @@ export function northflankStub(input?: { dns?: string; token?: string; pageSize?
         const name = payload?.["name"] as string | undefined
         const plan = (payload?.["billing"] as { deploymentPlan?: string } | undefined)?.deploymentPlan
         if (!name || !plan) return fail(400, "Request failed payload validation - see details.")
+        // The real API's description rule (max 200, restricted characters).
+        const description = payload?.["description"]
+        if (
+          typeof description === "string" &&
+          (description.length > 200 || !/^[a-zA-Z0-9.,?\s\\/'"()[\];`%^&*\-_:!]+$/.test(description))
+        )
+          return fail(400, "Request failed payload validation - see details.")
         const serviceID = name.toLowerCase().replace(/[^a-z0-9-]+/g, "-")
         if (services.has(serviceID)) return fail(409, `Service '${name}' already exists`)
         services.set(serviceID, { id: serviceID, name, payload: payload ?? {}, paused: false })

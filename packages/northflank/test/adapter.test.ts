@@ -57,7 +57,7 @@ describe("northflank.adapter", () => {
       billing: { deploymentPlan: "nf-compute-100-4" },
       // Untagged images normalize to :latest — the API requires an explicit tag.
       // Created idle and scaled after the volume attach, so the VM boots once.
-      deployment: { instances: 0, external: { imagePath: "jj123dev/omaiflank:latest" } },
+      deployment: { instances: 0, external: { imagePath: "jj123dev/microvm:latest" } },
       ports: [{ name: "p01", internalPort: 4096, public: true }],
     })
     // runtimeEnvironment is a flat scalar map (the real API rejects nested values).
@@ -128,9 +128,26 @@ describe("northflank.adapter", () => {
 
     const description = [...stub.services.values()][0]!.payload.description as string
     expect(description).toContain(`project: ${directory}`)
-    expect(description).toContain("user: alice (alice@example.test)")
+    expect(description).toContain("user: alice (alice at example.test)")
     expect(description).toContain(`workspace: ${info.id}`)
     expect(description.length).toBeLessThanOrEqual(200)
+    // Northflank's documented description pattern; anything else is a 400.
+    expect(description).toMatch(/^[a-zA-Z0-9.,?\s\\/'"()[\];`%^&*\-_:!]+$/)
+  })
+
+  test("create keeps a long description within Northflank's rules", async () => {
+    const { stub, adapter, info } = setup()
+    const directory = `/home/runner/workspace/${"très-long-name+".repeat(20)}`
+    const configured = await adapter.configure(
+      { ...info, extra: { owner: { username: "bob", email: "b+o@x.test" } } },
+      { instance: { directory } },
+    )
+
+    await adapter.create(configured, {})
+
+    const description = [...stub.services.values()][0]!.payload.description as string
+    expect(description.length).toBeLessThanOrEqual(200)
+    expect(description).toMatch(/^[a-zA-Z0-9.,?\s\\/'"()[\];`%^&*\-_:!]+$/)
   })
 
   test("create describes a service with no known owner without failing", async () => {
@@ -151,7 +168,7 @@ describe("northflank.adapter", () => {
 
     await adapter.create(configured, {})
 
-    expect(service.payload["deployment"]).toMatchObject({ external: { imagePath: "jj123dev/omaiflank:latest" } })
+    expect(service.payload["deployment"]).toMatchObject({ external: { imagePath: "jj123dev/microvm:latest" } })
   })
 
   test("start scales a service left at zero instances", async () => {

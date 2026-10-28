@@ -37,7 +37,7 @@ All optional except the token:
 |---|---|
 | `NORTHFLANK_API_TOKEN` | *(required, secret)* |
 | `NORTHFLANK_PROJECT_ID` / `NORTHFLANK_PROJECT` | `omai` |
-| `NORTHFLANK_IMAGE` | `jj123dev/omaiflank` |
+| `NORTHFLANK_IMAGE` | `jj123dev/microvm` (built from `Dockerfile.microvm` by the deploy workflow) |
 | `NORTHFLANK_DEPLOYMENT_PLAN` | `nf-compute-100-4` |
 | `NORTHFLANK_VOLUME_SIZE_GB` | `10` |
 | `NORTHFLANK_SERVICE_PORT` | `4096` |

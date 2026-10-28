@@ -298,22 +298,23 @@ export function DialogOpenPath(props: DialogOpenPathProps) {
             </div>
           }
         >
-          <TextField
-            autofocus
-            disabled={running()}
-            label={language.t("dialog.createProject.nameLabel")}
-            placeholder={language.t("dialog.createProject.namePlaceholder")}
-            value={name()}
-            onChange={(v) => {
-              setName(v)
-              setError("")
-              resetFailure()
-            }}
-            validationState={error() ? "invalid" : undefined}
-            error={error()}
-          />
+          <Show when={!running()}>
+            <TextField
+              autofocus
+              label={language.t("dialog.createProject.nameLabel")}
+              placeholder={language.t("dialog.createProject.namePlaceholder")}
+              value={name()}
+              onChange={(v) => {
+                setName(v)
+                setError("")
+                resetFailure()
+              }}
+              validationState={error() ? "invalid" : undefined}
+              error={error()}
+            />
 
-          <div class="text-11-regular text-text-weak -mt-2">{language.t("dialog.createProject.nameHint")}</div>
+            <div class="text-11-regular text-text-weak -mt-2">{language.t("dialog.createProject.nameHint")}</div>
+          </Show>
 
           <Show when={!running()}>
             <div class="flex flex-col gap-2">
@@ -371,14 +372,14 @@ export function DialogOpenPath(props: DialogOpenPathProps) {
                   "text-icon-critical-base": progress.failed,
                 }}
               >
-                {language.t(`dialog.createProject.progress.${progress.step === "upload" ? "setup" : progress.step}`)}
+                {language.t(`dialog.createProject.progress.${progress.step}`)}
                 <Show when={running()}>
                   {/* Fixed width so the growing dots never shift the label. */}
                   <span class="inline-block w-[3ch] text-left">{".".repeat((tick() % 3) + 1)}</span>
                 </Show>
               </div>
               <Show when={progress.failed}>
-                <div class="text-12-regular text-text-weak text-center">{progress.error}</div>
+                <div class="text-12-regular text-icon-critical-base text-center max-w-80">{progress.error}</div>
               </Show>
               <Show when={uploadPercent() !== null}>
                 <div class="w-full max-w-64">
