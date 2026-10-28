@@ -124,7 +124,7 @@ describe("control-plane lifecycle", () => {
 
   it.live("sweep never stops a workspace whose provision is not ready", () =>
     withEnv(
-      { OPENCODE_WORKSPACE_IDLE_MS: "0", OPENCODE_WORKSPACE_SWEEP_MS: "100000" },
+      { OPENCODE_WORKSPACE_IDLE_MS: "0", OPENCODE_WORKSPACE_SWEEP_MS: "100000", OPENCODE_PROVISION_RECONCILE: "true" },
       Effect.gen(function* () {
         const stops = yield* Ref.make(0)
         registerAdapter(projectID, "sweep-test", {
@@ -147,6 +147,27 @@ describe("control-plane lifecycle", () => {
 
         // Only the legacy/ready row may be suspended.
         expect(yield* Ref.get(stops)).toBe(1)
+      }),
+    ),
+  )
+
+  it.live("a process that does not own VM management never suspends VMs", () =>
+    withEnv(
+      { OPENCODE_WORKSPACE_IDLE_MS: "0", OPENCODE_WORKSPACE_SWEEP_MS: "100000", OPENCODE_PROVISION_RECONCILE: "false" },
+      Effect.gen(function* () {
+        const stops = yield* Ref.make(0)
+        registerAdapter(projectID, "sweep-owner-test", {
+          ...adapter,
+          stop: async () => Effect.runSync(Ref.update(stops, (count) => count + 1)),
+        })
+        const idle: Workspace.Info = { ...space, id: WorkspaceV2.ID.ascending(), type: "sweep-owner-test" }
+        const lifecycle = yield* lifecycleWith(fakeWorkspace({ all: () => Effect.succeed([idle]) }))
+
+        yield* lifecycle.sweep
+
+        // A laptop sharing the production database must not pause VMs that
+        // production users are working in.
+        expect(yield* Ref.get(stops)).toBe(0)
       }),
     ),
   )

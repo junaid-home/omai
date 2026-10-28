@@ -231,7 +231,7 @@ describe("northflank.adapter", () => {
     expect(stub.volumes.size).toBe(1)
     const refresh = stub.requests.findLast((request) => request.path.endsWith("/runtime-environment"))
     expect(refresh).toBeDefined()
-    const variables = (refresh?.body as { variables: Record<string, string> }).variables
+    const variables = (refresh?.body as { runtimeEnvironment: Record<string, string> }).runtimeEnvironment
     expect(variables.MY_VAR).toBe("second")
   })
 

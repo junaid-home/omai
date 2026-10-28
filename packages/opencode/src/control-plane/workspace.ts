@@ -608,7 +608,13 @@ const layer = Layer.effect(
         // ride to the instance. Migrator credentials never leave the control
         // plane. (Per-VM provisioning wiring is Phase F; until then a shared
         // control-plane role is forwarded as-is.)
-        OPENCODE_DATABASE_URL: process.env.OPENCODE_DATABASE_URL,
+        // The control plane may reach the database another way than its VMs:
+        // a laptop uses the public address while VMs sit on the private
+        // network. OPENCODE_VM_DATABASE_URL names the VMs' address.
+        OPENCODE_DATABASE_URL: process.env.OPENCODE_VM_DATABASE_URL ?? process.env.OPENCODE_DATABASE_URL,
+        // One project per VM needs few connections; 100 VMs at the default of
+        // 10 would exceed the database's connection budget.
+        OPENCODE_DATABASE_POOL_SIZE: process.env.OPENCODE_VM_DATABASE_POOL_SIZE ?? "3",
         OPENCODE_DATABASE_SCHEMA: process.env.OPENCODE_DATABASE_SCHEMA,
         OPENCODE_INSTANCE_ID: process.env.OPENCODE_INSTANCE_ID,
         OPENCODE_DATA_KEY: process.env.OPENCODE_DATA_KEY,

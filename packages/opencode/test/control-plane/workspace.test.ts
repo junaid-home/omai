@@ -908,6 +908,15 @@ describe("workspace CRUD", () => {
         })
         expect(recorded.calls.create[0].env.OPENCODE_AUTH_CONTENT).toBeString()
 
+        // Each VM serves one project: a small pool keeps 100 VMs well inside
+        // the database's connection budget.
+        expect(recorded.calls.create[0].env.OPENCODE_DATABASE_POOL_SIZE).toBe("3")
+
+        process.env.OPENCODE_VM_DATABASE_URL = "postgresql://vm@db.internal:5432/app"
+        yield* workspace.provisionVM(info)
+        expect(recorded.calls.create[1].env.OPENCODE_DATABASE_URL).toBe("postgresql://vm@db.internal:5432/app")
+        delete process.env.OPENCODE_VM_DATABASE_URL
+
         const updated = yield* workspace.setExtra(info.id, { marker: 1 })
         expect(updated?.extra).toEqual({ marker: 1 })
         yield* workspace.remove(info.id)

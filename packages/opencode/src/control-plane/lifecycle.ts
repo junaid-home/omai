@@ -118,6 +118,10 @@ export const layer = Layer.effect(
     })
 
     const sweep = Effect.gen(function* () {
+      // Only the deployed control plane suspends VMs. Every `serve` sharing
+      // the database (e.g. a developer's laptop) sees all workspace rows but
+      // only its own users' activity, so it would pause VMs others are using.
+      if (process.env["OPENCODE_PROVISION_RECONCILE"] !== "true") return
       const rows = yield* workspace.all()
       const idle = idleMs()
       yield* Effect.forEach(rows, (space) =>

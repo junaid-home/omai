@@ -116,7 +116,10 @@ export function northflankStub(input?: { dns?: string; token?: string; pageSize?
       if (kind === "services" && id && action === "runtime-environment" && method === "POST") {
         const service = services.get(id)
         if (!service) return fail(404, `Could not find service '${id}'`)
-        service.variables = payload?.["variables"] as Record<string, string | undefined> | undefined
+        // The real API's field; anything else is a 400.
+        const runtime = payload?.["runtimeEnvironment"]
+        if (!runtime || typeof runtime !== "object") return fail(400, "Request failed payload validation - see details.")
+        service.variables = runtime as Record<string, string | undefined>
         return json({ data: {} })
       }
 

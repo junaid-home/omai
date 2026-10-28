@@ -85,7 +85,7 @@ export function createClient(config: NorthflankConfig) {
     createService: <A>(payload: unknown) => request<A>("POST", "/services/deployment", payload),
     getService: <A>(id: string) => request<A>("GET", `/services/${id}`),
     setRuntimeEnvironment: (id: string, variables: Record<string, string | undefined>) =>
-      request("POST", `/services/${id}/runtime-environment`, { variables }),
+      request("POST", `/services/${id}/runtime-environment`, { runtimeEnvironment: variables }),
     // The /scale endpoint is deprecated in favor of patching the deployment.
     scaleService: (id: string, instances: number) =>
       request("PATCH", `/services/deployment/${id}`, { deployment: { instances } }),
