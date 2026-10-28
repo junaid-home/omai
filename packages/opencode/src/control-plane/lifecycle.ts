@@ -1,5 +1,6 @@
 import { WorkspaceV2 } from "@opencode-ai/core/workspace"
 import { Context, Deferred, Effect, Layer, Schedule, Semaphore } from "effect"
+import { ProvisionState } from "./provision-state"
 import { Workspace } from "./workspace"
 import { WorkspaceAdapterRuntime } from "./workspace-adapter-runtime"
 
@@ -120,6 +121,10 @@ export const layer = Layer.effect(
       yield* Effect.forEach(rows, (space) =>
         Effect.gen(function* () {
           if (!WorkspaceAdapterRuntime.lifecycleAdapter(space)) return
+          // A VM still being provisioned (or a failed one awaiting cleanup)
+          // belongs to the provisioner; suspending it would stall the job.
+          const provision = ProvisionState.read(space.extra)
+          if (provision && provision.status !== "ready") return
           const id = space.id
           if (phases.get(id) === "STARTING") return
           const fresh = () => Date.now() - (activity.get(id) ?? bootedAt) < idle

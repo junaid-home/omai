@@ -1,0 +1,510 @@
+import { afterEach, beforeEach, describe, expect } from "bun:test"
+import path from "node:path"
+import { Effect, Fiber, Layer } from "effect"
+import { Database } from "@opencode-ai/core/database/database"
+import { SessionProjector } from "@opencode-ai/core/session/projector"
+import { Ripgrep } from "@opencode-ai/core/ripgrep"
+import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
+import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { Session as SessionNs } from "@/session/session"
+import { InstanceStore } from "@/project/instance-store"
+import { InstanceBootstrap } from "@/project/bootstrap"
+import { RuntimeFlags } from "@/effect/runtime-flags"
+import { Auth } from "../../src/auth"
+import { registerAdapter } from "../../src/control-plane/adapters"
+import type { WorkspaceAdapter, WorkspaceHealthReport, WorkspaceInfo } from "../../src/control-plane/types"
+import * as Workspace from "../../src/control-plane/workspace"
+import { Provisioner } from "../../src/control-plane/provisioner"
+import { ProvisionState } from "../../src/control-plane/provision-state"
+import { resetDatabase } from "../fixture/db"
+import { disposeAllInstances, requireInstance } from "../fixture/fixture"
+import { testEffect } from "../lib/effect"
+
+const layer = AppNodeBuilder.build(
+  LayerNode.group([
+    Provisioner.node,
+    Workspace.node,
+    Auth.node,
+    SessionNs.node,
+    SessionProjector.node,
+    Database.node,
+    InstanceStore.node,
+    Ripgrep.node,
+  ]),
+  [
+    [RuntimeFlags.node, RuntimeFlags.layer({ experimentalWorkspaces: true })],
+    [
+      InstanceStore.bootstrapNode,
+      Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void })),
+    ],
+  ],
+)
+const it = testEffect(layer)
+
+const env = {
+  OPENCODE_EXPERIMENTAL_WORKSPACES: "true",
+  OPENCODE_PROVISION_BOOT_DEADLINE_MS: "4000",
+  OPENCODE_PROVISION_UPLOAD_DEADLINE_MS: "4000",
+}
+const saved = Object.fromEntries(
+  [...Object.keys(env), "OPENCODE_WORKSPACE_ADAPTER"].map((key) => [key, process.env[key]]),
+)
+
+beforeEach(() => Object.assign(process.env, env))
+
+afterEach(async () => {
+  for (const [key, value] of Object.entries(saved)) {
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
+  stops.splice(0).forEach((stop) => stop())
+  await disposeAllInstances()
+  await resetDatabase()
+})
+
+const stops: Array<() => void> = []
+
+/** Stand-in for `omai serve` inside the MicroVM: health, sync stream, and folder creation. */
+function vmStub() {
+  const state = { up: true, created: [] as string[], createFails: undefined as string | undefined }
+  const server = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      const url = new URL(request.url)
+      if (!state.up) return new Response(null, { status: 503 })
+      if (url.pathname === "/global/health") return Response.json({ healthy: true })
+      if (url.pathname === "/global/event")
+        return new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode(":\n\n"))
+            },
+          }),
+          { headers: { "content-type": "text/event-stream" } },
+        )
+      if (url.pathname === "/sync/history") return Response.json([])
+      if (url.pathname === "/global/file/create") {
+        if (state.createFails)
+          return Response.json({ success: false, errors: [{ message: state.createFails }] }, { status: 400 })
+        state.created.push(url.searchParams.get("directory") ?? "")
+        return Response.json({ success: true, files: 0 })
+      }
+      return new Response(null, { status: 404 })
+    },
+  })
+  stops.push(() => server.stop(true))
+  return { url: `http://127.0.0.1:${server.port}`, state }
+}
+
+type Script = {
+  create?: () => Promise<void>
+  remove?: (keepVolume: boolean) => Promise<void>
+  health?: () => WorkspaceHealthReport
+}
+
+function scriptedAdapter(vm: { url: string }, script: Script = {}) {
+  const calls = { create: 0, remove: [] as boolean[] }
+  const adapter: WorkspaceAdapter = {
+    name: "scripted",
+    description: "scripted test adapter",
+    // Pins the instance directory, as the Northflank adapter does for path parity.
+    configure: (info: WorkspaceInfo, context) => ({
+      ...info,
+      directory: info.directory ?? context?.instance?.directory ?? "/unused",
+    }),
+    async create() {
+      calls.create += 1
+      await script.create?.()
+    },
+    async remove(_info, context) {
+      calls.remove.push(context?.keepVolume === true)
+      await script.remove?.(context?.keepVolume === true)
+    },
+    target: () => ({ type: "remote", url: vm.url }),
+    start: async () => {},
+    stop: async () => {},
+    health: async () => script.health?.() ?? { state: "running" },
+  }
+  return { adapter, calls }
+}
+
+function setup(script: Script = {}) {
+  return Effect.gen(function* () {
+    const instance = yield* requireInstance
+    const vm = vmStub()
+    const type = `scripted-${Math.random().toString(36).slice(2)}`
+    const scripted = scriptedAdapter(vm, script)
+    registerAdapter(instance.project.id, type, scripted.adapter)
+    process.env.OPENCODE_WORKSPACE_ADAPTER = type
+    const directory = path.join(instance.directory, "project")
+    return { instance, vm, type, directory, calls: scripted.calls }
+  })
+}
+
+function settle(provisioner: Provisioner.Interface, directory: string, done: (job: Provisioner.Job) => boolean) {
+  return Effect.gen(function* () {
+    const deadline = Date.now() + 8_000
+    while (Date.now() < deadline) {
+      const job = yield* provisioner.status(directory)
+      if (job && done(job)) return job
+      yield* Effect.sleep("50 millis")
+    }
+    throw new Error(`job for ${directory} did not settle: ${JSON.stringify(yield* provisioner.status(directory))}`)
+  })
+}
+
+const finished = (job: Provisioner.Job) => job.status !== "running" || job.step === "upload"
+const cleanedUp = (job: Provisioner.Job) => job.status === "failed" && job.cleaned
+
+describe("control-plane provisioner", () => {
+  it.instance(
+    "empty project goes creating → booting → setup → ready and records timings",
+    () =>
+      Effect.gen(function* () {
+        const ctx = yield* setup()
+        const provisioner = yield* Provisioner.Service
+
+        yield* provisioner.start({ directory: ctx.directory, mode: "empty" })
+        const job = yield* settle(provisioner, ctx.directory, finished)
+
+        expect(job).toMatchObject({ status: "ready", step: "done" })
+        expect(Object.keys(job.timings).sort()).toEqual(["booting", "creating", "setup"])
+        expect(ctx.vm.state.created).toEqual([ctx.directory])
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "crash during boot fails fast with the adapter reason and deletes service and volume",
+    () =>
+      Effect.gen(function* () {
+        const ctx = yield* setup({ health: () => ({ state: "failed", reason: "OOMKilled" }) })
+        ctx.vm.state.up = false
+        const provisioner = yield* Provisioner.Service
+
+        const started = Date.now()
+        yield* provisioner.start({ directory: ctx.directory, mode: "empty" })
+        const job = yield* settle(provisioner, ctx.directory, cleanedUp)
+
+        expect(job.error).toContain("OOMKilled")
+        expect(Date.now() - started).toBeLessThan(3_900)
+        expect(ctx.calls.remove).toEqual([false])
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "a job left mid-creating by a restart is resumed by reconcile",
+    () =>
+      Effect.gen(function* () {
+        const ctx = yield* setup()
+        const workspace = yield* Workspace.Service
+        const provisioner = yield* Provisioner.Service
+        // What a dead process leaves behind: a row at step creating with no runner.
+        yield* workspace.insert({
+          type: ctx.type,
+          branch: null,
+          projectID: ctx.instance.project.id,
+          extra: ProvisionState.write(
+            null,
+            ProvisionState.begin({ kind: "new", mode: "empty", now: Date.now(), bootDeadlineMs: 4_000 }),
+          ),
+        })
+        const row = (yield* workspace.all()).find((item) => item.type === ctx.type)!
+
+        yield* provisioner.reconcile
+        const job = yield* settle(provisioner, row.directory!, finished)
+
+        expect(job.status).toBe("ready")
+        expect(ctx.calls.create).toBe(1)
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "cleanup failure is retried by reconcile",
+    () =>
+      Effect.gen(function* () {
+        const failures = { remaining: 1 }
+        const ctx = yield* setup({
+          health: () => ({ state: "failed", reason: "boom" }),
+          remove: async () => {
+            if (failures.remaining-- > 0) throw new Error("northflank unavailable")
+          },
+        })
+        ctx.vm.state.up = false
+        const provisioner = yield* Provisioner.Service
+
+        yield* provisioner.start({ directory: ctx.directory, mode: "empty" })
+        const failed = yield* settle(provisioner, ctx.directory, (job) => job.status === "failed")
+        yield* Effect.sleep("100 millis")
+        expect((yield* provisioner.status(ctx.directory))?.cleaned).toBe(false)
+        expect(failed.error).toContain("boom")
+
+        yield* provisioner.reconcile
+        yield* settle(provisioner, ctx.directory, cleanedUp)
+        expect(ctx.calls.remove).toHaveLength(2)
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "try again waits for the previous cleanup and never runs two jobs",
+    () =>
+      Effect.gen(function* () {
+        const health = { report: { state: "failed", reason: "boom" } as WorkspaceHealthReport }
+        const gate = Promise.withResolvers<void>()
+        const removing = { blocked: true }
+        const ctx = yield* setup({
+          health: () => health.report,
+          remove: async () => {
+            if (removing.blocked) await gate.promise
+          },
+        })
+        ctx.vm.state.up = false
+        const provisioner = yield* Provisioner.Service
+        const workspace = yield* Workspace.Service
+
+        const first = yield* provisioner.start({ directory: ctx.directory, mode: "empty" })
+        yield* settle(provisioner, ctx.directory, (job) => job.status === "failed")
+        expect(ctx.calls.remove).toHaveLength(1)
+
+        health.report = { state: "running" }
+        ctx.vm.state.up = true
+        const retry = yield* provisioner.start({ directory: ctx.directory, mode: "empty" }).pipe(Effect.forkChild)
+        yield* Effect.sleep("300 millis")
+        // Still blocked on the old teardown: no second workspace yet.
+        expect((yield* workspace.all()).filter((item) => item.directory === ctx.directory)).toHaveLength(1)
+
+        removing.blocked = false
+        gate.resolve()
+        const second = yield* Fiber.join(retry)
+        const job = yield* settle(provisioner, ctx.directory, finished)
+
+        expect(second.workspaceID).not.toBe(first.workspaceID)
+        expect(job).toMatchObject({ status: "ready", workspaceID: second.workspaceID })
+        expect((yield* workspace.all()).filter((item) => item.directory === ctx.directory)).toHaveLength(1)
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "try again on a failed recovery recovers in place and keeps the volume",
+    () =>
+      Effect.gen(function* () {
+        const health = { report: { state: "running" } as WorkspaceHealthReport }
+        const ctx = yield* setup({ health: () => health.report })
+        const provisioner = yield* Provisioner.Service
+        const workspace = yield* Workspace.Service
+        yield* provisioner.start({ directory: ctx.directory, mode: "empty" })
+        const ready = yield* settle(provisioner, ctx.directory, finished)
+        health.report = { state: "failed", reason: "boom" }
+        ctx.vm.state.up = false
+        yield* provisioner.recover((yield* workspace.get(ready.workspaceID))!)
+        yield* settle(provisioner, ctx.directory, cleanedUp)
+
+        health.report = { state: "running" }
+        ctx.vm.state.up = true
+        const retried = yield* provisioner.start({ directory: ctx.directory, mode: "empty" })
+        const job = yield* provisioner.await(retried.workspaceID, 8_000)
+
+        expect(retried.workspaceID).toBe(ready.workspaceID)
+        expect(job).toMatchObject({ status: "ready", kind: "recover" })
+        expect(ctx.calls.remove).toEqual([true])
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "deleting a workspace while its VM is being created removes what the create made afterwards",
+    () =>
+      Effect.gen(function* () {
+        const gate = Promise.withResolvers<void>()
+        const ctx = yield* setup({ create: () => gate.promise })
+        const provisioner = yield* Provisioner.Service
+        const workspace = yield* Workspace.Service
+
+        const job = yield* provisioner.start({ directory: ctx.directory, mode: "empty" })
+        yield* Effect.sleep("200 millis")
+        expect(ctx.calls.create).toBe(1)
+        yield* workspace.remove(job.workspaceID)
+        expect(ctx.calls.remove).toHaveLength(1)
+
+        gate.resolve()
+        yield* Effect.sleep("500 millis")
+
+        expect(ctx.calls.remove).toHaveLength(2)
+        expect(yield* workspace.get(job.workspaceID)).toBeUndefined()
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "a runner never overwrites a row whose state changed under it",
+    () =>
+      Effect.gen(function* () {
+        const ctx = yield* setup()
+        ctx.vm.state.up = false
+        const provisioner = yield* Provisioner.Service
+        const workspace = yield* Workspace.Service
+
+        const job = yield* provisioner.start({ directory: ctx.directory, mode: "empty" })
+        yield* settle(provisioner, ctx.directory, (current) => current.step === "booting")
+        const row = (yield* workspace.get(job.workspaceID))!
+        const marked = ProvisionState.fail(ProvisionState.read(row.extra)!, "Removal failed", Date.now())
+        yield* workspace.setExtra(row.id, ProvisionState.write(row.extra, marked))
+        ctx.vm.state.up = true
+        yield* Effect.sleep("1500 millis")
+
+        expect((yield* provisioner.status(ctx.directory))?.status).toBe("failed")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "a create that outlives the boot deadline is cleaned up only after it returns",
+    () =>
+      Effect.gen(function* () {
+        process.env.OPENCODE_PROVISION_BOOT_DEADLINE_MS = "300"
+        const order: string[] = []
+        const ctx = yield* setup({
+          create: async () => {
+            await Bun.sleep(800)
+            order.push("created")
+          },
+          remove: async () => {
+            order.push("removed")
+          },
+        })
+        const provisioner = yield* Provisioner.Service
+
+        yield* provisioner.start({ directory: ctx.directory, mode: "empty" })
+        const job = yield* settle(provisioner, ctx.directory, cleanedUp)
+
+        expect(job.error).toContain("Timed out")
+        expect(order).toEqual(["created", "removed"])
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "recover keeps the volume",
+    () =>
+      Effect.gen(function* () {
+        const health = { report: { state: "running" } as WorkspaceHealthReport }
+        const ctx = yield* setup({ health: () => health.report })
+        const provisioner = yield* Provisioner.Service
+        const workspace = yield* Workspace.Service
+        yield* provisioner.start({ directory: ctx.directory, mode: "empty" })
+        const ready = yield* settle(provisioner, ctx.directory, finished)
+
+        health.report = { state: "failed", reason: "boom" }
+        ctx.vm.state.up = false
+        yield* provisioner.recover((yield* workspace.get(ready.workspaceID))!)
+        const job = yield* settle(provisioner, ctx.directory, cleanedUp)
+
+        expect(job).toMatchObject({ kind: "recover", workspaceID: ready.workspaceID })
+        expect(ctx.calls.remove).toEqual([true])
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "recover of a healthy VM finishes without re-running project setup",
+    () =>
+      Effect.gen(function* () {
+        const ctx = yield* setup()
+        const provisioner = yield* Provisioner.Service
+        const workspace = yield* Workspace.Service
+        yield* provisioner.start({ directory: ctx.directory, mode: "empty" })
+        const ready = yield* settle(provisioner, ctx.directory, finished)
+        expect(ctx.vm.state.created).toHaveLength(1)
+
+        yield* provisioner.recover((yield* workspace.get(ready.workspaceID))!)
+        const job = yield* provisioner.await(ready.workspaceID, 8_000)
+
+        expect(job).toMatchObject({ status: "ready", kind: "recover" })
+        expect(ctx.vm.state.created).toHaveLength(1)
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "abandoned upload is cleaned after the upload deadline, not the boot deadline",
+    () =>
+      Effect.gen(function* () {
+        process.env.OPENCODE_PROVISION_BOOT_DEADLINE_MS = "1500"
+        process.env.OPENCODE_PROVISION_UPLOAD_DEADLINE_MS = "2500"
+        const ctx = yield* setup()
+        const provisioner = yield* Provisioner.Service
+
+        yield* provisioner.start({ directory: ctx.directory, mode: "upload" })
+        const waiting = yield* settle(provisioner, ctx.directory, finished)
+        expect(waiting).toMatchObject({ status: "running", step: "upload" })
+
+        yield* Effect.sleep("1800 millis")
+        yield* provisioner.reconcile
+        expect((yield* provisioner.status(ctx.directory))?.status).toBe("running")
+
+        yield* Effect.sleep("1000 millis")
+        yield* provisioner.reconcile
+        yield* settle(provisioner, ctx.directory, cleanedUp)
+        expect(ctx.vm.state.created).toEqual([])
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "uploaded finishes a job waiting for its zip",
+    () =>
+      Effect.gen(function* () {
+        const ctx = yield* setup()
+        const provisioner = yield* Provisioner.Service
+
+        const job = yield* provisioner.start({ directory: ctx.directory, mode: "upload" })
+        yield* settle(provisioner, ctx.directory, finished)
+        yield* provisioner.uploaded(job.workspaceID)
+
+        expect((yield* provisioner.status(ctx.directory))?.status).toBe("ready")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "concurrent start for one directory creates one workspace",
+    () =>
+      Effect.gen(function* () {
+        const ctx = yield* setup()
+        const provisioner = yield* Provisioner.Service
+        const workspace = yield* Workspace.Service
+
+        const [a, b] = yield* Effect.all(
+          [
+            provisioner.start({ directory: ctx.directory, mode: "empty" }),
+            provisioner.start({ directory: ctx.directory, mode: "empty" }),
+          ],
+          { concurrency: 2 },
+        )
+
+        expect(a.workspaceID).toBe(b.workspaceID)
+        yield* settle(provisioner, ctx.directory, finished)
+        expect((yield* workspace.all()).filter((item) => item.directory === ctx.directory)).toHaveLength(1)
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "await returns as soon as the job is ready",
+    () =>
+      Effect.gen(function* () {
+        const ctx = yield* setup()
+        const provisioner = yield* Provisioner.Service
+
+        const job = yield* provisioner.start({ directory: ctx.directory, mode: "empty" })
+        const awaited = yield* provisioner.await(job.workspaceID, 8_000)
+
+        expect(awaited?.status).toBe("ready")
+      }),
+    { git: true },
+  )
+})

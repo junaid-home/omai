@@ -13,6 +13,8 @@ export const ServeCommand = effectCmd({
   instance: false,
   handler: Effect.fn("Cli.serve")(function* (args) {
     const { Server } = yield* Effect.promise(() => import("../../server/server"))
+    const { Provisioner } = yield* Effect.promise(() => import("../../control-plane/provisioner"))
+    Provisioner.enableReconcile()
     if (!Authentication.central() && !Flag.OPENCODE_SERVER_PASSWORD) {
       console.log("Warning: OPENCODE_SERVER_PASSWORD is not set; server is unsecured.")
     }

@@ -1,3 +1,4 @@
+import { $ } from "bun"
 import { PreviewCapability } from "@opencode-ai/core/preview-capability"
 import { InstanceStateStore } from "@opencode-ai/core/instance-state/store"
 import { AuthSession } from "../../src/auth/session"
@@ -120,6 +121,26 @@ describe("global HttpApi", () => {
       expect(response.status).toBe(200)
       expect(yield* response.json).toMatchObject({ success: true, path: dir, files: 0, git: true })
       expect(yield* Effect.promise(() => stat(dir)).pipe(Effect.map((info) => info.isDirectory()))).toBe(true)
+    }),
+  )
+
+  it.live("file create without a zip succeeds again on the repository it created", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "opencode-file-create-again-")))
+      const dir = path.join(root, "project")
+      const create = HttpClientRequest.post(GlobalPaths.fileCreate).pipe(
+        HttpClientRequest.setBody(HttpBody.jsonUnsafe({ path: dir })),
+        HttpClient.execute,
+      )
+
+      const first = yield* create
+      expect(first.status).toBe(200)
+      const head = yield* Effect.promise(() => $`git -C ${dir} rev-parse HEAD`.quiet().text())
+
+      const second = yield* create
+      expect(second.status).toBe(200)
+      expect(yield* second.json).toMatchObject({ success: true, path: dir, files: 0, git: true })
+      expect(yield* Effect.promise(() => $`git -C ${dir} rev-parse HEAD`.quiet().text())).toBe(head)
     }),
   )
 

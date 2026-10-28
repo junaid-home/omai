@@ -396,6 +396,15 @@ function validateLinks(links: { name: string; target: string }[]) {
   }
 }
 
+/** True when `target` holds nothing but a git repository (what an empty project create leaves). */
+export async function isFreshRepository(target: string) {
+  const entries = await readdir(target).catch(() => undefined)
+  if (!entries) return false
+  const visible = entries.filter((name) => name !== "lost+found" && !name.startsWith(".omai-import-"))
+  if (visible.length !== 1 || visible[0] !== ".git") return false
+  return (await lstat(path.join(target, ".git", "HEAD")).catch(() => undefined))?.isFile() === true
+}
+
 export async function assertEmptyDestination(target: string) {
   const info = await lstat(target).catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return undefined

@@ -64,11 +64,22 @@ export const list = (adapter: WorkspaceAdapter) =>
     return yield* EffectBridge.fromPromise(() => Promise.resolve(adapter.list?.(ctx) ?? []))
   })
 
-export const remove = (info: WorkspaceInfo) =>
+export const remove = (info: WorkspaceInfo, options?: { keepVolume?: boolean }) =>
   Effect.gen(function* () {
     const adapter = getAdapter(info.projectID, info.type)
     const ctx = yield* context
-    return yield* EffectBridge.fromPromise(() => adapter.remove(info, ctx))
+    return yield* EffectBridge.fromPromise(() =>
+      adapter.remove(info, options?.keepVolume ? { ...ctx, keepVolume: true } : ctx),
+    )
+  })
+
+/** The adapter's view of a booting or running VM, or undefined when it cannot tell. */
+export const health = (info: WorkspaceInfo) =>
+  Effect.gen(function* () {
+    const adapter = getAdapter(info.projectID, info.type)
+    if (!adapter.health) return undefined
+    const ctx = yield* context
+    return yield* EffectBridge.fromPromise(() => adapter.health!(info, ctx))
   })
 
 /** An adapter exposing suspend/resume; `busy` stays optional (treated as never-busy). */

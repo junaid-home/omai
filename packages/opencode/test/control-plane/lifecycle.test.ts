@@ -6,6 +6,7 @@ import { registerAdapter } from "../../src/control-plane/adapters"
 import { Lifecycle } from "../../src/control-plane/lifecycle"
 import type { WorkspaceAdapter } from "../../src/control-plane/types"
 import { Workspace } from "../../src/control-plane/workspace"
+import { ProvisionState } from "../../src/control-plane/provision-state"
 import { testEffect } from "../lib/effect"
 
 const projectID = ProjectV2.ID.make("proj_lifecycle_wake")
@@ -35,6 +36,53 @@ const space: Workspace.Info = {
 
 const it = testEffect(Layer.empty)
 
+function fakeWorkspace(overrides: Partial<Workspace.Interface>) {
+  return Workspace.Service.of({
+    create: () => Effect.die("unused"),
+    insert: () => Effect.die("unused"),
+    provisionVM: () => Effect.die("unused"),
+    setExtra: () => Effect.die("unused"),
+    stopSync: () => Effect.void,
+    sessionWarp: () => Effect.die("unused"),
+    list: () => Effect.die("unused"),
+    syncList: () => Effect.die("unused"),
+    get: () => Effect.die("unused"),
+    remove: () => Effect.die("unused"),
+    status: () => Effect.die("unused"),
+    isSyncing: () => Effect.succeed(true),
+    isSynced: () => Effect.succeed(false),
+    waitForSync: () => Effect.die("unused"),
+    startWorkspaceSyncing: () => Effect.die("unused"),
+    getByDirectory: () => Effect.succeed(undefined),
+    all: () => Effect.succeed([]),
+    startSync: () => Effect.void,
+    ...overrides,
+  })
+}
+
+const lifecycleWith = (workspace: Workspace.Interface) =>
+  Lifecycle.Service.pipe(
+    Effect.provide(Lifecycle.layer.pipe(Layer.provide(Layer.succeed(Workspace.Service, workspace)))),
+  )
+
+function withEnv<A, E, R>(env: Record<string, string>, effect: Effect.Effect<A, E, R>) {
+  return Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const previous = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]))
+      Object.assign(process.env, env)
+      return previous
+    }),
+    () => effect,
+    (previous) =>
+      Effect.sync(() => {
+        for (const [key, value] of Object.entries(previous)) {
+          if (value === undefined) delete process.env[key]
+          else process.env[key] = value
+        }
+      }),
+  )
+}
+
 describe("control-plane lifecycle", () => {
   it.live("keeps retrying the sync connection while a VM wakes instead of waiting out backoff", () =>
     Effect.gen(function* () {
@@ -44,6 +92,10 @@ describe("control-plane lifecycle", () => {
       // left alone in exponential backoff would not reconnect within the wake.
       const workspace = Workspace.Service.of({
         create: () => Effect.die("unused"),
+        insert: () => Effect.die("unused"),
+        provisionVM: () => Effect.die("unused"),
+        setExtra: () => Effect.die("unused"),
+        stopSync: () => Effect.void,
         sessionWarp: () => Effect.die("unused"),
         list: () => Effect.die("unused"),
         syncList: () => Effect.die("unused"),
@@ -68,5 +120,34 @@ describe("control-plane lifecycle", () => {
       expect(yield* Ref.get(retries)).toBe(2)
       expect(Date.now() - started).toBeLessThan(5_000)
     }),
+  )
+
+  it.live("sweep never stops a workspace whose provision is not ready", () =>
+    withEnv(
+      { OPENCODE_WORKSPACE_IDLE_MS: "0", OPENCODE_WORKSPACE_SWEEP_MS: "100000" },
+      Effect.gen(function* () {
+        const stops = yield* Ref.make(0)
+        registerAdapter(projectID, "sweep-test", {
+          ...adapter,
+          stop: async () => Effect.runSync(Ref.update(stops, (count) => count + 1)),
+        })
+        const provisioning: Workspace.Info = {
+          ...space,
+          id: WorkspaceV2.ID.ascending(),
+          type: "sweep-test",
+          extra: ProvisionState.write(
+            null,
+            ProvisionState.begin({ kind: "new", mode: "empty", now: Date.now(), bootDeadlineMs: 60_000 }),
+          ),
+        }
+        const ready: Workspace.Info = { ...provisioning, id: WorkspaceV2.ID.ascending(), extra: null }
+        const lifecycle = yield* lifecycleWith(fakeWorkspace({ all: () => Effect.succeed([provisioning, ready]) }))
+
+        yield* lifecycle.sweep
+
+        // Only the legacy/ready row may be suspended.
+        expect(yield* Ref.get(stops)).toBe(1)
+      }),
+    ),
   )
 })

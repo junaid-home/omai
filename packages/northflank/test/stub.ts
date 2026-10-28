@@ -7,6 +7,8 @@ type Service = {
   paused: boolean
   instances?: number
   variables?: Record<string, string | undefined>
+  deployment?: { status: string; reason?: string }
+  containers?: string[]
 }
 
 type Volume = { id: string; name: string; payload: Record<string, unknown> }
@@ -18,7 +20,7 @@ export type RecordedRequest = { method: string; path: string; authorization?: st
  * adapter uses. Tests assert against recorded requests and server state —
  * no module mocks.
  */
-export function northflankStub(input?: { dns?: string; token?: string }) {
+export function northflankStub(input?: { dns?: string; token?: string; pageSize?: number }) {
   const services = new Map<string, Service>()
   const volumes = new Map<string, Volume>()
   const requests: RecordedRequest[] = []
@@ -28,6 +30,21 @@ export function northflankStub(input?: { dns?: string; token?: string }) {
   const dns = input?.dns ?? "127.0.0.1:4096"
   const json = (data: unknown, status = 200) => Response.json(data, { status })
   const fail = (status: number, message: string) => json({ error: { message } }, status)
+  // Cursor pagination as the real API serves it: a 24-character cursor and
+  // `pagination.hasNextPage`. The default page is small so tests cross it.
+  const page = <A>(url: URL, items: A[]) => {
+    const size = Math.min(Number(url.searchParams.get("per_page") ?? input?.pageSize ?? 2), input?.pageSize ?? 2)
+    const start = Number(url.searchParams.get("cursor") ?? 0)
+    const next = start + size
+    return {
+      items: items.slice(start, next),
+      pagination: {
+        hasNextPage: next < items.length,
+        count: items.slice(start, next).length,
+        ...(next < items.length ? { cursor: String(next).padStart(24, "0") } : {}),
+      },
+    }
+  }
 
   const server = Bun.serve({
     port: 0,
@@ -73,7 +90,16 @@ export function northflankStub(input?: { dns?: string; token?: string }) {
       if (kind === "services" && id && !action) {
         const service = services.get(id)
         if (!service) return fail(404, `Could not find service '${id}'`)
-        if (method === "GET") return json({ data: { ...service.payload, id: service.id, name: service.name } })
+        if (method === "GET")
+          return json({
+            data: {
+              ...service.payload,
+              id: service.id,
+              name: service.name,
+              deployment: { instances: service.instances ?? 0 },
+              status: { deployment: service.deployment ?? { status: "COMPLETED", reason: "DEPLOYING" } },
+            },
+          })
         if (method === "DELETE") {
           services.delete(id)
           return json({ data: {} })
@@ -85,6 +111,18 @@ export function northflankStub(input?: { dns?: string; token?: string }) {
         if (!service) return fail(404, `Could not find service '${id}'`)
         service.variables = payload?.["variables"] as Record<string, string | undefined> | undefined
         return json({ data: {} })
+      }
+
+      if (kind === "services" && id && action === "containers" && method === "GET") {
+        const service = services.get(id)
+        if (!service) return fail(404, `Could not find service '${id}'`)
+        const containers = (service.containers ?? ["TASK_RUNNING"]).map((status, index) => ({
+          name: `${service.id}-${index}`,
+          status,
+          createdAt: 1,
+          updatedAt: 1,
+        }))
+        return json({ data: { containers }, pagination: { hasNextPage: false, count: containers.length } })
       }
 
       if (kind === "services" && id && action === "ports") {
@@ -108,10 +146,15 @@ export function northflankStub(input?: { dns?: string; token?: string }) {
         return json({ data: {} })
       }
 
-      if (kind === "services" && id === undefined && method === "GET")
-        return json({ data: { services: [...services.values()] } })
+      if (kind === "services" && id === undefined && method === "GET") {
+        const result = page(url, [...services.values()])
+        return json({ data: { services: result.items }, pagination: result.pagination })
+      }
 
-      if (kind === "volumes" && id === undefined && method === "GET") return json({ data: [...volumes.values()] })
+      if (kind === "volumes" && id === undefined && method === "GET") {
+        const result = page(url, [...volumes.values()])
+        return json({ data: result.items, pagination: result.pagination })
+      }
 
       if (kind === "volumes" && id === undefined && method === "POST") {
         const name = payload?.["name"] as string | undefined

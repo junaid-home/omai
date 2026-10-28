@@ -80,7 +80,10 @@ describe("northflank.adapter", () => {
 
   test("create hands the global config to the VM only when configured", async () => {
     const plain = setup()
-    await plain.adapter.create(await plain.adapter.configure(plain.info, { instance: { directory: plain.directory } }), {})
+    await plain.adapter.create(
+      await plain.adapter.configure(plain.info, { instance: { directory: plain.directory } }),
+      {},
+    )
     const bare = [...plain.stub.services.values()][0]!.payload.runtimeEnvironment as Record<string, string>
     expect(bare).not.toHaveProperty("OPENCODE_GLOBAL_CONFIG")
 
@@ -92,6 +95,74 @@ describe("northflank.adapter", () => {
     )
     const variables = [...configured.stub.services.values()][0]!.payload.runtimeEnvironment as Record<string, string>
     expect(variables.OPENCODE_GLOBAL_CONFIG).toBe(global)
+  })
+
+  test("create finds an existing service beyond the first page", async () => {
+    const { stub, adapter, info, directory, config } = setup()
+    const configured = await adapter.configure(info, { instance: { directory } })
+    await adapter.create(configured, {})
+    // Push ours behind three others, off the first page.
+    const ours = [...stub.services.values()][0]!
+    stub.services.delete(ours.id)
+    for (const name of ["vm-other-a", "vm-other-b", "vm-other-c"])
+      stub.services.set(name, { id: name, name, payload: {}, paused: false })
+    stub.services.set(ours.id, ours)
+
+    // A fresh adapter has no cached IDs, as after a control-plane restart.
+    await northflankAdapter(config).create(configured, {})
+
+    expect(stub.services.size).toBe(4)
+    expect(
+      stub.requests.filter((request) => request.method === "POST" && request.path.endsWith("/services/deployment")),
+    ).toHaveLength(1)
+  })
+
+  test("start scales a service left at zero instances", async () => {
+    const { stub, adapter, info, directory } = setup()
+    const configured = await adapter.configure(info, { instance: { directory } })
+    await adapter.create(configured, {})
+    const service = [...stub.services.values()][0]!
+    service.instances = 0
+
+    await adapter.start!(configured)
+
+    expect(service.instances).toBe(1)
+  })
+
+  test("remove with keepVolume deletes only the service", async () => {
+    const { stub, adapter, info, directory } = setup()
+    const configured = await adapter.configure(info, { instance: { directory } })
+    await adapter.create(configured, {})
+
+    await adapter.remove(configured, { keepVolume: true })
+    expect(stub.services.size).toBe(0)
+    expect(stub.volumes.size).toBe(1)
+
+    await adapter.create(configured, {})
+    await adapter.remove(configured)
+    expect(stub.services.size).toBe(0)
+    expect(stub.volumes.size).toBe(0)
+  })
+
+  test("health reports a crashed deployment and a running one", async () => {
+    const { stub, adapter, info, directory } = setup()
+    const configured = await adapter.configure(info, { instance: { directory } })
+    await adapter.create(configured, {})
+    const service = [...stub.services.values()][0]!
+
+    service.deployment = { status: "FAILED", reason: "DEPLOYING" }
+    expect(await adapter.health!(configured)).toEqual({ state: "failed", reason: "Deployment failed" })
+
+    service.deployment = { status: "COMPLETED", reason: "DEPLOYING" }
+    service.containers = ["TASK_FAILED"]
+    expect(await adapter.health!(configured)).toEqual({ state: "failed", reason: "Container exited (TASK_FAILED)" })
+
+    service.containers = ["TASK_RUNNING"]
+    expect(await adapter.health!(configured)).toEqual({ state: "running" })
+
+    service.deployment = { status: "IN_PROGRESS", reason: "DEPLOYING" }
+    service.containers = ["TASK_STARTING"]
+    expect(await adapter.health!(configured)).toEqual({ state: "pending" })
   })
 
   test("create is idempotent across restarts and refreshes runtime env", async () => {
@@ -164,7 +235,10 @@ describe("northflank.adapter", () => {
     expect([...stub.services.values()][0]!.paused).toBe(false)
 
     const actions = stub.requests.map((request) => request.path).filter((path) => /pause|resume/.test(path))
-    expect(actions).toEqual(["/v1/projects/omai/services/vm-w-01jxample0000000000000000ab/pause", "/v1/projects/omai/services/vm-w-01jxample0000000000000000ab/resume"])
+    expect(actions).toEqual([
+      "/v1/projects/omai/services/vm-w-01jxample0000000000000000ab/pause",
+      "/v1/projects/omai/services/vm-w-01jxample0000000000000000ab/resume",
+    ])
   })
 
   test("start treats resuming an already-running service as success", async () => {

@@ -26,6 +26,7 @@ import { WorkspaceTable } from "@opencode-ai/core/control-plane/workspace.sql"
 import type { Target, WorkspaceAdapter, WorkspaceInfo } from "../../src/control-plane/types"
 import { Auth } from "../../src/auth"
 import * as Workspace from "../../src/control-plane/workspace"
+import { ProvisionState } from "../../src/control-plane/provision-state"
 import { InstanceStore } from "@/project/instance-store"
 import { InstanceBootstrap } from "@/project/bootstrap"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -797,7 +798,7 @@ describe("workspace CRUD", () => {
   )
 
   it.instance(
-    "remove still deletes the row when the adapter cannot remove resources",
+    "remove keeps the row for retry when the adapter remove fails",
     () =>
       Effect.gen(function* () {
         const instance = yield* requireInstance
@@ -818,8 +819,96 @@ describe("workspace CRUD", () => {
         )
         yield* insertWorkspace(info)
 
+        expect(yield* workspace.remove(info.id)).toBeUndefined()
+        const row = yield* workspace.get(info.id)
+        expect(ProvisionState.read(row?.extra)).toMatchObject({ status: "failed", cleaned: false, kind: "new" })
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "a failed remove on a recovered workspace is marked for full deletion",
+    () =>
+      Effect.gen(function* () {
+        const instance = yield* requireInstance
+        const workspace = yield* Workspace.Service
+        const type = unique("remove-recovered")
+        const recovered = ProvisionState.begin({ kind: "recover", mode: "empty", now: Date.now(), bootDeadlineMs: 1 })
+        const info = workspaceInfo(instance.project.id, type, {
+          id: WorkspaceV2.ID.ascending("wrk_remove_recovered"),
+          extra: ProvisionState.write(null, recovered),
+        })
+        registerAdapter(
+          instance.project.id,
+          type,
+          recordedAdapter({
+            async remove() {
+              throw new Error("remove exploded")
+            },
+            target() {
+              return { type: "local", directory: "/unused" }
+            },
+          }).adapter,
+        )
+        yield* insertWorkspace(info)
+
+        yield* workspace.remove(info.id)
+
+        // Never a recovery candidate again, and its cleanup deletes the volume too.
+        expect(ProvisionState.read((yield* workspace.get(info.id))?.extra)).toMatchObject({
+          status: "failed",
+          kind: "new",
+        })
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "remove deletes the row when its adapter is no longer registered",
+    () =>
+      Effect.gen(function* () {
+        const instance = yield* requireInstance
+        const workspace = yield* Workspace.Service
+        const info = workspaceInfo(instance.project.id, unique("unregistered"), {
+          id: WorkspaceV2.ID.ascending("wrk_remove_unregistered"),
+        })
+        yield* insertWorkspace(info)
+
         expect(yield* workspace.remove(info.id)).toEqual(info)
         expect(yield* workspace.get(info.id)).toBeUndefined()
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "insert then provisionVM hands the adapter the same env as create",
+    () =>
+      Effect.gen(function* () {
+        const instance = yield* requireInstance
+        const workspace = yield* Workspace.Service
+        const type = unique("split-create")
+        const recorded = recordedAdapter({
+          target() {
+            return { type: "local", directory: "/unused" }
+          },
+        })
+        registerAdapter(instance.project.id, type, recorded.adapter)
+
+        const info = yield* workspace.insert({ type, branch: null, projectID: instance.project.id, extra: null })
+        expect(recorded.calls.create).toHaveLength(0)
+        expect(yield* workspace.get(info.id)).toBeDefined()
+
+        yield* workspace.provisionVM(info)
+        expect(recorded.calls.create).toHaveLength(1)
+        expect(recorded.calls.create[0].env).toMatchObject({
+          OPENCODE_WORKSPACE_ID: info.id,
+          OPENCODE_EXPERIMENTAL_WORKSPACES: "true",
+        })
+        expect(recorded.calls.create[0].env.OPENCODE_AUTH_CONTENT).toBeString()
+
+        const updated = yield* workspace.setExtra(info.id, { marker: 1 })
+        expect(updated?.extra).toEqual({ marker: 1 })
+        yield* workspace.remove(info.id)
       }),
     { git: true },
   )

@@ -1,5 +1,6 @@
 import { Workspace } from "@/control-plane/workspace"
 import { WorkspaceAdapterEntry } from "@/control-plane/types"
+import { ProvisionState } from "@/control-plane/provision-state"
 import { Schema, Struct } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
 import { ApiVcsApplyError } from "./instance"
@@ -16,6 +17,15 @@ export const WarpPayload = Schema.Struct({
   sessionID: Workspace.SessionWarpInput.fields.sessionID,
   copyChanges: Workspace.SessionWarpInput.fields.copyChanges,
 })
+
+export const ProvisionPayload = Schema.Struct({ mode: ProvisionState.Mode })
+
+/** A MicroVM project creation job and its progress. */
+export const ProvisionJob = Schema.Struct({
+  ...ProvisionState.State.fields,
+  workspaceID: Workspace.Info.fields.id,
+  directory: Schema.String,
+}).annotate({ identifier: "WorkspaceProvisionJob" })
 
 /** Aggregated activity report for the workspace this instance serves. */
 export const BusyReport = Schema.Struct({
@@ -49,6 +59,7 @@ export const WorkspacePaths = {
   syncList: `${root}/sync-list`,
   status: `${root}/status`,
   busy: `${root}/busy`,
+  provision: `${root}/provision`,
   remove: `${root}/:id`,
   warp: `${root}/warp`,
 } as const
@@ -118,6 +129,29 @@ export const WorkspaceApi = HttpApi.make("workspace")
             summary: "Workspace busy report",
             description:
               "Aggregated activity (sessions, processes, preview dev server) used to decide whether the workspace may be suspended.",
+          }),
+        ),
+        HttpApiEndpoint.post("provision", WorkspacePaths.provision, {
+          query: WorkspaceRoutingQuery,
+          payload: ProvisionPayload,
+          success: described(ProvisionJob, "Provisioning job"),
+          error: ApiWorkspaceCreateError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.workspace.provision",
+            summary: "Provision a project VM",
+            description:
+              "Start (or join) the durable job that creates the MicroVM for the directory. Returns immediately; poll the status endpoint for progress.",
+          }),
+        ),
+        HttpApiEndpoint.get("provisionStatus", WorkspacePaths.provision, {
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.NullOr(ProvisionJob), "Provisioning job"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "experimental.workspace.provisionStatus",
+            summary: "Provisioning status",
+            description: "Get the provisioning job for the directory, or null when it has none.",
           }),
         ),
         HttpApiEndpoint.delete("remove", WorkspacePaths.remove, {

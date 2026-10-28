@@ -35,6 +35,26 @@ describe("northflank.client", () => {
     expect(stub.requests[0].authorization).toBe(`Bearer ${stub.token}`)
   })
 
+  test("listServices follows every page", async () => {
+    const { stub, client } = setup()
+    for (const name of ["a", "b", "c", "d", "e"])
+      stub.services.set(`vm-${name}`, { id: `vm-${name}`, name: `vm-${name}`, payload: {}, paused: false })
+
+    const services = await client.listServices()
+
+    expect(services.map((service) => service.name).sort()).toEqual(["vm-a", "vm-b", "vm-c", "vm-d", "vm-e"])
+  })
+
+  test("listVolumes follows every page", async () => {
+    const { stub, client } = setup()
+    for (const name of ["a", "b", "c", "d", "e"])
+      stub.volumes.set(`vol-${name}`, { id: `vol-${name}`, name: `vol-${name}`, payload: {} })
+
+    const volumes = await client.listVolumes()
+
+    expect(volumes.map((volume) => volume.name).sort()).toEqual(["vol-a", "vol-b", "vol-c", "vol-d", "vol-e"])
+  })
+
   test("creates a service and returns its id", async () => {
     const { stub, client } = setup()
 

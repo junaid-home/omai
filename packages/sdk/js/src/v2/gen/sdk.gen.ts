@@ -82,6 +82,10 @@ import type {
   ExperimentalWorkspaceCreateResponses,
   ExperimentalWorkspaceListErrors,
   ExperimentalWorkspaceListResponses,
+  ExperimentalWorkspaceProvisionErrors,
+  ExperimentalWorkspaceProvisionResponses,
+  ExperimentalWorkspaceProvisionStatusErrors,
+  ExperimentalWorkspaceProvisionStatusResponses,
   ExperimentalWorkspaceRemoveErrors,
   ExperimentalWorkspaceRemoveResponses,
   ExperimentalWorkspaceStatusErrors,
@@ -1428,6 +1432,81 @@ export class Workspace extends HeyApiClient {
       url: "/experimental/workspace/busy",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Provisioning status
+   *
+   * Get the provisioning job for the directory, or null when it has none.
+   */
+  public provisionStatus<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      ExperimentalWorkspaceProvisionStatusResponses,
+      ExperimentalWorkspaceProvisionStatusErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/workspace/provision",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Provision a project VM
+   *
+   * Start (or join) the durable job that creates the MicroVM for the directory. Returns immediately; poll the status endpoint for progress.
+   */
+  public provision<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      mode?: "empty" | "upload"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "mode" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      ExperimentalWorkspaceProvisionResponses,
+      ExperimentalWorkspaceProvisionErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/workspace/provision",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 

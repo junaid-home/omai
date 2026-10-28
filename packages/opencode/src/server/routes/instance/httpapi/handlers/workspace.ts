@@ -1,7 +1,12 @@
+import path from "node:path"
 import { AppProcess } from "@opencode-ai/core/process"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { listAdapters } from "@/control-plane/adapters"
 import { Workspace } from "@/control-plane/workspace"
+import { Provisioner } from "@/control-plane/provisioner"
+import { vmProjectsRoot } from "@/control-plane/vm-projects"
+import { Flag } from "@opencode-ai/core/flag/flag"
+import { WorkspaceRouteContext } from "../middleware/workspace-routing"
 import * as InstanceState from "@/effect/instance-state"
 import { Vcs } from "@/project/vcs"
 import { getDevServerStatus } from "@/preview/server"
@@ -10,7 +15,13 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { notFound } from "../errors"
 import { ApiVcsApplyError } from "../groups/instance"
-import { ApiWorkspaceCreateError, ApiWorkspaceWarpError, CreatePayload, WarpPayload } from "../groups/workspace"
+import {
+  ApiWorkspaceCreateError,
+  ApiWorkspaceWarpError,
+  CreatePayload,
+  ProvisionPayload,
+  WarpPayload,
+} from "../groups/workspace"
 
 export const workspaceHandlers = HttpApiBuilder.group(InstanceHttpApi, "workspace", (handlers) =>
   Effect.gen(function* () {
@@ -73,6 +84,30 @@ export const workspaceHandlers = HttpApiBuilder.group(InstanceHttpApi, "workspac
       return { busy: reasons.length > 0, reasons }
     })
 
+    const provision = Effect.fn("WorkspaceHttpApi.provision")(function* (ctx: {
+      payload: typeof ProvisionPayload.Type
+    }) {
+      const route = yield* WorkspaceRouteContext
+      const provisioner = yield* Provisioner.Service
+      const rejected = (message: string) =>
+        Effect.fail(new ApiWorkspaceCreateError({ name: "WorkspaceCreateError", data: { message } }))
+      if (!Flag.OPENCODE_WORKSPACE_ADAPTER) return yield* rejected("No workspace adapter is configured")
+      // Only project folders under the VM projects root get a VM of their own;
+      // resolve first so `..` segments cannot step outside it.
+      const root = vmProjectsRoot()
+      const directory = path.resolve(route.directory)
+      const relative = root ? path.relative(path.resolve(root), directory) : directory
+      if (root && (!relative || relative.startsWith("..") || path.isAbsolute(relative)))
+        return yield* rejected(`Project directory must be under ${root}`)
+      return yield* provisioner.start({ directory, mode: ctx.payload.mode })
+    })
+
+    const provisionStatus = Effect.fn("WorkspaceHttpApi.provisionStatus")(function* () {
+      const route = yield* WorkspaceRouteContext
+      const provisioner = yield* Provisioner.Service
+      return (yield* provisioner.status(route.directory)) ?? null
+    })
+
     const remove = Effect.fn("WorkspaceHttpApi.remove")(function* (ctx: { params: { id: Workspace.Info["id"] } }) {
       return yield* workspace.remove(ctx.params.id)
     })
@@ -113,6 +148,8 @@ export const workspaceHandlers = HttpApiBuilder.group(InstanceHttpApi, "workspac
       .handle("syncList", syncList)
       .handle("status", status)
       .handle("busy", busy)
+      .handle("provision", provision)
+      .handle("provisionStatus", provisionStatus)
       .handle("remove", remove)
       .handle("warp", warp)
   }),

@@ -2732,6 +2732,23 @@ export type WorkspaceCreateError = {
   }
 }
 
+export type WorkspaceProvisionJob = {
+  status: "running" | "ready" | "failed"
+  step: "creating" | "booting" | "setup" | "upload" | "done"
+  kind: "new" | "recover"
+  mode: "empty" | "upload"
+  error?: string
+  cleaned: boolean
+  startedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  updatedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  deadline: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  timings: {
+    [key: string]: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  }
+  workspaceID: string
+  directory: string
+}
+
 export type WorkspaceWarpError = {
   name: "WorkspaceWarpError"
   data: {
@@ -13460,6 +13477,68 @@ export type ExperimentalWorkspaceBusyResponses = {
 
 export type ExperimentalWorkspaceBusyResponse =
   ExperimentalWorkspaceBusyResponses[keyof ExperimentalWorkspaceBusyResponses]
+
+export type ExperimentalWorkspaceProvisionStatusData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/workspace/provision"
+}
+
+export type ExperimentalWorkspaceProvisionStatusErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ExperimentalWorkspaceProvisionStatusError =
+  ExperimentalWorkspaceProvisionStatusErrors[keyof ExperimentalWorkspaceProvisionStatusErrors]
+
+export type ExperimentalWorkspaceProvisionStatusResponses = {
+  /**
+   * Provisioning job
+   */
+  200: WorkspaceProvisionJob
+}
+
+export type ExperimentalWorkspaceProvisionStatusResponse =
+  ExperimentalWorkspaceProvisionStatusResponses[keyof ExperimentalWorkspaceProvisionStatusResponses]
+
+export type ExperimentalWorkspaceProvisionData = {
+  body?: {
+    mode: "empty" | "upload"
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/workspace/provision"
+}
+
+export type ExperimentalWorkspaceProvisionErrors = {
+  /**
+   * WorkspaceCreateError | InvalidRequestError
+   */
+  400: WorkspaceCreateError | InvalidRequestError
+}
+
+export type ExperimentalWorkspaceProvisionError =
+  ExperimentalWorkspaceProvisionErrors[keyof ExperimentalWorkspaceProvisionErrors]
+
+export type ExperimentalWorkspaceProvisionResponses = {
+  /**
+   * Provisioning job
+   */
+  200: WorkspaceProvisionJob
+}
+
+export type ExperimentalWorkspaceProvisionResponse =
+  ExperimentalWorkspaceProvisionResponses[keyof ExperimentalWorkspaceProvisionResponses]
 
 export type ExperimentalWorkspaceRemoveData = {
   body?: never

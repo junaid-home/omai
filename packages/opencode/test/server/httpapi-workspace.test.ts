@@ -234,6 +234,84 @@ describe("workspace HttpApi", () => {
     }),
   )
 
+  it.live("provision endpoint starts one job per directory and status reports it", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const project = yield* Project.use.fromDirectory(dir)
+      const vm = Bun.serve({
+        port: 0,
+        fetch(request) {
+          const url = new URL(request.url)
+          if (url.pathname === "/global/event")
+            return new Response(
+              new ReadableStream({
+                start(controller) {
+                  controller.enqueue(new TextEncoder().encode(":\n\n"))
+                },
+              }),
+              { headers: { "content-type": "text/event-stream" } },
+            )
+          if (url.pathname === "/sync/history") return Response.json([])
+          if (url.pathname === "/global/health") return Response.json({ healthy: true })
+          if (url.pathname === "/global/file/create") return Response.json({ success: true })
+          return new Response(null, { status: 404 })
+        },
+      })
+      yield* Effect.addFinalizer(() => Effect.sync(() => vm.stop(true)))
+      const type = "provision-endpoint"
+      registerAdapter(project.project.id, type, {
+        name: "Provision Test",
+        description: "remote test VM",
+        configure: (info, context) => ({ ...info, directory: context?.instance?.directory ?? null }),
+        async create() {},
+        async remove() {},
+        target: () => ({ type: "remote", url: `http://127.0.0.1:${vm.port}` }),
+      })
+      const previous = { adapter: process.env.OPENCODE_WORKSPACE_ADAPTER, root: process.env.OPENCODE_VM_PROJECTS_ROOT }
+      process.env.OPENCODE_WORKSPACE_ADAPTER = type
+      process.env.OPENCODE_VM_PROJECTS_ROOT = path.dirname(dir)
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          if (previous.adapter === undefined) delete process.env.OPENCODE_WORKSPACE_ADAPTER
+          else process.env.OPENCODE_WORKSPACE_ADAPTER = previous.adapter
+          if (previous.root === undefined) delete process.env.OPENCODE_VM_PROJECTS_ROOT
+          else process.env.OPENCODE_VM_PROJECTS_ROOT = previous.root
+        }),
+      )
+      const start = () =>
+        request(WorkspacePaths.provision, dir, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ mode: "empty" }),
+        })
+
+      const first = yield* start()
+      expect(first.status).toBe(200)
+      const job = (yield* first.json) as { workspaceID: string; directory: string }
+      expect(job.directory).toBe(dir)
+      const again = (yield* (yield* start()).json) as { workspaceID: string }
+      expect(again.workspaceID).toBe(job.workspaceID)
+
+      const escaped = yield* request(WorkspacePaths.provision, `${path.dirname(dir)}/../escaped`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode: "empty" }),
+      })
+      expect(escaped.status).toBe(400)
+
+      const deadline = Date.now() + 8_000
+      const settled = yield* Effect.gen(function* () {
+        while (Date.now() < deadline) {
+          const status = (yield* (yield* request(WorkspacePaths.provision, dir)).json) as { step: string } | null
+          if (status?.step === "done") return status
+          yield* Effect.sleep("100 millis")
+        }
+        return undefined
+      })
+      expect(settled).toMatchObject({ status: "ready", step: "done", workspaceID: job.workspaceID })
+    }),
+  )
+
   it.live("serves list sync endpoint", () =>
     Effect.gen(function* () {
       Flag.OPENCODE_EXPERIMENTAL_WORKSPACES = true

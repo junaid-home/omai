@@ -20,6 +20,7 @@ import { ProjectV2 } from "@opencode-ai/core/project"
 import { Slug } from "@opencode-ai/core/util/slug"
 import { WorkspaceTable } from "@opencode-ai/core/control-plane/workspace.sql"
 import { getAdapter, registeredAdapters } from "./adapters"
+import { ProvisionState } from "./provision-state"
 import { type Target, type WorkspaceInfo, WorkspaceInfo as WorkspaceInfoSchema } from "./types"
 import { WorkspaceV2 } from "@opencode-ai/core/workspace"
 import { Session } from "@/session/session"
@@ -131,6 +132,11 @@ type SyncLoopError = SyncHttpError | HttpClientError.HttpClientError
 
 export interface Interface {
   readonly create: (input: CreateInput) => Effect.Effect<Info, CreateError>
+  /** Configure and persist the row only; no VM is created. */
+  readonly insert: (input: CreateInput) => Effect.Effect<Info>
+  /** Create (or idempotently re-create) the workspace's VM through its adapter. */
+  readonly provisionVM: (info: Info) => Effect.Effect<void, CreateError>
+  readonly setExtra: (id: WorkspaceV2.ID, extra: unknown) => Effect.Effect<Info | undefined>
   readonly sessionWarp: (input: SessionWarpInput) => Effect.Effect<void, SessionWarpError>
   readonly list: (project: Project.Info) => Effect.Effect<Info[]>
   readonly syncList: (project: Project.Info) => Effect.Effect<void>
@@ -150,6 +156,7 @@ export interface Interface {
   ) => Effect.Effect<void, WaitForSyncError>
   readonly startWorkspaceSyncing: (projectID: ProjectV2.ID) => Effect.Effect<void>
   readonly startSync: (workspace: Info) => Effect.Effect<void>
+  readonly stopSync: (workspaceID: WorkspaceV2.ID) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Workspace") {}
@@ -520,7 +527,7 @@ const layer = Layer.effect(
       connections.delete(id)
     })
 
-    const create = Effect.fn("Workspace.create")(function* (input: CreateInput) {
+    const insert = Effect.fn("Workspace.insert")(function* (input: CreateInput) {
       const id = WorkspaceV2.ID.ascending(input.id)
       const adapter = getAdapter(input.projectID, input.type)
       const config = yield* WorkspaceAdapterRuntime.configure(adapter, {
@@ -556,9 +563,14 @@ const layer = Layer.effect(
         })
         .pipe(Effect.orDie)
 
+      return info
+    })
+
+    const provisionVM = Effect.fn("Workspace.provisionVM")(function* (info: Info) {
+      const adapter = getAdapter(info.projectID, info.type)
       const env = {
         OPENCODE_AUTH_CONTENT: JSON.stringify(yield* auth.all()),
-        OPENCODE_WORKSPACE_ID: config.id,
+        OPENCODE_WORKSPACE_ID: info.id,
         OPENCODE_EXPERIMENTAL_WORKSPACES: "true",
         OTEL_EXPORTER_OTLP_HEADERS: process.env.OTEL_EXPORTER_OTLP_HEADERS,
         OTEL_EXPORTER_OTLP_ENDPOINT: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
@@ -588,7 +600,27 @@ const layer = Layer.effect(
         OPENCODE_HOST: process.env.OPENCODE_HOST ?? "0.0.0.0",
       }
 
-      yield* WorkspaceAdapterRuntime.create(adapter, config, env)
+      // Adapters receive the persisted fields only, never control-plane bookkeeping.
+      const target = {
+        id: info.id,
+        type: info.type,
+        name: info.name,
+        branch: info.branch,
+        directory: info.directory,
+        extra: info.extra,
+        projectID: info.projectID,
+      }
+      yield* WorkspaceAdapterRuntime.create(adapter, target, env)
+    })
+
+    const setExtra = Effect.fn("Workspace.setExtra")(function* (id: WorkspaceV2.ID, extra: unknown) {
+      yield* db.update(WorkspaceTable).set({ extra }).where(eq(WorkspaceTable.id, id)).pipe(Effect.orDie)
+      return yield* get(id)
+    })
+
+    const create = Effect.fn("Workspace.create")(function* (input: CreateInput) {
+      const info = yield* insert(input)
+      yield* provisionVM(info)
       // The sync loop must outlive the create fence: a cold MicroVM can boot
       // slower than the fence waits, and `Effect.all` would interrupt
       // `startSync` before it forks the loop fiber — stranding the workspace
@@ -878,12 +910,36 @@ const layer = Layer.effect(
       yield* stopSync(id)
 
       const info = fromRow(row)
-      yield* Effect.catchCause(
-        Effect.gen(function* () {
-          yield* WorkspaceAdapterRuntime.remove(info)
-        }),
-        () => Effect.logError("adapter not available when removing workspace", { type: row.type }),
+      // A row whose adapter is gone (plugin removed) can never be cleaned up,
+      // so it is dropped. Any other remove failure keeps the row as a failed,
+      // uncleaned provision: deleting it would orphan the VM, and the
+      // provisioner's reconcile retries the cleanup from it.
+      const registered = registeredAdapters(info.projectID).some(([type]) => type === info.type)
+      if (!registered) {
+        yield* Effect.logError("adapter not available when removing workspace", { type: row.type })
+        yield* db.delete(WorkspaceTable).where(eq(WorkspaceTable.id, id)).pipe(Effect.orDie)
+        return info
+      }
+      const removed = yield* WorkspaceAdapterRuntime.remove(info).pipe(
+        Effect.as(true),
+        Effect.catchCause((cause) =>
+          Effect.logError("workspace adapter remove failed; keeping row for retry", {
+            workspaceID: id,
+            error: String(cause),
+          }).pipe(Effect.as(false)),
+        ),
       )
+      if (!removed) {
+        const now = Date.now()
+        const state =
+          ProvisionState.read(info.extra) ??
+          ProvisionState.begin({ kind: "new", mode: "empty", now, bootDeadlineMs: 0 })
+        // Marked as a failed *new* job whatever it was before: its cleanup
+        // then deletes the volume too, and routing never recovers it.
+        const marked = { ...ProvisionState.fail(state, "Removal failed", now), kind: "new" as const }
+        yield* setExtra(id, ProvisionState.write(info.extra, marked))
+        return
+      }
 
       yield* db.delete(WorkspaceTable).where(eq(WorkspaceTable.id, id)).pipe(Effect.orDie)
       return info
@@ -955,6 +1011,9 @@ const layer = Layer.effect(
 
     return Service.of({
       create,
+      insert,
+      provisionVM,
+      setExtra,
       sessionWarp,
       list,
       syncList,
@@ -968,6 +1027,7 @@ const layer = Layer.effect(
       waitForSync,
       startWorkspaceSyncing,
       startSync,
+      stopSync,
     })
   }),
 )

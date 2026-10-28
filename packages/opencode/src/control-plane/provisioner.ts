@@ -1,0 +1,462 @@
+import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
+import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { Flag } from "@opencode-ai/core/flag/flag"
+import { WorkspaceV2 } from "@opencode-ai/core/workspace"
+import { Cause, Context, Deferred, Effect, Layer, Schedule } from "effect"
+import { HttpBody, HttpClient, HttpClientRequest } from "effect/unstable/http"
+import { InstanceRef } from "@/effect/instance-ref"
+import { InstanceStore } from "@/project/instance-store"
+import { ProvisionState } from "./provision-state"
+import type { Target } from "./types"
+import { Workspace } from "./workspace"
+import { WorkspaceAdapterRuntime } from "./workspace-adapter-runtime"
+
+// Creating a MicroVM project is a durable job on the control plane rather
+// than one long HTTP request: each step is persisted on the workspace row
+// before the next begins and is safe to re-run, so a crash, restart, closed
+// tab or proxy timeout leaves a row that `reconcile` resumes or cleans up.
+
+export type Job = ProvisionState.State & { workspaceID: WorkspaceV2.ID; directory: string }
+
+export interface Interface {
+  readonly start: (input: { directory: string; mode: ProvisionState.State["mode"] }) => Effect.Effect<Job>
+  readonly status: (directory: string) => Effect.Effect<Job | undefined>
+  readonly recover: (workspace: Workspace.Info) => Effect.Effect<Job>
+  /** Resolves once the job is ready, waiting for its upload, or failed, or once timeoutMs elapses. */
+  readonly await: (workspaceID: WorkspaceV2.ID, timeoutMs: number) => Effect.Effect<Job | undefined>
+  /** The zip upload into the VM succeeded: finishes a job waiting at step "upload". */
+  readonly uploaded: (workspaceID: WorkspaceV2.ID) => Effect.Effect<void>
+  readonly reconcile: Effect.Effect<void>
+}
+
+export class Service extends Context.Service<Service, Interface>()("@opencode/control-plane/Provisioner") {}
+
+function env(key: string, fallback: number) {
+  const value = Number(process.env[key] ?? fallback)
+  return Number.isFinite(value) && value >= 0 ? value : fallback
+}
+
+const bootDeadlineMs = () => env("OPENCODE_PROVISION_BOOT_DEADLINE_MS", 120_000)
+const uploadDeadlineMs = () => env("OPENCODE_PROVISION_UPLOAD_DEADLINE_MS", 1_800_000)
+const reconcileMs = () => Math.max(env("OPENCODE_PROVISION_RECONCILE_MS", 15_000), 100)
+const failedTtlMs = () => env("OPENCODE_PROVISION_FAILED_TTL_MS", 3_600_000)
+const HEALTH_POLL_MS = 500
+// The Northflank rate limit is shared by the whole team: ask it about the
+// VM far less often than we ask the VM itself.
+const ADAPTER_POLL_MS = 3_000
+
+// Process-wide so one runner per workspace holds even if the layer is built
+// more than once (route groups are provided separately).
+const runners = new Map<WorkspaceV2.ID, Deferred.Deferred<void>>()
+const starting = new Map<string, Deferred.Deferred<Job>>()
+
+// Only the long-lived `serve` process owns background reconciliation. Every
+// CLI or TUI process builds the same server routes in-process, and with a
+// developer .env that enables the adapter it would otherwise resume, fail and
+// clean up the control plane's jobs (and hold short-lived commands open).
+const reconciler = { enabled: false }
+export function enableReconcile() {
+  reconciler.enabled = true
+}
+
+export const layer = Layer.effect(
+  Service,
+  Effect.gen(function* () {
+    const workspace = yield* Workspace.Service
+    const store = yield* InstanceStore.Service
+    const http = yield* HttpClient.HttpClient
+
+    const toJob = (info: Workspace.Info): Job | undefined => {
+      if (!info.directory) return undefined
+      return { ...(ProvisionState.read(info.extra) ?? legacy(info)), workspaceID: info.id, directory: info.directory }
+    }
+
+    const save = Effect.fn("Provisioner.save")(function* (info: Workspace.Info, state: ProvisionState.State) {
+      return (yield* workspace.setExtra(info.id, ProvisionState.write(info.extra, state))) ?? info
+    })
+
+    // Compare-and-set: a step only commits if the row still holds the state it
+    // started from. A step can take minutes, and meanwhile the row may have
+    // been removed, marked for deletion, failed by a deadline, or restarted.
+    const commit = Effect.fn("Provisioner.commit")(function* (
+      info: Workspace.Info,
+      from: ProvisionState.State,
+      to: ProvisionState.State,
+    ) {
+      const fresh = yield* workspace.get(info.id)
+      if (!fresh) {
+        // Removed while the adapter was still creating: whatever it made
+        // after the removal has no row left to own it, so delete it now.
+        yield* Effect.logWarning("workspace removed during provisioning; deleting late resources", {
+          workspaceID: info.id,
+        })
+        yield* WorkspaceAdapterRuntime.remove(info).pipe(Effect.ignoreCause)
+        return false
+      }
+      const current = ProvisionState.read(fresh.extra)
+      if (current?.status !== from.status || current.step !== from.step || current.updatedAt !== from.updatedAt)
+        return false
+      yield* save(fresh, to)
+      return true
+    })
+
+    // Runs `effect` detached unless a runner for this workspace is already live.
+    const fork = (id: WorkspaceV2.ID, effect: Effect.Effect<void>) =>
+      Effect.gen(function* () {
+        if (runners.has(id)) return
+        const done = Deferred.makeUnsafe<void>()
+        runners.set(id, done)
+        yield* effect.pipe(
+          Effect.catchCause((cause) =>
+            Effect.logError("workspace provision runner failed", { workspaceID: id, error: Cause.pretty(cause) }),
+          ),
+          Effect.ensuring(
+            Effect.suspend(() => {
+              runners.delete(id)
+              return Deferred.succeed(done, undefined)
+            }),
+          ),
+          Effect.forkDetach({ startImmediately: true }),
+        )
+      })
+
+    const settled = (id: WorkspaceV2.ID) => {
+      const pending = runners.get(id)
+      return pending ? Deferred.await(pending) : Effect.void
+    }
+
+    const cleanup = Effect.fn("Provisioner.cleanup")(function* (info: Workspace.Info, state: ProvisionState.State) {
+      yield* workspace.stopSync(info.id)
+      const removed = yield* WorkspaceAdapterRuntime.remove(info, { keepVolume: state.kind === "recover" }).pipe(
+        Effect.as(true),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("workspace provision cleanup failed; will retry", {
+            workspaceID: info.id,
+            error: message(cause),
+          }).pipe(Effect.as(false)),
+        ),
+      )
+      if (!removed) return
+      const fresh = yield* workspace.get(info.id)
+      const current = fresh && ProvisionState.read(fresh.extra)
+      if (fresh && current?.status === "failed") yield* save(fresh, ProvisionState.cleaned(current, Date.now()))
+    })
+
+    const fail = Effect.fn("Provisioner.fail")(function* (id: WorkspaceV2.ID, reason: string) {
+      const info = yield* workspace.get(id)
+      const state = info && ProvisionState.read(info.extra)
+      if (!info || !state || state.status !== "running") return
+      yield* Effect.logWarning("workspace provision failed", { workspaceID: id, step: state.step, error: reason })
+      const failed = ProvisionState.fail(state, reason, Date.now())
+      yield* cleanup(yield* save(info, failed), failed)
+    })
+
+    const remote = Effect.fn("Provisioner.remote")(function* (info: Workspace.Info) {
+      const target = yield* WorkspaceAdapterRuntime.target(info)
+      if (target.type !== "remote") return undefined
+      return target
+    })
+
+    const healthy = (target: Extract<Target, { type: "remote" }>) =>
+      http
+        .execute(HttpClientRequest.get(route(target.url, "/global/health"), { headers: new Headers(target.headers) }))
+        .pipe(
+          Effect.map((response) => response.status >= 200 && response.status < 300),
+          Effect.timeoutOrElse({ duration: "2 seconds", orElse: () => Effect.succeed(false) }),
+          Effect.catchCause(() => Effect.succeed(false)),
+        )
+
+    // Poll the VM directly instead of letting the sync loop back off
+    // exponentially, and ask the adapter whether the container crashed so a
+    // crash-looping VM fails in seconds rather than at the deadline.
+    const boot = Effect.fn("Provisioner.boot")(function* (info: Workspace.Info, deadline: number) {
+      const target = yield* remote(info)
+      if (!target) return yield* workspace.startSync(info)
+      let asked = 0
+      while (true) {
+        if (Date.now() >= deadline) return yield* Effect.die(new Error(`Timed out while ${describe("booting")}`))
+        if (Date.now() - asked >= ADAPTER_POLL_MS) {
+          asked = Date.now()
+          const report = yield* WorkspaceAdapterRuntime.health(info).pipe(
+            Effect.catchCause(() => Effect.succeed(undefined)),
+          )
+          if (report?.state === "failed")
+            return yield* Effect.die(new Error(`VM crashed while starting: ${report.reason ?? "unknown reason"}`))
+        }
+        if (yield* healthy(target)) {
+          yield* workspace.startSync(info)
+          if (yield* workspace.isSynced(info.id)) return
+        }
+        yield* Effect.sleep(HEALTH_POLL_MS)
+      }
+    })
+
+    const setup = Effect.fn("Provisioner.setup")(function* (info: Workspace.Info) {
+      const target = yield* remote(info)
+      if (!target || !info.directory) return
+      const url = route(target.url, "/global/file/create")
+      url.searchParams.set("directory", info.directory)
+      const response = yield* http
+        .execute(
+          HttpClientRequest.post(url, {
+            headers: new Headers(target.headers),
+            body: HttpBody.jsonUnsafe({ path: info.directory }),
+          }),
+        )
+        .pipe(
+          Effect.timeoutOrElse({
+            duration: "60 seconds",
+            orElse: () => Effect.die(new Error(`Timed out while ${describe("setup")}`)),
+          }),
+        )
+      const body = (yield* response.json.pipe(Effect.catchCause(() => Effect.succeed(undefined)))) as
+        | { success?: boolean; errors?: { message?: string }[] }
+        | undefined
+      if (response.status >= 200 && response.status < 300 && body?.success !== false) return
+      return yield* Effect.die(
+        new Error(body?.errors?.[0]?.message ?? `Project setup failed with HTTP ${response.status}`),
+      )
+    })
+
+    const next = (state: ProvisionState.State): ProvisionState.State["step"] => {
+      if (state.step === "creating") return "booting"
+      // Recovery boots an existing project from its surviving volume: there is
+      // nothing to set up, and re-running it would re-init the repository.
+      if (state.step === "booting" && state.kind === "recover") return "done"
+      if (state.step === "booting") return state.mode === "upload" ? "upload" : "setup"
+      return "done"
+    }
+
+    const execute = (id: WorkspaceV2.ID): Effect.Effect<void, unknown> =>
+      Effect.gen(function* () {
+        const info = yield* workspace.get(id)
+        const state = info && ProvisionState.read(info.extra)
+        if (!info || !state || state.status !== "running") return
+        if (state.step === "upload" || state.step === "done") return
+        // Creating is never cut short: interrupting it would leave the
+        // adapter's in-flight calls creating resources after cleanup ran.
+        // The deadline is enforced before and during the later steps.
+        if (state.step !== "creating" && Date.now() >= state.deadline)
+          return yield* Effect.die(new Error(`Timed out while ${describe(state.step)}`))
+        if (state.step === "creating") yield* workspace.provisionVM(info)
+        if (state.step === "booting") yield* boot(info, state.deadline)
+        if (state.step === "setup") yield* setup(info)
+        const advanced = ProvisionState.advance(state, next(state), Date.now(), uploadDeadlineMs())
+        if (!(yield* commit(info, state, advanced))) return
+        if (advanced.status === "ready")
+          yield* Effect.logInfo("workspace provisioned", { workspaceID: id, timings: advanced.timings })
+        return yield* execute(id)
+      })
+
+    const run = (id: WorkspaceV2.ID) =>
+      Effect.gen(function* () {
+        const info = yield* workspace.get(id)
+        const state = info && ProvisionState.read(info.extra)
+        if (!state || state.status !== "running") return
+        const exit = yield* execute(id).pipe(Effect.exit)
+        if (exit._tag === "Failure") yield* fail(id, message(exit.cause))
+      })
+
+    const create = Effect.fn("Provisioner.create")(function* (input: {
+      directory: string
+      mode: ProvisionState.State["mode"]
+    }) {
+      const type = Flag.OPENCODE_WORKSPACE_ADAPTER
+      if (!type) return yield* Effect.die(new Error("No workspace adapter is configured"))
+      const ctx = yield* store.load({ directory: input.directory })
+      const state = ProvisionState.begin({
+        kind: "new",
+        mode: input.mode,
+        now: Date.now(),
+        bootDeadlineMs: bootDeadlineMs(),
+      })
+      // The row exists before any VM does, and carries the job from birth.
+      const info = yield* workspace
+        .insert({ type, branch: null, projectID: ctx.project.id, extra: ProvisionState.write(null, state) })
+        .pipe(Effect.provideService(InstanceRef, ctx))
+      yield* fork(info.id, run(info.id))
+      return toJob(info) ?? { ...state, workspaceID: info.id, directory: input.directory }
+    })
+
+    const begin = Effect.fn("Provisioner.begin")(function* (input: {
+      directory: string
+      mode: ProvisionState.State["mode"]
+    }) {
+      const existing = yield* workspace.getByDirectory(input.directory)
+      if (!existing) return yield* create(input)
+      const state = ProvisionState.read(existing.extra)
+      if (!state || state.status === "ready") return toJob(existing)!
+      if (state.status === "running") {
+        yield* fork(existing.id, run(existing.id))
+        return toJob(existing)!
+      }
+      // Try again: finish cleaning the failed attempt before replacing it, so
+      // the new job never races the old one's teardown.
+      yield* settled(existing.id)
+      // A failed recovery belongs to an existing project: retry it in place.
+      // Replacing the row would delete the volume holding the project.
+      if (state.kind === "recover") return yield* recover(existing)
+      const failed = yield* workspace.get(existing.id)
+      const failedState = failed && ProvisionState.read(failed.extra)
+      if (failed && failedState && !failedState.cleaned) yield* cleanup(failed, failedState)
+      const after = yield* workspace.get(existing.id)
+      if (after && !ProvisionState.read(after.extra)?.cleaned) return toJob(after)!
+      if (after) yield* workspace.remove(after.id)
+      const leftover = yield* workspace.get(existing.id)
+      if (leftover) return toJob(leftover)!
+      return yield* create(input)
+    })
+
+    // Concurrent starts for one directory share a single attempt.
+    const start = Effect.fn("Provisioner.start")(function* (input: {
+      directory: string
+      mode: ProvisionState.State["mode"]
+    }) {
+      const entry = yield* Effect.sync(() => {
+        const pending = starting.get(input.directory)
+        if (pending) return { deferred: pending, owner: false }
+        const deferred = Deferred.makeUnsafe<Job>()
+        starting.set(input.directory, deferred)
+        return { deferred, owner: true }
+      })
+      if (!entry.owner) return yield* Deferred.await(entry.deferred)
+      yield* entry.deferred.pipe(
+        Deferred.complete(begin(input).pipe(Effect.orDie)),
+        Effect.ensuring(Effect.sync(() => starting.delete(input.directory))),
+      )
+      return yield* Deferred.await(entry.deferred)
+    })
+
+    const status = Effect.fn("Provisioner.status")(function* (directory: string) {
+      const info = yield* workspace.getByDirectory(directory)
+      return info ? toJob(info) : undefined
+    })
+
+    const recover = Effect.fn("Provisioner.recover")(function* (workspaceInfo: Workspace.Info) {
+      const current = (yield* workspace.get(workspaceInfo.id)) ?? workspaceInfo
+      if (ProvisionState.read(current.extra)?.status === "running") {
+        yield* fork(current.id, run(current.id))
+        return toJob(current)!
+      }
+      // A runner that just finished may still be unwinding; let it go first.
+      yield* settled(current.id)
+      const info = (yield* workspace.get(current.id)) ?? current
+      const state = ProvisionState.begin({
+        kind: "recover",
+        mode: "empty",
+        now: Date.now(),
+        bootDeadlineMs: bootDeadlineMs(),
+      })
+      yield* Effect.logWarning("workspace VM unavailable; re-provisioning", { workspaceID: info.id })
+      const saved = yield* save(info, state)
+      yield* fork(info.id, run(info.id))
+      return toJob(saved)!
+    })
+
+    const awaitJob = Effect.fn("Provisioner.await")(function* (id: WorkspaceV2.ID, timeoutMs: number) {
+      const deadline = Date.now() + timeoutMs
+      while (true) {
+        const info = yield* workspace.get(id)
+        const job = info && toJob(info)
+        if (!job) return undefined
+        if (job.status !== "running" || ProvisionState.proxyable(job) || Date.now() >= deadline) return job
+        yield* Effect.sleep(200)
+      }
+    })
+
+    const uploaded = Effect.fn("Provisioner.uploaded")(function* (id: WorkspaceV2.ID) {
+      const info = yield* workspace.get(id)
+      const state = info && ProvisionState.read(info.extra)
+      if (!info || !state || state.status !== "running" || state.step !== "upload") return
+      const done = ProvisionState.advance(state, "done", Date.now(), uploadDeadlineMs())
+      yield* save(info, done)
+      yield* Effect.logInfo("workspace provisioned", { workspaceID: id, timings: done.timings })
+    })
+
+    const reconcile = Effect.gen(function* () {
+      const rows = yield* workspace.all()
+      const now = Date.now()
+      yield* Effect.forEach(
+        rows,
+        (info) =>
+          Effect.gen(function* () {
+            if (!ProvisionState.read(info.extra) || runners.has(info.id)) return
+            // The snapshot can be stale by the time this row comes up.
+            const fresh = yield* workspace.get(info.id)
+            const state = fresh && ProvisionState.read(fresh.extra)
+            if (!fresh || !state || runners.has(info.id)) return
+            if (state.status === "running" && now >= state.deadline)
+              return yield* fork(info.id, fail(info.id, `Timed out while ${describe(state.step)}`))
+            if (state.status === "running" && state.step !== "upload") return yield* fork(info.id, run(info.id))
+            if (state.status === "failed" && !state.cleaned) return yield* fork(info.id, cleanup(fresh, state))
+            if (state.status === "failed" && state.kind === "new" && now - state.updatedAt >= failedTtlMs())
+              yield* workspace.remove(info.id)
+          }),
+        { discard: true },
+      )
+    }).pipe(Effect.withSpan("Provisioner.reconcile"))
+
+    // Only a control plane provisions VMs. A VM shares the database (until
+    // per-VM schemas land) but carries OPENCODE_WORKSPACE_ID, and must never
+    // pick up the control plane's jobs.
+    if (reconciler.enabled && Flag.OPENCODE_WORKSPACE_ADAPTER && !Flag.OPENCODE_WORKSPACE_ID) {
+      yield* reconcile.pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("workspace provision reconcile failed", { error: message(cause) }),
+        ),
+        Effect.repeat(Schedule.spaced(reconcileMs())),
+        Effect.forkScoped,
+      )
+    }
+
+    return Service.of({ start, status, recover, await: awaitJob, uploaded, reconcile })
+  }),
+)
+
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [Workspace.node, InstanceStore.node, httpClient],
+})
+
+function legacy(info: Workspace.Info): ProvisionState.State {
+  return {
+    status: "ready",
+    step: "done",
+    kind: "new",
+    mode: "empty",
+    cleaned: false,
+    startedAt: info.timeUsed,
+    updatedAt: info.timeUsed,
+    deadline: info.timeUsed,
+    timings: {},
+  }
+}
+
+function describe(step: ProvisionState.State["step"]) {
+  if (step === "creating") return "creating the VM"
+  if (step === "booting") return "booting the VM"
+  if (step === "setup") return "setting up the project"
+  if (step === "upload") return "waiting for the project upload"
+  return "finishing"
+}
+
+function message(cause: Cause.Cause<unknown>) {
+  const die = cause.reasons.find(Cause.isDieReason)
+  const fail = cause.reasons.find(Cause.isFailReason)
+  const reason: unknown = die?.defect ?? fail?.error
+  if (reason instanceof Error) return reason.message
+  if (reason && typeof reason === "object" && "message" in reason && typeof reason.message === "string")
+    return reason.message
+  return Cause.pretty(cause)
+}
+
+function route(url: string | URL, path: string) {
+  const next = new URL(url)
+  next.pathname = `${next.pathname.replace(/\/$/, "")}${path}`
+  next.search = ""
+  next.hash = ""
+  return next
+}
+
+export * as Provisioner from "./provisioner"

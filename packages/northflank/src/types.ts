@@ -21,6 +21,13 @@ export type WorkspaceTarget =
 export type AdapterContext = {
   readonly instance?: { readonly directory: string }
   readonly workspaceID?: string
+  /** Remove only the compute and keep the data volume (recovering an existing project). */
+  readonly keepVolume?: boolean
+}
+
+export type HealthReport = {
+  state: "pending" | "running" | "failed"
+  reason?: string
 }
 
 export type BusyReport = {
@@ -52,4 +59,5 @@ export type WorkspaceAdapter = {
   start?(info: WorkspaceInfo, context?: AdapterContext): Promise<void>
   stop?(info: WorkspaceInfo, context?: AdapterContext): Promise<void>
   busy?(info: WorkspaceInfo, context?: AdapterContext): Promise<BusyReport>
+  health?(info: WorkspaceInfo, context?: AdapterContext): Promise<HealthReport>
 }

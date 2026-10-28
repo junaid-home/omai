@@ -37,3 +37,4 @@ tsconfig.tsbuildinfo
 .test-results/
 *-plan.md
 **/graphify-out/
+docs/*

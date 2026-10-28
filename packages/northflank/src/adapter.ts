@@ -1,6 +1,13 @@
 import { createClient, NorthflankApiError, type NorthflankClient } from "./client.js"
 import type { NorthflankConfig } from "./config.js"
-import type { AdapterContext, BusyReport, WorkspaceAdapter, WorkspaceInfo, WorkspaceTarget } from "./types.js"
+import type {
+  AdapterContext,
+  BusyReport,
+  HealthReport,
+  WorkspaceAdapter,
+  WorkspaceInfo,
+  WorkspaceTarget,
+} from "./types.js"
 import { WorkspaceGoneError } from "./types.js"
 
 const slug = (value: string, max: number) => {
@@ -141,10 +148,11 @@ export function northflankAdapter(config: NorthflankConfig): WorkspaceAdapter {
         })
     },
 
-    async remove(info) {
+    async remove(info, context) {
       const service = await resolve(info.id)
       forget(info.id)
       if (service) await client().deleteService(service.id)
+      if (context?.keepVolume) return
       const volume = (await client().listVolumes()).find((item) => item.name === volumeName(info.id))
       if (volume) await client().deleteVolume(volume.id)
     },
@@ -156,13 +164,14 @@ export function northflankAdapter(config: NorthflankConfig): WorkspaceAdapter {
 
     async start(info) {
       const service = await requireService(info.id)
-      await client()
-        .resumeService(service.id)
-        .catch((error: unknown) => {
-          if (error instanceof NorthflankApiError && (error.status === 400 || error.status === 409)) return
-          throw error
-        })
-        .catch(gone(info.id))
+      const settled = (error: unknown) => {
+        if (error instanceof NorthflankApiError && (error.status === 400 || error.status === 409)) return
+        throw error
+      }
+      await client().resumeService(service.id).catch(settled).catch(gone(info.id))
+      // A create interrupted between provisioning and scaling leaves a service
+      // at zero instances that resume alone never boots.
+      await client().scaleService(service.id, 1).catch(settled).catch(gone(info.id))
     },
 
     async stop(info) {
@@ -174,6 +183,19 @@ export function northflankAdapter(config: NorthflankConfig): WorkspaceAdapter {
           throw error
         })
         .catch(gone(info.id))
+    },
+
+    async health(info): Promise<HealthReport> {
+      const service = await requireService(info.id)
+      const [deployment, containers] = await Promise.all([
+        client().getDeploymentStatus(service.id),
+        client().listContainerStatuses(service.id),
+      ]).catch(gone(info.id))
+      if (deployment.status === "FAILED") return { state: "failed", reason: "Deployment failed" }
+      const crashed = containers.find((status) => status === "TASK_FAILED")
+      if (crashed) return { state: "failed", reason: `Container exited (${crashed})` }
+      if (deployment.status === "COMPLETED" && containers.includes("TASK_RUNNING")) return { state: "running" }
+      return { state: "pending" }
     },
 
     async busy(info): Promise<BusyReport> {

@@ -3,19 +3,19 @@ import { Authentication } from "@opencode-ai/core/authentication"
 import { WorkspaceV2 } from "@opencode-ai/core/workspace"
 import type { Target } from "@/control-plane/types"
 import { Lifecycle } from "@/control-plane/lifecycle"
+import { Provisioner } from "@/control-plane/provisioner"
+import { ProvisionState } from "@/control-plane/provision-state"
 import { Workspace } from "@/control-plane/workspace"
 import { WorkspaceAdapterRuntime } from "@/control-plane/workspace-adapter-runtime"
 import { vmProjectsRoot } from "@/control-plane/vm-projects"
 import { setVmPreviewTarget } from "@/control-plane/vm-preview-map"
-import { InstanceRef } from "@/effect/instance-ref"
-import { InstanceStore } from "@/project/instance-store"
 import { Session } from "@/session/session"
 import { HttpApiProxy } from "./proxy"
 import * as Fence from "@/server/shared/fence"
 import { getWorkspaceRouteSessionID, isLocalWorkspaceRoute, workspaceProxyURL } from "@/server/shared/workspace-routing"
 import { NotFoundError } from "@/storage/storage"
 import { Flag } from "@opencode-ai/core/flag/flag"
-import { Context, Data, Deferred, Effect, Layer, Option, Schedule, Schema, Scope } from "effect"
+import { Context, Data, Effect, Layer, Option, Schedule, Schema, Scope } from "effect"
 import { HttpClient, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import * as Socket from "effect/unstable/socket/Socket"
@@ -44,6 +44,9 @@ type RequestPlan = Data.TaggedEnum<{
   // that died after inserting the row). Surfaced instead of reusing the dead
   // target, so the open path can drop the row and re-provision.
   WorkspaceGone: { readonly workspace: Workspace.Info }
+  // The workspace's VM is still being created or booted by the provisioner.
+  Provisioning: { readonly step: ProvisionState.State["step"] }
+  ProvisionFailed: { readonly error: string }
   Remote: {
     readonly request: HttpServerRequest.HttpServerRequest
     readonly workspace: Workspace.Info
@@ -155,6 +158,7 @@ function resolveTarget(workspace: Workspace.Info): Effect.Effect<Target, Workspa
 function proxyRemote(
   client: HttpClient.HttpClient,
   lifecycle: Lifecycle.Interface,
+  provisioner: Provisioner.Interface,
   request: HttpServerRequest.HttpServerRequest,
   workspace: Workspace.Info,
   target: RemoteTarget,
@@ -197,6 +201,10 @@ function proxyRemote(
     }
     if (headers["upgrade"]?.toLowerCase() === "websocket") return yield* HttpApiProxy.websocket(request, proxyURL, target.headers)
     const response = yield* HttpApiProxy.http(client, proxyURL, target.headers, request)
+    // A zip upload into a VM waiting at the provisioner's upload step is the
+    // step itself: its success finishes the job.
+    if (request.method === "POST" && url.pathname === "/global/file/create" && response.status >= 200 && response.status < 300)
+      yield* provisioner.uploaded(workspace.id)
     const sync = Fence.parse(new Headers(response.headers))
     if (sync) {
       const syncFailure = yield* Fence.wait(
@@ -281,93 +289,63 @@ function resolveRequestDirectory(
   )
 }
 
-// Auto-provisioned workspaces keyed by resolved directory. The first request
-// opens the workspace; concurrent requests await the same deferred, and the
-// create runs detached so a client disconnect cannot leave a half-created VM.
-const provisioning = new Map<string, Deferred.Deferred<Workspace.Info | undefined, never>>()
-
-function provision(
-  store: InstanceStore.Interface,
-  directory: string,
-): Effect.Effect<Workspace.Info | undefined, never, Workspace.Service> {
-  const type = Flag.OPENCODE_WORKSPACE_ADAPTER
-  if (!type) return Effect.succeed(undefined)
-  return Effect.gen(function* () {
-    const entry = yield* Effect.sync(() => {
-      const pending = provisioning.get(directory)
-      if (pending) return { deferred: pending, owner: false }
-      const deferred = Deferred.makeUnsafe<Workspace.Info | undefined, never>()
-      provisioning.set(directory, deferred)
-      return { deferred, owner: true }
-    })
-    if (!entry.owner) return yield* Deferred.await(entry.deferred)
-
-    const workspace = yield* Workspace.Service
-    const attempt = Effect.gen(function* () {
-      const ctx = yield* store.load({ directory })
-      return yield* Workspace.Service.use((svc) =>
-        svc.create({ type, branch: null, extra: null, projectID: ctx.project.id }),
-      ).pipe(Effect.provideService(InstanceRef, ctx))
-    }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.gen(function* () {
-          yield* Effect.logWarning("workspace auto-provision failed", { directory, error: String(cause) })
-          // create() may have failed after inserting the row; reuse it so
-          // later requests route remotely instead of creating a second VM.
-          return yield* Workspace.Service.use((svc) => svc.getByDirectory(directory))
-        }),
-      ),
-      Effect.provideService(Workspace.Service, workspace),
-    )
-
-    yield* entry.deferred.pipe(
-      // complete (not completeWith) runs the attempt exactly once and shares
-      // its result with every awaiting request; completeWith would let each
-      // awaiter run its own create.
-      Deferred.complete(attempt),
-      Effect.ensuring(Effect.sync(() => provisioning.delete(directory))),
-      Effect.forkDetach({ startImmediately: true }),
-    )
-    return yield* Deferred.await(entry.deferred)
-  })
+const provisionWaitMs = () => {
+  const value = Number(process.env["OPENCODE_PROVISION_WAIT_MS"] ?? 30_000)
+  return Number.isFinite(value) && value >= 0 ? value : 30_000
+}
+const provisionRetryMs = () => {
+  const value = Number(process.env["OPENCODE_PROVISION_RETRY_MS"] ?? 30_000)
+  return Number.isFinite(value) && value >= 0 ? value : 30_000
 }
 
-// The stored workspace's VM is gone (deleted out-of-band, or a create that
-// died after inserting the row). Drop the stranded row, re-provision one for
-// the same directory, and re-plan against the fresh workspace. On re-provision
-// failure the original stranded row is already gone, so surface an
-// Unavailable plan instead of routing into a dead target.
-function recoverOrReplan(
-  store: InstanceStore.Interface,
+// Plans a request for a workspace that may still be (re)provisioning. Requests
+// wait a bounded time for the job instead of holding the boot inside one
+// request; a gone VM is re-provisioned on the same row so its volume survives.
+function planProvisioned(
+  provisioner: Provisioner.Interface,
   request: HttpServerRequest.HttpServerRequest,
   url: URL,
   workspace: Workspace.Info,
 ): Effect.Effect<RequestPlan, never, Workspace.Service> {
-  // Narrow once: the closure below re-reads the field, which the guard alone
-  // does not narrow across function boundaries.
-  const directory = workspace.directory
-  if (!directory) return Effect.succeed(RequestPlan.UnavailableWorkspace())
   return Effect.gen(function* () {
-    const workspaceService = yield* Workspace.Service
-    yield* Effect.logWarning("workspace VM gone; re-provisioning", {
-      workspaceID: workspace.id,
-      directory,
-    })
-    yield* workspaceService.remove(workspace.id).pipe(
-      Effect.catchCause(() => Effect.logWarning("workspace remove failed during gone-recovery", { workspaceID: workspace.id })),
-    )
-    const replanned = yield* provision(store, directory).pipe(
-      Effect.catchCause(() => Effect.succeed(undefined)),
-    )
-    if (replanned === undefined) return RequestPlan.UnavailableWorkspace()
-    return yield* planWorkspaceRequest(request, url, replanned)
+    const state = ProvisionState.read(workspace.extra)
+    if (state?.status === "failed") {
+      if (state.kind !== "recover" || Date.now() - state.updatedAt < provisionRetryMs())
+        return RequestPlan.ProvisionFailed({ error: state.error ?? "Workspace provisioning failed" })
+      return yield* awaitProvisioned(provisioner, request, url, (yield* provisioner.recover(workspace)).workspaceID)
+    }
+    if (!ProvisionState.proxyable(state)) return yield* awaitProvisioned(provisioner, request, url, workspace.id)
+    const planned = yield* planWorkspaceRequest(request, url, workspace)
+    if (planned._tag !== "WorkspaceGone") return planned
+    if (!Flag.OPENCODE_WORKSPACE_ADAPTER) return RequestPlan.UnavailableWorkspace()
+    return yield* awaitProvisioned(provisioner, request, url, (yield* provisioner.recover(workspace)).workspaceID)
+  })
+}
+
+function awaitProvisioned(
+  provisioner: Provisioner.Interface,
+  request: HttpServerRequest.HttpServerRequest,
+  url: URL,
+  workspaceID: WorkspaceV2.ID,
+): Effect.Effect<RequestPlan, never, Workspace.Service> {
+  return Effect.gen(function* () {
+    const job = yield* provisioner.await(workspaceID, provisionWaitMs())
+    if (!job) return RequestPlan.UnavailableWorkspace()
+    if (job.status === "failed") return RequestPlan.ProvisionFailed({ error: job.error ?? "Workspace provisioning failed" })
+    if (!ProvisionState.proxyable(job)) return RequestPlan.Provisioning({ step: job.step })
+    const fresh = yield* Workspace.Service.use((svc) => svc.get(workspaceID))
+    if (!fresh) return RequestPlan.UnavailableWorkspace()
+    const planned = yield* planWorkspaceRequest(request, url, fresh)
+    // Gone again straight after provisioning: report progress rather than loop.
+    if (planned._tag === "WorkspaceGone") return RequestPlan.Provisioning({ step: "creating" })
+    return planned
   })
 }
 
 function planRequest(
   request: HttpServerRequest.HttpServerRequest,
   session: Session.Info | undefined,
-  store: InstanceStore.Interface,
+  provisioner: Provisioner.Interface,
 ): Effect.Effect<RequestPlan, never, Workspace.Service> {
   return Effect.gen(function* () {
     const url = requestURL(request)
@@ -383,9 +361,7 @@ function planRequest(
     }
 
     if (workspace !== undefined && !envWorkspaceID && !shouldStayOnControlPlane(request, url)) {
-      const planned = yield* planWorkspaceRequest(request, url, workspace)
-      if (planned._tag !== "WorkspaceGone") return planned
-      return yield* recoverOrReplan(store, request, url, workspace)
+      return yield* planProvisioned(provisioner, request, url, workspace)
     }
 
     // Directory-scoped clients (the app) never select a workspace explicitly.
@@ -395,16 +371,10 @@ function planRequest(
       const resolved = yield* resolveRequestDirectory(request, url, session)
       if (resolved) {
         const owned = yield* Workspace.Service.use((svc) => svc.getByDirectory(resolved))
-        // Read the in-flight map after the lookup: a visible row implies the
-        // owner set it before inserting, so awaiting here holds concurrent
-        // first-open requests until the workspace's sync stream connects
-        // instead of proxying into a target that is not ready yet.
-        const pending = provisioning.get(resolved)
-        const space = pending ? yield* Deferred.await(pending) : (owned ?? (yield* provision(store, resolved)))
-        if (space) {
-          const planned = yield* planWorkspaceRequest(request, url, space)
-          if (planned._tag !== "WorkspaceGone") return planned
-          return yield* recoverOrReplan(store, request, url, space)
+        if (owned) return yield* planProvisioned(provisioner, request, url, owned)
+        if (Flag.OPENCODE_WORKSPACE_ADAPTER) {
+          const job = yield* provisioner.start({ directory: resolved, mode: "empty" })
+          return yield* awaitProvisioned(provisioner, request, url, job.workspaceID)
         }
       }
     }
@@ -419,6 +389,7 @@ function planRequest(
 function routeWorkspace<E>(
   client: HttpClient.HttpClient,
   lifecycle: Lifecycle.Interface,
+  provisioner: Provisioner.Interface,
   effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, WorkspaceRouteContext>,
   plan: RequestPlan,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, E, Scope.Scope | Socket.WebSocketConstructor | Workspace.Service> {
@@ -442,7 +413,17 @@ function routeWorkspace<E>(
           { status: 409 },
         ),
       ),
-    Remote: ({ request, workspace, target, url }) => proxyRemote(client, lifecycle, request, workspace, target, url),
+    Remote: ({ request, workspace, target, url }) =>
+      proxyRemote(client, lifecycle, provisioner, request, workspace, target, url),
+    Provisioning: ({ step }) =>
+      Effect.succeed(
+        HttpServerResponse.jsonUnsafe(
+          { code: "workspace_provisioning", step },
+          { status: 503, headers: { "retry-after": "2" } },
+        ),
+      ),
+    ProvisionFailed: ({ error }) =>
+      Effect.succeed(HttpServerResponse.jsonUnsafe({ code: "workspace_failed", error }, { status: 503 })),
     // Both call sites intercept this before dispatch and re-provision, so a
     // WorkspaceGone reaching the router means recovery already failed; the
     // historical 503 stands in as the terminal response.
@@ -465,8 +446,8 @@ function routeWorkspace<E>(
 
 function routeHttpApiWorkspace<E>(
   client: HttpClient.HttpClient,
-  store: InstanceStore.Interface,
   lifecycle: Lifecycle.Interface,
+  provisioner: Provisioner.Interface,
   effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, WorkspaceRouteContext>,
 ): Effect.Effect<
   HttpServerResponse.HttpServerResponse,
@@ -485,8 +466,8 @@ function routeHttpApiWorkspace<E>(
           Effect.catchDefect(() => Effect.succeed(undefined)),
         )
       : undefined
-    const plan = yield* planRequest(request, session, store)
-    return yield* routeWorkspace(client, lifecycle, effect, plan)
+    const plan = yield* planRequest(request, session, provisioner)
+    return yield* routeWorkspace(client, lifecycle, provisioner, effect, plan)
   })
 }
 
@@ -495,11 +476,11 @@ export const workspaceRoutingLayer = Layer.effect(
   Effect.gen(function* () {
     const makeWebSocket = yield* Socket.WebSocketConstructor
     const workspace = yield* Workspace.Service
-    const store = yield* InstanceStore.Service
     const client = yield* HttpClient.HttpClient
     const lifecycle = yield* Lifecycle.Service
+    const provisioner = yield* Provisioner.Service
     return WorkspaceRoutingMiddleware.of((effect) =>
-      routeHttpApiWorkspace(client, store, lifecycle, effect).pipe(
+      routeHttpApiWorkspace(client, lifecycle, provisioner, effect).pipe(
         Effect.provideService(Socket.WebSocketConstructor, makeWebSocket),
         Effect.provideService(Workspace.Service, workspace),
       ),

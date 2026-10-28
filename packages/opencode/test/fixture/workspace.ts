@@ -4,6 +4,7 @@ import { Database } from "@opencode-ai/core/database/database"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Auth } from "../../src/auth"
 import { Workspace } from "../../src/control-plane/workspace"
+import { Provisioner } from "../../src/control-plane/provisioner"
 import { RuntimeFlags } from "../../src/effect/runtime-flags"
 import { InstanceBootstrap } from "../../src/project/bootstrap"
 import { InstanceStore } from "../../src/project/instance-store"
@@ -17,6 +18,7 @@ export const workspaceLayerWithRuntimeFlags = (overrides: Partial<RuntimeFlags.I
   AppNodeBuilder.build(
     LayerNode.group([
       Workspace.node,
+      Provisioner.node,
       Auth.node,
       Session.node,
       SessionPrompt.node,

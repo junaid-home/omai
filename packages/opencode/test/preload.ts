@@ -76,6 +76,11 @@ delete process.env["FIREWORKS_API_KEY"]
 delete process.env["CEREBRAS_API_KEY"]
 delete process.env["SAMBANOVA_API_KEY"]
 delete process.env["OPENCODE_SERVER_PASSWORD"]
+// A developer .env that enables the Northflank adapter would make any test
+// request for an unknown directory provision a real, billed MicroVM.
+// Tests that exercise provisioning set a fake adapter type explicitly.
+delete process.env["OPENCODE_WORKSPACE_ADAPTER"]
+delete process.env["NORTHFLANK_API_TOKEN"]
 delete process.env["OPENCODE_SERVER_USERNAME"]
 delete process.env["OPENCODE_EXPERIMENTAL"]
 delete process.env["OPENCODE_ENABLE_EXPERIMENTAL_MODELS"]

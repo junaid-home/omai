@@ -267,6 +267,15 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
             )
           }
           const destination = projectPath
+          // Provisioning retries this call after a crash, so a destination
+          // holding only the empty repository a previous call created counts
+          // as done instead of "not empty". Real projects are still refused.
+          const created =
+            !zipData && (yield* Effect.promise(() => ProjectArchive.isFreshRepository(destination)))
+          if (created) {
+            yield* projectSvc.fromDirectory(projectPath).pipe(Effect.ignore)
+            return HttpServerResponse.jsonUnsafe({ success: true, path: projectPath, files: 0, git: true })
+          }
           const extracted = yield* Effect.tryPromise(async () => {
             if (zipData) return ProjectArchive.extract(zipData, destination)
             await ProjectArchive.assertEmptyDestination(destination)

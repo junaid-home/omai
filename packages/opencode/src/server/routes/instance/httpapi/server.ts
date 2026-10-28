@@ -29,6 +29,7 @@ import { Command } from "@/command"
 import { Checkpoint } from "@/checkpoint"
 import { Config } from "@/config/config"
 import { Lifecycle } from "@/control-plane/lifecycle"
+import { Provisioner } from "@/control-plane/provisioner"
 import { Workspace } from "@/control-plane/workspace"
 import { Env } from "@/env"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -304,6 +305,7 @@ const app = LayerNode.group([
   Project.node,
   Vcs.node,
   Workspace.node,
+  Provisioner.node,
   Worktree.node,
   Installation.node,
   ShareNext.node,

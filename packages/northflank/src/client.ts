@@ -13,6 +13,8 @@ export class NorthflankApiError extends Error {
 export type ServiceSummary = { id: string; name: string }
 export type VolumeSummary = { id: string; name: string }
 export type ServicePort = { name: string; internalPort: number; public?: boolean; dns?: string }
+export type DeploymentStatus = { status: "PENDING" | "IN_PROGRESS" | "COMPLETED" | "FAILED"; reason?: string }
+type Pagination = { hasNextPage: boolean; cursor?: string }
 
 const RATE_LIMIT_RETRIES = 3
 
@@ -66,9 +68,20 @@ export function createClient(config: NorthflankConfig) {
         throw error
       })
 
+  // List endpoints are cursor-paginated; reading only the first page made a
+  // service past it look missing, and the follow-up create hit a name clash.
+  const all = async <A>(path: string, items: (body: { data: unknown }) => A[], cursor?: string): Promise<A[]> => {
+    const body = await request<{ data: unknown; pagination?: Pagination }>(
+      "GET",
+      `${path}?per_page=100${cursor ? `&cursor=${cursor}` : ""}`,
+    )
+    const page = items(body)
+    if (!body.pagination?.hasNextPage || !body.pagination.cursor) return page
+    return [...page, ...(await all(path, items, body.pagination.cursor))]
+  }
+
   return {
-    listServices: async () =>
-      (await request<{ data: { services: ServiceSummary[] } }>("GET", "/services")).data.services,
+    listServices: () => all("/services", (body) => (body.data as { services: ServiceSummary[] }).services),
     createService: <A>(payload: unknown) => request<A>("POST", "/services/deployment", payload),
     getService: <A>(id: string) => request<A>("GET", `/services/${id}`),
     setRuntimeEnvironment: (id: string, variables: Record<string, string | undefined>) =>
@@ -81,7 +94,14 @@ export function createClient(config: NorthflankConfig) {
     deleteService: (id: string) => tolerant(404)(request("DELETE", `/services/${id}`)),
     getPorts: async (id: string) =>
       (await request<{ data: { ports: ServicePort[] } }>("GET", `/services/${id}/ports`)).data.ports,
-    listVolumes: async () => (await request<{ data: VolumeSummary[] }>("GET", "/volumes")).data,
+    listVolumes: () => all("/volumes", (body) => body.data as VolumeSummary[]),
+    getDeploymentStatus: async (id: string) =>
+      (await request<{ data: { status: { deployment: DeploymentStatus } } }>("GET", `/services/${id}`)).data.status
+        .deployment,
+    listContainerStatuses: async (id: string) =>
+      (
+        await request<{ data: { containers: { status: string }[] } }>("GET", `/services/${id}/containers`)
+      ).data.containers.map((container) => container.status),
     createVolume: <A>(payload: unknown) => request<A>("POST", "/volumes", payload),
     deleteVolume: (id: string) => tolerant(404)(request("DELETE", `/volumes/${id}`)),
     attachVolume: (volumeID: string, serviceID: string) =>

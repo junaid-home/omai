@@ -20,6 +20,8 @@ import { WorkspaceV2 } from "@opencode-ai/core/workspace"
 import type { WorkspaceAdapter } from "../../src/control-plane/types"
 import { Workspace } from "../../src/control-plane/workspace"
 import { Lifecycle } from "../../src/control-plane/lifecycle"
+import { ProvisionState } from "../../src/control-plane/provision-state"
+import { WorkspaceGoneError } from "@opencode-ai/northflank"
 import { WorkspaceTable } from "@opencode-ai/core/control-plane/workspace.sql"
 import { Database } from "@opencode-ai/core/database/database"
 import { Project } from "../../src/project/project"
@@ -259,6 +261,7 @@ const ProbeApi = HttpApi.make("workspace-routing-probe").add(
       HttpApiEndpoint.get("get", "/probe", { query: WorkspaceRoutingQuery, success: ProbeResult }),
       HttpApiEndpoint.patch("patch", "/probe", { query: WorkspaceRoutingQuery, success: Schema.Boolean }),
       HttpApiEndpoint.get("session", "/session", { query: WorkspaceRoutingQuery, success: ProbeResult }),
+      HttpApiEndpoint.post("fileCreate", "/global/file/create", { query: WorkspaceRoutingQuery, success: ProbeResult }),
       HttpApiEndpoint.get("workspace", WorkspacePaths.list, {
         query: WorkspaceRoutingQuery,
         success: ProbeResult,
@@ -277,6 +280,7 @@ const probeHandlers = HttpApiBuilder.group(ProbeApi, "probe", (handlers) =>
     .handle("get", () => routeContextResponse)
     .handle("patch", () => Effect.succeed(false))
     .handle("session", () => routeContextResponse)
+    .handle("fileCreate", () => routeContextResponse)
     .handle("workspace", () => routeContextResponse),
 )
 
@@ -378,6 +382,10 @@ describe("HttpApi workspace routing middleware", () => {
 
       const workspace = Workspace.Service.of({
         create: () => Effect.die("unused"),
+        insert: () => Effect.die("unused"),
+        provisionVM: () => Effect.die("unused"),
+        setExtra: () => Effect.die("unused"),
+    stopSync: () => Effect.void,
         sessionWarp: () => Effect.die("unused"),
         list: () => Effect.die("unused"),
         syncList: () => Effect.die("unused"),
@@ -610,6 +618,92 @@ describe("HttpApi workspace routing middleware", () => {
         directory: workspaceDir,
         workspaceID: workspace.id,
       })
+    }),
+  )
+
+  it.live("a directory still provisioning answers 503 workspace_provisioning after the wait", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const project = yield* Project.use.fromDirectory(dir)
+      const type = "vm-still-booting"
+      registerAdapter(project.project.id, type, {
+        name: "Booting",
+        description: "never finishes creating",
+        configure: (info, context) => ({ ...info, directory: context?.instance?.directory ?? null }),
+        create: () => new Promise<void>(() => {}),
+        async remove() {},
+        target: () => ({ type: "remote" as const, url: "http://127.0.0.1:1" }),
+      })
+      yield* scopedEnv({
+        OPENCODE_WORKSPACE_ADAPTER: type,
+        OPENCODE_VM_PROJECTS_ROOT: dir,
+        OPENCODE_PROVISION_WAIT_MS: "300",
+      })
+      yield* serveProbe
+
+      const response = yield* HttpClient.get(`/probe?directory=${encodeURIComponent(path.join(dir, "booting"))}`)
+
+      expect(response.status).toBe(503)
+      expect(yield* response.json).toMatchObject({ code: "workspace_provisioning", step: "creating" })
+    }),
+  )
+
+  it.live("a gone VM is recovered on the same workspace id", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const project = yield* Project.use.fromDirectory(dir)
+      const remoteUrl = yield* startRemoteWorkspaceHttpServer(() => HttpServerResponse.json({ healthy: true }))
+      const type = "vm-gone-once"
+      const gone = { remaining: 0 }
+      const base = remoteAdapter(path.join(dir, `.${type}`), `${remoteUrl}/base`)
+      const adapter: WorkspaceAdapter = {
+        ...base,
+        target: (info) => {
+          if (gone.remaining-- > 0) throw new WorkspaceGoneError(info.id)
+          return base.target(info)
+        },
+      }
+      const workspace = yield* createWorkspace({ projectID: project.project.id, type, adapter })
+      gone.remaining = 1
+      yield* scopedEnv({ OPENCODE_WORKSPACE_ADAPTER: type, OPENCODE_PROVISION_WAIT_MS: "8000" })
+      yield* serveProbe
+
+      const response = yield* HttpClient.get(`/probe?workspace=${workspace.id}`)
+
+      expect(response.status).toBe(200)
+      const row = yield* Workspace.use.get(workspace.id)
+      expect(ProvisionState.read(row?.extra)).toMatchObject({ kind: "recover", status: "ready" })
+    }),
+  )
+
+  it.live("zip upload proxied to a VM at step upload marks the job ready", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const project = yield* Project.use.fromDirectory(dir)
+      const remoteUrl = yield* startRemoteWorkspaceHttpServer(() => HttpServerResponse.json({ success: true }))
+      const workspace = yield* createRemoteWorkspace({
+        dir,
+        projectID: project.project.id,
+        type: "vm-awaiting-upload",
+        url: `${remoteUrl}/base`,
+      })
+      const now = Date.now()
+      const waiting = ProvisionState.advance(
+        ProvisionState.begin({ kind: "new", mode: "upload", now, bootDeadlineMs: 60_000 }),
+        "upload",
+        now,
+        60_000,
+      )
+      yield* Workspace.use.setExtra(workspace.id, ProvisionState.write(null, waiting))
+      yield* serveProbe
+
+      const response = yield* HttpClientRequest.post(`/global/file/create?workspace=${workspace.id}`).pipe(
+        HttpClient.execute,
+      )
+
+      expect(response.status).toBe(200)
+      const row = yield* Workspace.use.get(workspace.id)
+      expect(ProvisionState.read(row?.extra)?.status).toBe("ready")
     }),
   )
 })
