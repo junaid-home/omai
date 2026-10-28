@@ -42,6 +42,7 @@ function fakeWorkspace(overrides: Partial<Workspace.Interface>) {
     insert: () => Effect.die("unused"),
     provisionVM: () => Effect.die("unused"),
     setExtra: () => Effect.die("unused"),
+    claim: () => Effect.die("unused"),
     stopSync: () => Effect.void,
     sessionWarp: () => Effect.die("unused"),
     list: () => Effect.die("unused"),
@@ -95,6 +96,7 @@ describe("control-plane lifecycle", () => {
         insert: () => Effect.die("unused"),
         provisionVM: () => Effect.die("unused"),
         setExtra: () => Effect.die("unused"),
+        claim: () => Effect.die("unused"),
         stopSync: () => Effect.void,
         sessionWarp: () => Effect.die("unused"),
         list: () => Effect.die("unused"),
@@ -147,6 +149,32 @@ describe("control-plane lifecycle", () => {
 
         // Only the legacy/ready row may be suspended.
         expect(yield* Ref.get(stops)).toBe(1)
+      }),
+    ),
+  )
+
+  it.live("sweep never stops the warm reserve VM", () =>
+    withEnv(
+      { OPENCODE_WORKSPACE_IDLE_MS: "0", OPENCODE_WORKSPACE_SWEEP_MS: "100000", OPENCODE_PROVISION_RECONCILE: "true" },
+      Effect.gen(function* () {
+        const stops = yield* Ref.make(0)
+        registerAdapter(projectID, "sweep-reserve-test", {
+          ...adapter,
+          stop: async () => Effect.runSync(Ref.update(stops, (count) => count + 1)),
+        })
+        const begun = ProvisionState.begin({ kind: "reserve", mode: "empty", now: Date.now(), bootDeadlineMs: 60_000 })
+        const reserve: Workspace.Info = {
+          ...space,
+          id: WorkspaceV2.ID.ascending(),
+          type: "sweep-reserve-test",
+          extra: ProvisionState.write(null, ProvisionState.advance(begun, "done", Date.now(), 60_000)),
+        }
+        expect(ProvisionState.read(reserve.extra)?.status).toBe("ready")
+        const lifecycle = yield* lifecycleWith(fakeWorkspace({ all: () => Effect.succeed([reserve]) }))
+
+        yield* lifecycle.sweep
+
+        expect(yield* Ref.get(stops)).toBe(0)
       }),
     ),
   )

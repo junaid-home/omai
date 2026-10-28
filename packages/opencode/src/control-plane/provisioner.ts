@@ -2,10 +2,12 @@ import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { WorkspaceV2 } from "@opencode-ai/core/workspace"
+import path from "path"
 import { Cause, Context, Deferred, Effect, Layer, Schedule } from "effect"
 import { HttpBody, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { InstanceRef } from "@/effect/instance-ref"
 import { InstanceStore } from "@/project/instance-store"
+import { vmProjectsRoot } from "./vm-projects"
 import { ProvisionState } from "./provision-state"
 import type { Target } from "./types"
 import { Workspace } from "./workspace"
@@ -45,6 +47,9 @@ const bootDeadlineMs = () => env("OPENCODE_PROVISION_BOOT_DEADLINE_MS", 120_000)
 const uploadDeadlineMs = () => env("OPENCODE_PROVISION_UPLOAD_DEADLINE_MS", 1_800_000)
 const reconcileMs = () => Math.max(env("OPENCODE_PROVISION_RECONCILE_MS", 15_000), 100)
 const failedTtlMs = () => env("OPENCODE_PROVISION_FAILED_TTL_MS", 3_600_000)
+// A reserve VM is kept while the deployment is in use and deleted after this
+// long without any activity (it is recreated on the next request).
+const reserveIdleMs = () => env("OPENCODE_RESERVE_IDLE_MS", 1_800_000)
 const HEALTH_POLL_MS = 500
 // The Northflank rate limit is shared by the whole team: ask it about the
 // VM far less often than we ask the VM itself.
@@ -53,6 +58,9 @@ const ADAPTER_POLL_MS = 3_000
 // Process-wide so one runner per workspace holds even if the layer is built
 // more than once (route groups are provided separately).
 const runners = new Map<WorkspaceV2.ID, Deferred.Deferred<void>>()
+// Runner slot that serializes reserve refills, so a claim and a reconcile
+// never warm two reserves at once.
+const RESERVE_REFILL = WorkspaceV2.ID.make("wrk_reserve_refill")
 const starting = new Map<string, Deferred.Deferred<Job>>()
 
 // Only the long-lived `serve` process owns background reconciliation. Every
@@ -60,6 +68,12 @@ const starting = new Map<string, Deferred.Deferred<Job>>()
 // developer .env that enables the adapter it would otherwise resume, fail and
 // clean up the control plane's jobs (and hold short-lived commands open).
 const reconciler = { enabled: false }
+// Last time anyone used the deployment; drives whether a reserve VM is kept.
+const demand = { last: 0 }
+/** Records deployment activity (any routed request, any project start). */
+export function touchDemand() {
+  demand.last = Date.now()
+}
 export function enableReconcile() {
   reconciler.enabled = true
 }
@@ -228,6 +242,8 @@ export const layer = Layer.effect(
       // Recovery boots an existing project from its surviving volume: there is
       // nothing to set up, and re-running it would re-init the repository.
       if (state.step === "booting" && state.kind === "recover") return "done"
+      // A reserve is only booted; it becomes a project when claimed.
+      if (state.step === "booting" && state.kind === "reserve") return "done"
       if (state.step === "booting") return state.mode === "upload" ? "upload" : "setup"
       return "done"
     }
@@ -262,12 +278,15 @@ export const layer = Layer.effect(
         if (exit._tag === "Failure") yield* fail(id, message(exit.cause))
       })
 
-    const create = Effect.fn("Provisioner.create")(function* (input: StartInput) {
+    const create = Effect.fn("Provisioner.create")(function* (
+      input: StartInput,
+      kind: ProvisionState.State["kind"] = "new",
+    ) {
       const type = Flag.OPENCODE_WORKSPACE_ADAPTER
       if (!type) return yield* Effect.die(new Error("No workspace adapter is configured"))
       const ctx = yield* store.load({ directory: input.directory })
       const state = ProvisionState.begin({
-        kind: "new",
+        kind,
         mode: input.mode,
         now: Date.now(),
         bootDeadlineMs: bootDeadlineMs(),
@@ -287,7 +306,7 @@ export const layer = Layer.effect(
 
     const begin = Effect.fn("Provisioner.begin")(function* (input: StartInput) {
       const existing = yield* workspace.getByDirectory(input.directory)
-      if (!existing) return yield* create(input)
+      if (!existing) return (yield* claimReserve(input)) ?? (yield* create(input))
       const state = ProvisionState.read(existing.extra)
       if (!state || state.status === "ready") return toJob(existing)!
       if (state.status === "running") {
@@ -311,8 +330,78 @@ export const layer = Layer.effect(
       return yield* create(input)
     })
 
+    // Turns the booted reserve into this project: only the project setup is
+    // left to run, so creation takes seconds instead of a full VM boot.
+    const claimReserve = Effect.fn("Provisioner.claimReserve")(function* (input: StartInput) {
+      const reserve = (yield* workspace.all()).find((row) => {
+        const state = ProvisionState.read(row.extra)
+        return (
+          state?.kind === "reserve" &&
+          state.status === "ready" &&
+          !runners.has(row.id) &&
+          // The reserve's volume is mounted at its parent folder: only a
+          // project inside that folder is persisted by it.
+          row.directory &&
+          input.directory.startsWith(`${path.posix.dirname(row.directory)}/`)
+        )
+      })
+      if (!reserve?.directory) return undefined
+      const ctx = yield* store.load({ directory: input.directory })
+      const now = Date.now()
+      const fresh = ProvisionState.begin({ kind: "new", mode: input.mode, now, bootDeadlineMs: bootDeadlineMs() })
+      const step = input.mode === "upload" ? "upload" : "setup"
+      const state: ProvisionState.State = {
+        ...fresh,
+        step,
+        deadline: step === "upload" ? now + uploadDeadlineMs() : fresh.deadline,
+      }
+      const claimed = yield* workspace.claim(reserve.id, {
+        from: reserve.directory,
+        directory: input.directory,
+        projectID: ctx.project.id,
+        extra: ProvisionState.write(input.owner ? { owner: input.owner } : null, state),
+      })
+      // Someone else took it first; fall back to a fresh VM.
+      if (!claimed) return undefined
+      yield* Effect.logInfo("claimed reserve VM", { workspaceID: claimed.id, directory: input.directory })
+      // The boot opened sync for the placeholder folder and project; the next
+      // routed request reconnects it for the claimed project.
+      yield* workspace.stopSync(claimed.id)
+      if (step === "setup") yield* fork(claimed.id, run(claimed.id))
+      yield* fork(RESERVE_REFILL, ensureReserve)
+      return toJob(claimed) ?? { ...state, workspaceID: claimed.id, directory: input.directory }
+    })
+
+    // Keeps exactly one reserve while the deployment is in use; removes it
+    // once nobody has used the deployment for OPENCODE_RESERVE_IDLE_MS.
+    const ensureReserve: Effect.Effect<void> = Effect.gen(function* () {
+      if (!Flag.OPENCODE_WORKSPACE_ADAPTER) return
+      const reserves = (yield* workspace.all()).filter((row) => {
+        const state = ProvisionState.read(row.extra)
+        return state?.kind === "reserve" && state.status !== "failed"
+      })
+      if (Date.now() - demand.last >= reserveIdleMs()) {
+        yield* Effect.forEach(
+          reserves.filter((row) => !runners.has(row.id)),
+          (row) =>
+            Effect.logInfo("removing idle reserve VM", { workspaceID: row.id }).pipe(
+              Effect.andThen(workspace.remove(row.id)),
+            ),
+          { discard: true },
+        )
+        return
+      }
+      if (reserves.length > 0) return
+      const root = vmProjectsRoot() ?? "/home/runner"
+      // A placeholder directory only the reserve uses; claiming replaces it.
+      const directory = `${root}/workspace/.reserve-${crypto.randomUUID().slice(0, 8)}`
+      yield* Effect.logInfo("warming reserve VM", { directory })
+      yield* create({ directory, mode: "empty" }, "reserve").pipe(Effect.asVoid)
+    }).pipe(Effect.catchCause((cause) => Effect.logWarning("reserve VM refill failed", { error: message(cause) })))
+
     // Concurrent starts for one directory share a single attempt.
     const start = Effect.fn("Provisioner.start")(function* (input: StartInput) {
+      touchDemand()
       const entry = yield* Effect.sync(() => {
         const pending = starting.get(input.directory)
         if (pending) return { deferred: pending, owner: false }
@@ -390,11 +479,13 @@ export const layer = Layer.effect(
               return yield* fork(info.id, fail(info.id, `Timed out while ${describe(state.step)}`))
             if (state.status === "running" && state.step !== "upload") return yield* fork(info.id, run(info.id))
             if (state.status === "failed" && !state.cleaned) return yield* fork(info.id, cleanup(fresh, state))
-            if (state.status === "failed" && state.kind === "new" && now - state.updatedAt >= failedTtlMs())
+            if (state.status === "failed" && state.kind !== "recover" && now - state.updatedAt >= failedTtlMs())
               yield* workspace.remove(info.id)
           }),
         { discard: true },
       )
+      yield* fork(RESERVE_REFILL, ensureReserve)
+      yield* settled(RESERVE_REFILL)
     }).pipe(Effect.withSpan("Provisioner.reconcile"))
 
     // Only a control plane provisions VMs. A VM shares the database (until

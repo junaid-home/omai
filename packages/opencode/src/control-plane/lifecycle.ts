@@ -131,6 +131,8 @@ export const layer = Layer.effect(
           // belongs to the provisioner; suspending it would stall the job.
           const provision = ProvisionState.read(space.extra)
           if (provision && provision.status !== "ready") return
+          // The warm reserve must stay booted; the provisioner removes it.
+          if (provision?.kind === "reserve") return
           const id = space.id
           if (phases.get(id) === "STARTING") return
           const fresh = () => Date.now() - (activity.get(id) ?? bootedAt) < idle

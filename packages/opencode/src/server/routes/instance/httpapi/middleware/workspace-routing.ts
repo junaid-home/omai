@@ -499,7 +499,9 @@ export const workspaceRoutingLayer = Layer.effect(
     const lifecycle = yield* Lifecycle.Service
     const provisioner = yield* Provisioner.Service
     return WorkspaceRoutingMiddleware.of((effect) =>
-      routeHttpApiWorkspace(client, lifecycle, provisioner, effect).pipe(
+      Effect.sync(Provisioner.touchDemand).pipe(
+        Effect.andThen(routeHttpApiWorkspace(client, lifecycle, provisioner, effect)),
+      ).pipe(
         Effect.provideService(Socket.WebSocketConstructor, makeWebSocket),
         Effect.provideService(Workspace.Service, workspace),
       ),

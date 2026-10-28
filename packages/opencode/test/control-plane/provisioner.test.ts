@@ -526,4 +526,109 @@ describe("control-plane provisioner", () => {
       }),
     { git: true },
   )
+
+  describe("reserve VM", () => {
+    // The reserve lives under the VM projects root; point it inside the test
+    // instance so the scripted adapter (registered per project) serves it.
+    const setupReserve = () =>
+      Effect.gen(function* () {
+        const ctx = yield* setup()
+        process.env.OPENCODE_VM_PROJECTS_ROOT = ctx.instance.directory
+        return { ...ctx, directory: path.join(ctx.instance.directory, "workspace", "user", "projects", "app") }
+      })
+
+    afterEach(() => {
+      delete process.env.OPENCODE_VM_PROJECTS_ROOT
+      delete process.env.OPENCODE_RESERVE_IDLE_MS
+    })
+
+    const reserveOf = (workspace: Workspace.Interface) =>
+      workspace
+        .all()
+        .pipe(Effect.map((rows) => rows.find((row) => ProvisionState.read(row.extra)?.kind === "reserve")))
+
+    const awaitReserveReady = (workspace: Workspace.Interface) =>
+      Effect.gen(function* () {
+        const deadline = Date.now() + 8_000
+        while (Date.now() < deadline) {
+          const row = yield* reserveOf(workspace)
+          if (row && ProvisionState.read(row.extra)?.status === "ready") return row
+          yield* Effect.sleep("50 millis")
+        }
+        throw new Error("reserve never became ready")
+      })
+
+    it.instance(
+      "keeps one booted reserve while the deployment is in use",
+      () =>
+        Effect.gen(function* () {
+          const ctx = yield* setupReserve()
+          const provisioner = yield* Provisioner.Service
+          const workspace = yield* Workspace.Service
+
+          Provisioner.touchDemand()
+          yield* provisioner.reconcile
+          const reserve = yield* awaitReserveReady(workspace)
+          yield* provisioner.reconcile
+
+          expect(ctx.calls.create).toBe(1)
+          expect((yield* workspace.all()).filter((row) => ProvisionState.read(row.extra)?.kind === "reserve")).toHaveLength(1)
+          // A reserve is never set up as a project.
+          expect(ctx.vm.state.created).toEqual([])
+          expect(reserve.directory).not.toBe(ctx.directory)
+        }),
+      { git: true },
+    )
+
+    it.instance(
+      "creating a project claims the reserve, skips boot, and warms the next one",
+      () =>
+        Effect.gen(function* () {
+          const ctx = yield* setupReserve()
+          const provisioner = yield* Provisioner.Service
+          const workspace = yield* Workspace.Service
+          Provisioner.touchDemand()
+          yield* provisioner.reconcile
+          const reserve = yield* awaitReserveReady(workspace)
+
+          const started = Date.now()
+          const job = yield* provisioner.start({ directory: ctx.directory, mode: "empty" })
+          const ready = yield* provisioner.await(job.workspaceID, 8_000)
+
+          expect(job.workspaceID).toBe(reserve.id)
+          expect(ready).toMatchObject({ status: "ready", kind: "new", directory: ctx.directory })
+          expect(Date.now() - started).toBeLessThan(2_000)
+          expect(ctx.vm.state.created).toEqual([ctx.directory])
+          // The claimed VM was not created again.
+          expect(ctx.calls.create).toBe(1)
+
+          yield* provisioner.reconcile
+          const next = yield* awaitReserveReady(workspace)
+          expect(next.id).not.toBe(reserve.id)
+          expect(ctx.calls.create).toBe(2)
+        }),
+      { git: true },
+    )
+
+    it.instance(
+      "the reserve is deleted once the deployment has been idle",
+      () =>
+        Effect.gen(function* () {
+          process.env.OPENCODE_RESERVE_IDLE_MS = "300"
+          const ctx = yield* setupReserve()
+          const provisioner = yield* Provisioner.Service
+          const workspace = yield* Workspace.Service
+          Provisioner.touchDemand()
+          yield* provisioner.reconcile
+          const reserve = yield* awaitReserveReady(workspace)
+
+          yield* Effect.sleep("500 millis")
+          yield* provisioner.reconcile
+
+          expect(yield* workspace.get(reserve.id)).toBeUndefined()
+          expect(ctx.calls.remove).toEqual([false])
+        }),
+      { git: true },
+    )
+  })
 })

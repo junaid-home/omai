@@ -385,6 +385,7 @@ describe("HttpApi workspace routing middleware", () => {
         insert: () => Effect.die("unused"),
         provisionVM: () => Effect.die("unused"),
         setExtra: () => Effect.die("unused"),
+    claim: () => Effect.die("unused"),
     stopSync: () => Effect.void,
         sessionWarp: () => Effect.die("unused"),
         list: () => Effect.die("unused"),

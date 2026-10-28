@@ -79,6 +79,11 @@ export function northflankAdapter(config: NorthflankConfig): WorkspaceAdapter {
     return info.directory
   }
 
+  // Projects live under `<root>/workspace/...`. Mounting the volume at that
+  // shared folder (not the project's own) lets a booted reserve VM be claimed
+  // for any project: the project folder is then created inside the volume.
+  const mountPath = (directory: string) => directory.match(/^(.*?\/workspace)\//)?.[1] ?? directory
+
   const ensureService = async (info: WorkspaceInfo, variables: Record<string, string | undefined>) => {
     const image = /[:@][^/:@]*$/.test(config.image) ? config.image : `${config.image}:latest`
     const existing = await resolve(info.id)
@@ -110,7 +115,7 @@ export function northflankAdapter(config: NorthflankConfig): WorkspaceAdapter {
     if (existing) return existing.id
     const created = await client().createVolume<{ data: { id: string } }>({
       name,
-      mounts: [{ containerMountPath: requireDirectory(info) }],
+      mounts: [{ containerMountPath: mountPath(requireDirectory(info)) }],
       spec: { accessMode: "ReadWriteOnce", storageSize: config.volumeSizeMB },
     })
     return created.data.id

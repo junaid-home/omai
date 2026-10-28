@@ -6,8 +6,12 @@ import { Option, Schema } from "effect"
 
 export const Step = Schema.Literals(["creating", "booting", "setup", "upload", "done"])
 export const Status = Schema.Literals(["running", "ready", "failed"])
-/** `recover` re-provisions an existing project and must never delete its volume. */
-export const Kind = Schema.Literals(["new", "recover"])
+/**
+ * `recover` re-provisions an existing project and must never delete its volume.
+ * `reserve` is a booted VM held ready for the next project; creating a project
+ * claims it (becoming `new`) instead of waiting for a fresh VM to boot.
+ */
+export const Kind = Schema.Literals(["new", "recover", "reserve"])
 /** `upload`: the browser uploads a zip into the booted VM to finish the job. */
 export const Mode = Schema.Literals(["empty", "upload"])
 

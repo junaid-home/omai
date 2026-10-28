@@ -49,7 +49,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get update \
     && apt-get install -y --no-install-recommends nodejs \
     && npm install -g pnpm bun lighthouse \
-    && rm -rf /var/lib/apt/lists/*
+    && npm cache clean --force \
+    && rm -rf /var/lib/apt/lists/* /root/.npm /root/.cache /tmp/*
 
 # Lighthouse drives a headless Chromium installed above; the preview audit
 # resolves this path through chrome-launcher.

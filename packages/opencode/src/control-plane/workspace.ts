@@ -5,7 +5,7 @@ import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { FetchHttpClient, HttpBody, HttpClient, HttpClientError, HttpClientRequest } from "effect/unstable/http"
 import { Database } from "@opencode-ai/core/database/database"
 import { asc } from "drizzle-orm"
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { inArray } from "drizzle-orm"
 import { Project } from "@/project/project"
 import { GlobalBus } from "@/bus/global"
@@ -137,6 +137,14 @@ export interface Interface {
   /** Create (or idempotently re-create) the workspace's VM through its adapter. */
   readonly provisionVM: (info: Info) => Effect.Effect<void, CreateError>
   readonly setExtra: (id: WorkspaceV2.ID, extra: unknown) => Effect.Effect<Info | undefined>
+  /**
+   * Atomically re-points a row at a new directory, only if it still has
+   * `from`: two creations racing for one reserve VM cannot both win.
+   */
+  readonly claim: (
+    id: WorkspaceV2.ID,
+    input: { from: string; directory: string; projectID: ProjectV2.ID; extra: unknown },
+  ) => Effect.Effect<Info | undefined>
   readonly sessionWarp: (input: SessionWarpInput) => Effect.Effect<void, SessionWarpError>
   readonly list: (project: Project.Info) => Effect.Effect<Info[]>
   readonly syncList: (project: Project.Info) => Effect.Effect<void>
@@ -652,6 +660,19 @@ const layer = Layer.effect(
       return yield* get(id)
     })
 
+    const claim = Effect.fn("Workspace.claim")(function* (
+      id: WorkspaceV2.ID,
+      input: { from: string; directory: string; projectID: ProjectV2.ID; extra: unknown },
+    ) {
+      const rows = yield* db
+        .update(WorkspaceTable)
+        .set({ directory: input.directory, project_id: input.projectID, extra: input.extra, time_used: Date.now() })
+        .where(and(eq(WorkspaceTable.id, id), eq(WorkspaceTable.directory, input.from)))
+        .returning()
+        .pipe(Effect.orDie)
+      return rows[0] ? fromRow(rows[0]) : undefined
+    })
+
     const create = Effect.fn("Workspace.create")(function* (input: CreateInput) {
       const info = yield* insert(input)
       yield* provisionVM(info)
@@ -1048,6 +1069,7 @@ const layer = Layer.effect(
       insert,
       provisionVM,
       setExtra,
+      claim,
       sessionWarp,
       list,
       syncList,
