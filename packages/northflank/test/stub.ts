@@ -5,6 +5,7 @@ type Service = {
   name: string
   payload: Record<string, unknown>
   paused: boolean
+  instances?: number
   variables?: Record<string, string | undefined>
 }
 
@@ -21,6 +22,7 @@ export function northflankStub(input?: { dns?: string; token?: string }) {
   const services = new Map<string, Service>()
   const volumes = new Map<string, Volume>()
   const requests: RecordedRequest[] = []
+  const throttle = { remaining: 0 }
 
   const token = input?.token ?? "nf-test-token"
   const dns = input?.dns ?? "127.0.0.1:4096"
@@ -40,6 +42,14 @@ export function northflankStub(input?: { dns?: string; token?: string }) {
         authorization: request.headers.get("authorization") ?? undefined,
         ...(body === undefined ? {} : { body }),
       })
+
+      if (throttle.remaining > 0) {
+        throttle.remaining -= 1
+        return Response.json(
+          { error: { status: 429, message: "API rate limit exceeded for this team." } },
+          { status: 429, headers: { "Retry-After": "0" } },
+        )
+      }
 
       if (request.headers.get("authorization") !== `Bearer ${token}`)
         return fail(401, "The token used to authenticate does not have permission to access this endpoint.")
@@ -83,6 +93,13 @@ export function northflankStub(input?: { dns?: string; token?: string }) {
         return json({ data: { ports } })
       }
 
+      if (kind === "services" && id === "deployment" && action && method === "PATCH") {
+        const service = services.get(action)
+        if (!service) return fail(404, `Could not find service '${action}'`)
+        service.instances = (payload?.["deployment"] as { instances?: number } | undefined)?.instances
+        return json({ data: {} })
+      }
+
       if (kind === "services" && id && (action === "pause" || action === "resume")) {
         const service = services.get(id)
         if (!service) return fail(404, `Could not find service '${id}'`)
@@ -124,6 +141,10 @@ export function northflankStub(input?: { dns?: string; token?: string }) {
     services,
     volumes,
     requests,
+    /** Rejects the next `count` requests with a 429, as the shared team limit does. */
+    throttle: (count: number) => {
+      throttle.remaining = count
+    },
     stop: () => server.stop(true),
   }
 }

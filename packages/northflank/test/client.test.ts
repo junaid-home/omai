@@ -62,6 +62,25 @@ describe("northflank.client", () => {
     await expect(client.deleteService("missing")).resolves.toBeUndefined()
   })
 
+  test("retries a request rejected by the team rate limit", async () => {
+    const { stub, client } = setup()
+    stub.services.set("svc-a", { id: "svc-a", name: "vm-alpha", payload: {}, paused: false })
+    stub.throttle(2)
+
+    const services = await client.listServices()
+
+    expect(services).toHaveLength(1)
+    expect(stub.requests).toHaveLength(3)
+  })
+
+  test("gives up after repeated rate limiting", async () => {
+    const { stub, client } = setup()
+    stub.throttle(10)
+
+    await expect(client.listServices()).rejects.toMatchObject({ status: 429, name: "NorthflankApiError" })
+    expect(stub.requests).toHaveLength(4)
+  })
+
   test("fails fast without a token", async () => {
     const client = createClient(configFromEnv({ NORTHFLANK_API_BASE: "http://127.0.0.1:1/v1" }))
     await expect(client.listServices()).rejects.toMatchObject({ status: 401, name: "NorthflankApiError" })

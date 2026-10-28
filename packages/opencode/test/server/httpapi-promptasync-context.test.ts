@@ -33,6 +33,7 @@ import {
 import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, tmpdirScoped } from "../fixture/fixture"
 import { workspaceLayerWithRuntimeFlags } from "../fixture/workspace"
+import { Lifecycle } from "../../src/control-plane/lifecycle"
 import { testEffect } from "../lib/effect"
 
 const testStateLayer = Layer.effectDiscard(
@@ -53,7 +54,7 @@ const it = testEffect(Layer.mergeAll(testStateLayer, NodeHttpServer.layerTest, N
 
 const instanceContextTestLayer = Layer.mergeAll(
   instanceContextLayer,
-  workspaceRoutingLayer.pipe(Layer.provide(Socket.layerWebSocketConstructorGlobal)),
+  workspaceRoutingLayer.pipe(Layer.provide([Socket.layerWebSocketConstructorGlobal, Lifecycle.layer])),
 )
 
 const localAdapter = (directory: string): WorkspaceAdapter => ({

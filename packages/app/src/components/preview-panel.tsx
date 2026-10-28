@@ -843,7 +843,7 @@ export function PreviewPanel(props: {
     setIframeReady(false)
 
     try {
-      const result = await serverSDK().createClient({ directory: dir, throwOnError: true }).global.preview.start({ directory: dir })
+      const result = await serverSDK().createClient({ directory: dir, throwOnError: true }).global.preview.start({ body_directory: dir })
       const data = result.data as any
       if (data?.success && data?.url) {
         const url = normalizePreviewUrl(data.url)

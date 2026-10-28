@@ -4,7 +4,9 @@ import os from "node:os"
 import path from "node:path"
 import { RotationLock } from "../script/lib/rotation-lock"
 
-test("rotation holds the deployment filesystem lock until the supervised holder closes", async () => {
+// The contender is util-linux flock(1), which deployments (Linux) ship and
+// macOS does not.
+test.skipIf(!Bun.which("flock"))("rotation holds the deployment filesystem lock until the supervised holder closes", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "omai-rotation-lock-"))
   try {
     const first = await RotationLock.acquire(root)

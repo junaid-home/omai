@@ -10,6 +10,7 @@ function env(key: string, fallback: number) {
 
 const idleMs = () => env("OPENCODE_WORKSPACE_IDLE_MS", 60_000)
 const wakeTimeoutMs = () => env("NORTHFLANK_WAKE_TIMEOUT_MS", 180_000)
+const wakeRetryMs = () => env("OPENCODE_WORKSPACE_WAKE_RETRY_MS", 1_000)
 
 type Phase = "STOPPED" | "STARTING" | "RUNNING" | "STOPPING"
 
@@ -81,11 +82,22 @@ export const layer = Layer.effect(
             ),
           )
           const deadline = Date.now() + wakeTimeoutMs()
+          let retried = Date.now()
           while (Date.now() < deadline) {
             if (yield* workspace.isSynced(id)) {
               phases.set(id, "RUNNING")
               activity.set(id, Date.now())
               return
+            }
+            // A booting VM refuses connections, and the sync loop backs off
+            // exponentially on each refusal (1s, 2s, 4s, ...), so a VM ready
+            // after 20s would wait until the 31s retry. startSync restarts a
+            // loop sitting in a failed backoff (and leaves a connecting or
+            // connected one alone), keeping the retry cadence at
+            // wakeRetryMs for as long as the wake lasts.
+            if (Date.now() - retried >= wakeRetryMs()) {
+              retried = Date.now()
+              yield* workspace.startSync(space).pipe(Effect.ignore)
             }
             yield* Effect.sleep(250)
           }

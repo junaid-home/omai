@@ -11,7 +11,7 @@ import { describe, expect } from "bun:test"
 import { Context, Effect, Layer, Option } from "effect"
 import { HttpBody, HttpClient, HttpClientRequest, HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { mkdtemp, readFile, readdir, stat } from "node:fs/promises"
+import { mkdtemp, readFile, readdir, realpath, stat } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import JSZip from "jszip"
@@ -31,8 +31,23 @@ import { globalHandlers } from "../../src/server/routes/instance/httpapi/handler
 import { authHandlers } from "../../src/server/routes/instance/httpapi/handlers/auth"
 import { authorizationLayer } from "../../src/server/routes/instance/httpapi/middleware/authorization"
 import { schemaErrorLayer } from "../../src/server/routes/instance/httpapi/middleware/schema-error"
+import {
+  WorkspaceRouteContext,
+  WorkspaceRoutingMiddleware,
+} from "../../src/server/routes/instance/httpapi/middleware/workspace-routing"
+import { Project } from "../../src/project/project"
+import { Session } from "../../src/session/session"
 import { testEffect } from "../lib/effect"
 import { tmpdirScoped } from "../fixture/fixture"
+
+// The global file and preview endpoints sit behind workspace routing; these
+// tests exercise the control plane itself, so requests stay local.
+const passthroughWorkspaceRouting = Layer.succeed(
+  WorkspaceRoutingMiddleware,
+  WorkspaceRoutingMiddleware.of((effect) =>
+    effect.pipe(Effect.provideService(WorkspaceRouteContext, WorkspaceRouteContext.of({ directory: process.cwd() }))),
+  ),
+)
 
 const apiLayer = HttpRouter.serve(
   HttpApiBuilder.layer(RootHttpApi).pipe(
@@ -45,7 +60,7 @@ const apiLayer = HttpRouter.serve(
       userStateHandlers,
       adminHandlers,
     ]),
-    Layer.provide([authorizationLayer, schemaErrorLayer]),
+    Layer.provide([authorizationLayer, schemaErrorLayer, passthroughWorkspaceRouting, Layer.mock(Session.Service)({})]),
     // Raw HttpApi routes expose an opaque handler context at the request boundary.
     // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
     HttpRouter.provideRequest(Layer.succeedContext(Context.empty() as Context.Context<unknown>)),
@@ -68,7 +83,7 @@ const apiLayer = HttpRouter.serve(
   Layer.provide(UserState.layer),
   Layer.provide(PreviewCapability.layer),
   Layer.provide(LayerNode.compile(InstanceStateStore.node)),
-  Layer.provideMerge(LayerNode.compile(LayerNode.group([Database.node, FSUtil.node, CrossSpawnSpawner.node]))),
+  Layer.provideMerge(LayerNode.compile(LayerNode.group([Database.node, FSUtil.node, CrossSpawnSpawner.node, Project.node]))),
 )
 const it = testEffect(apiLayer)
 
@@ -155,7 +170,9 @@ describe("global HttpApi", () => {
       zip.folder("__MACOSX")?.file("_.DS_Store", "junk")
       const bytes = yield* Effect.promise(() => zip.generateAsync({ type: "nodebuffer" }))
 
-      const dir = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "opencode-file-zip-")))
+      // The handler refuses destinations behind a symlink, and macOS's tmpdir
+      // lives under the /var -> /private/var link.
+      const dir = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "opencode-file-zip-")).then((dir) => realpath(dir)))
       const response = yield* HttpClientRequest.post(`${GlobalPaths.fileCreate}?path=${encodeURIComponent(dir)}`).pipe(
         HttpClientRequest.setBody(HttpBody.uint8Array(new Uint8Array(bytes), "application/octet-stream")),
         HttpClient.execute,

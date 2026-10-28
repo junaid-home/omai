@@ -44,6 +44,7 @@ All optional except the token:
 | `NORTHFLANK_SERVICE_SCHEME` | `https` (`http` for local stubs) |
 | `NORTHFLANK_VM_USERNAME` / `NORTHFLANK_VM_PASSWORD` | `OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD` |
 | `NORTHFLANK_API_BASE` | `https://api.northflank.com/v1` |
+| `NORTHFLANK_VM_GLOBAL_CONFIG` | unset; JSON/JSONC passed to every VM as `OPENCODE_GLOBAL_CONFIG` |
 
 Untagged image references default to `:latest` — the API's `imagePath` pattern
 requires an explicit tag or digest.

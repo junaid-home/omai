@@ -19,7 +19,9 @@ afterEach(async () => {
 const hash = (value: string) => createHash("sha1").update(value).digest("hex")
 
 async function fixture() {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "omai-checkpoint-import-"))
+  // Storage roots must not sit behind a symlink, and macOS's tmpdir is under
+  // the /var -> /private/var link.
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "omai-checkpoint-import-")))
   roots.push(root)
   const source = path.join(root, "source.db")
   const database = new Database(source)

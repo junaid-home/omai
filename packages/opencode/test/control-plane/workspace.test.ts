@@ -24,6 +24,7 @@ import { registerAdapter } from "../../src/control-plane/adapters"
 import { WorkspaceV2 } from "@opencode-ai/core/workspace"
 import { WorkspaceTable } from "@opencode-ai/core/control-plane/workspace.sql"
 import type { Target, WorkspaceAdapter, WorkspaceInfo } from "../../src/control-plane/types"
+import { Auth } from "../../src/auth"
 import * as Workspace from "../../src/control-plane/workspace"
 import { InstanceStore } from "@/project/instance-store"
 import { InstanceBootstrap } from "@/project/bootstrap"
@@ -44,6 +45,7 @@ const workspaceLayer = (experimentalWorkspaces: boolean) =>
   AppNodeBuilder.build(
     LayerNode.group([
       Workspace.node,
+      Auth.node,
       SessionNs.node,
       SessionProjector.node,
       Database.node,
@@ -416,7 +418,9 @@ describe("workspace CRUD", () => {
       Effect.gen(function* () {
         const instance = yield* requireInstance
         const workspace = yield* Workspace.Service
-        process.env.OPENCODE_AUTH_CONTENT = JSON.stringify({ test: { type: "api", key: "secret" } })
+        // Provider auth lives in the database; the VM receives a snapshot of it.
+        const auth = yield* Auth.Service
+        yield* auth.set("test", { type: "api", key: "secret" })
         process.env.OTEL_EXPORTER_OTLP_HEADERS = "authorization=otel"
         process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "https://otel.test"
         process.env.OTEL_RESOURCE_ATTRIBUTES = "service.name=opencode-test"

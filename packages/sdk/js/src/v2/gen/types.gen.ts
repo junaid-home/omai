@@ -7509,7 +7509,10 @@ export type GlobalFileCreateData = {
     data?: Array<number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN">
   }
   path?: never
-  query?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
   url: "/global/file/create"
 }
 
@@ -7571,7 +7574,10 @@ export type GlobalPreviewStartData = {
     directory: string
   }
   path?: never
-  query?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
   url: "/global/preview/start"
 }
 
@@ -7603,7 +7609,10 @@ export type GlobalPreviewStopData = {
     directory: string
   }
   path?: never
-  query?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
   url: "/global/preview/stop"
 }
 
@@ -7630,7 +7639,10 @@ export type GlobalPreviewStopResponse = GlobalPreviewStopResponses[keyof GlobalP
 export type GlobalPreviewStatusData = {
   body?: never
   path?: never
-  query?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
   url: "/global/preview/status"
 }
 
@@ -7661,7 +7673,10 @@ export type GlobalPreviewHeartbeatData = {
     directory: string
   }
   path?: never
-  query?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
   url: "/global/preview/heartbeat"
 }
 
@@ -7691,7 +7706,10 @@ export type GlobalPreviewAuditData = {
     formFactor?: "mobile" | "desktop"
   }
   path?: never
-  query?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
   url: "/global/preview/audit"
 }
 
@@ -7845,6 +7863,7 @@ export type AuthConfigResponses = {
   200: {
     mode: "central" | "local"
     workspaceRoot?: string
+    projectsRoot?: string
     google: boolean
   }
 }
@@ -13409,6 +13428,38 @@ export type ExperimentalWorkspaceStatusResponses = {
 
 export type ExperimentalWorkspaceStatusResponse =
   ExperimentalWorkspaceStatusResponses[keyof ExperimentalWorkspaceStatusResponses]
+
+export type ExperimentalWorkspaceBusyData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/experimental/workspace/busy"
+}
+
+export type ExperimentalWorkspaceBusyErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ExperimentalWorkspaceBusyError = ExperimentalWorkspaceBusyErrors[keyof ExperimentalWorkspaceBusyErrors]
+
+export type ExperimentalWorkspaceBusyResponses = {
+  /**
+   * Workspace busy report
+   */
+  200: {
+    busy: boolean
+    reasons: Array<string>
+  }
+}
+
+export type ExperimentalWorkspaceBusyResponse =
+  ExperimentalWorkspaceBusyResponses[keyof ExperimentalWorkspaceBusyResponses]
 
 export type ExperimentalWorkspaceRemoveData = {
   body?: never

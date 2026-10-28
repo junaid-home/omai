@@ -86,6 +86,16 @@ set -e
 mkdir -p /home/runner/.local/share/opencode /home/runner/.local/state /home/runner/.cache/opencode /home/runner/.config/opencode /home/runner/workspace 2>/dev/null || true
 chown -R runner:runner /home/runner/.local /home/runner/.cache /home/runner/.config /home/runner/workspace /root 2>/dev/null || true
 find /home/runner/workspace -mindepth 1 -maxdepth 1 -name lost+found -type d -exec rm -rf {} + 2>/dev/null || true
+# Global config (share, permission, MCP servers) is handed in at runtime rather
+# than baked into the image because it carries credentials. Written as the
+# global config file, not OPENCODE_CONFIG_CONTENT, so project configs still
+# override it. The control plane sets it from NORTHFLANK_VM_GLOBAL_CONFIG.
+if [ -n "$OPENCODE_GLOBAL_CONFIG" ]; then
+  printf '%s\n' "$OPENCODE_GLOBAL_CONFIG" > /home/runner/.config/opencode/opencode.jsonc
+  chown runner:runner /home/runner/.config/opencode/opencode.jsonc 2>/dev/null || true
+  chmod 600 /home/runner/.config/opencode/opencode.jsonc
+fi
+unset OPENCODE_GLOBAL_CONFIG
 su runner -c "git config --global --add safe.directory '*'" 2>/dev/null || true
 if [ -n "$OPENCODE_PROJECT_NAME" ]; then
   printf "export PS1='runner@%s:\w\$ '\n" "$OPENCODE_PROJECT_NAME" > /etc/profile.d/omai-prompt.sh

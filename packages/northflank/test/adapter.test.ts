@@ -10,7 +10,7 @@ afterEach(() => {
   while (active.length) active.pop()?.()
 })
 
-function setup() {
+function setup(env: Record<string, string> = {}) {
   const vm = vmStub()
   const stub = northflankStub({ dns: vm.host })
   active.push(vm.stop, stub.stop)
@@ -20,6 +20,7 @@ function setup() {
     NORTHFLANK_PROJECT_ID: "omai",
     NORTHFLANK_SERVICE_SCHEME: "http",
     NORTHFLANK_VM_PASSWORD: "vm-secret",
+    ...env,
   })
   const adapter = northflankAdapter(config)
   const info: WorkspaceInfo = {
@@ -55,7 +56,8 @@ describe("northflank.adapter", () => {
     expect(service.payload).toMatchObject({
       billing: { deploymentPlan: "nf-compute-100-4" },
       // Untagged images normalize to :latest — the API requires an explicit tag.
-      deployment: { instances: 1, external: { imagePath: "jj123dev/omaiflank:latest" } },
+      // Created idle and scaled after the volume attach, so the VM boots once.
+      deployment: { instances: 0, external: { imagePath: "jj123dev/omaiflank:latest" } },
       ports: [{ name: "p01", internalPort: 4096, public: true }],
     })
     // runtimeEnvironment is a flat scalar map (the real API rejects nested values).
@@ -68,7 +70,28 @@ describe("northflank.adapter", () => {
       mounts: [{ containerMountPath: directory }],
       spec: { accessMode: "ReadWriteOnce", storageSize: 10 * 1024 },
     })
-    expect(stub.requests.some((request) => request.path.endsWith("/attach"))).toBe(true)
+    const paths = stub.requests.map((request) => request.path)
+    const attach = paths.findIndex((path) => path.endsWith("/attach"))
+    const scale = stub.requests.findIndex((request) => request.method === "PATCH")
+    expect(attach).toBeGreaterThan(-1)
+    expect(scale).toBeGreaterThan(attach)
+    expect(service.instances).toBe(1)
+  })
+
+  test("create hands the global config to the VM only when configured", async () => {
+    const plain = setup()
+    await plain.adapter.create(await plain.adapter.configure(plain.info, { instance: { directory: plain.directory } }), {})
+    const bare = [...plain.stub.services.values()][0]!.payload.runtimeEnvironment as Record<string, string>
+    expect(bare).not.toHaveProperty("OPENCODE_GLOBAL_CONFIG")
+
+    const global = JSON.stringify({ permission: "allow", share: { mode: "manual" } })
+    const configured = setup({ NORTHFLANK_VM_GLOBAL_CONFIG: global })
+    await configured.adapter.create(
+      await configured.adapter.configure(configured.info, { instance: { directory: configured.directory } }),
+      {},
+    )
+    const variables = [...configured.stub.services.values()][0]!.payload.runtimeEnvironment as Record<string, string>
+    expect(variables.OPENCODE_GLOBAL_CONFIG).toBe(global)
   })
 
   test("create is idempotent across restarts and refreshes runtime env", async () => {
@@ -98,6 +121,36 @@ describe("northflank.adapter", () => {
     expect(String(target.type === "remote" ? target.url : "")).toBe(`http://${vm.host}`)
     const headers = target.type === "remote" ? target.headers : undefined
     expect(headers).toMatchObject({ Authorization: `Basic ${btoa("omai:vm-secret")}` })
+  })
+
+  test("target resolves the address from the API once per workspace", async () => {
+    const { stub, info, directory, config } = setup()
+    const adapter = northflankAdapter(config)
+    const configured = await adapter.configure(info, { instance: { directory } })
+    await adapter.create(configured, {})
+    const before = stub.requests.length
+
+    await adapter.target(configured)
+    await adapter.target(configured)
+    await adapter.busy?.(configured)
+
+    // The team-wide API rate limit cannot absorb a lookup per proxied request.
+    expect(stub.requests.slice(before).map((request) => request.path)).toEqual([
+      "/v1/projects/omai/services/vm-w-01jxample0000000000000000ab/ports",
+    ])
+  })
+
+  test("start reports a service deleted out-of-band as gone", async () => {
+    const { stub, adapter, info, directory } = setup()
+    const configured = await adapter.configure(info, { instance: { directory } })
+    await adapter.create(configured, {})
+    await adapter.target(configured)
+
+    stub.services.clear()
+
+    await expect(adapter.start?.(configured)).rejects.toMatchObject({ name: "WorkspaceGoneError" })
+    // The cached address is dropped with it, so the next lookup sees the loss.
+    await expect(adapter.target(configured)).rejects.toMatchObject({ name: "WorkspaceGoneError" })
   })
 
   test("start and stop map to resume and pause", async () => {

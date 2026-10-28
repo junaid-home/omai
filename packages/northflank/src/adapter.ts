@@ -19,6 +19,16 @@ export function northflankAdapter(config: NorthflankConfig): WorkspaceAdapter {
   let api: NorthflankClient | undefined
   const client = () => (api ??= createClient(config))
   const ids = new Map<string, string>()
+  // Every proxied request, sync reconnect and busy probe resolves the VM URL,
+  // and the Northflank API rate limit is shared by the whole team. A public
+  // port's DNS is fixed for the life of the service, so resolve it once and
+  // drop it only when the service goes away.
+  const urls = new Map<string, string>()
+
+  const forget = (workspaceID: string) => {
+    ids.delete(workspaceID)
+    urls.delete(workspaceID)
+  }
 
   const authHeaders = () =>
     config.vmPassword ? { Authorization: `Basic ${btoa(`${config.vmUsername}:${config.vmPassword}`)}` } : undefined
@@ -38,10 +48,23 @@ export function northflankAdapter(config: NorthflankConfig): WorkspaceAdapter {
   }
 
   const vmURL = async (workspaceID: string) => {
+    const cached = urls.get(workspaceID)
+    if (cached) return cached
     const { id } = await requireService(workspaceID)
     const dns = (await client().getPorts(id)).find((port) => port.public && port.dns)?.dns
     if (!dns) throw new Error(`Northflank service has no public port: ${id}`)
-    return `${config.scheme}://${dns}`
+    const url = `${config.scheme}://${dns}`
+    urls.set(workspaceID, url)
+    return url
+  }
+
+  // A cached service ID outlives a service deleted out-of-band; the API's 404
+  // is the first sign, so turn it into the gone signal the control plane
+  // reconciles on instead of a generic failure.
+  const gone = (workspaceID: string) => (error: unknown) => {
+    if (!(error instanceof NorthflankApiError) || error.status !== 404) throw error
+    forget(workspaceID)
+    throw new WorkspaceGoneError(workspaceID)
   }
 
   const requireDirectory = (info: WorkspaceInfo) => {
@@ -53,19 +76,22 @@ export function northflankAdapter(config: NorthflankConfig): WorkspaceAdapter {
     const existing = await resolve(info.id)
     if (existing) {
       await client().setRuntimeEnvironment(existing.id, variables)
-      return existing.id
+      return { id: existing.id, created: false }
     }
     const image = /[:@][^/:@]*$/.test(config.image) ? config.image : `${config.image}:latest`
     const created = await client().createService<{ data: { id: string } }>({
       name: serviceName(info.id),
       description: "OpenCode project MicroVM",
       billing: { deploymentPlan: config.plan },
-      deployment: { instances: 1, external: { imagePath: image }, docker: { configType: "default" } },
+      // Start with no instances: attaching a volume to a running service
+      // restarts it, so booting before the attach costs a whole extra boot.
+      // create() scales to one once the volume is in place.
+      deployment: { instances: 0, external: { imagePath: image }, docker: { configType: "default" } },
       ports: [{ name: "p01", internalPort: config.port, public: true, protocol: "HTTP" }],
       runtimeEnvironment: { ...variables },
     })
     ids.set(info.id, created.data.id)
-    return created.data.id
+    return { id: created.data.id, created: true }
   }
 
   const ensureVolume = async (info: WorkspaceInfo) => {
@@ -97,15 +123,27 @@ export function northflankAdapter(config: NorthflankConfig): WorkspaceAdapter {
         ...env,
         OPENCODE_SERVER_USERNAME: config.vmUsername,
         ...(config.vmPassword ? { OPENCODE_SERVER_PASSWORD: config.vmPassword } : {}),
+        ...(config.vmGlobalConfig ? { OPENCODE_GLOBAL_CONFIG: config.vmGlobalConfig } : {}),
         OPENCODE_PROJECT_NAME: projectName,
       }
-      const serviceID = await ensureService(info, variables)
+      const service = await ensureService(info, variables)
       const volumeID = await ensureVolume(info)
-      await client().attachVolume(volumeID, serviceID)
+      await client().attachVolume(volumeID, service.id)
+      // An existing service is either already scaled or left at zero by a
+      // create that failed after provisioning; scaling a paused or running
+      // service is rejected or a no-op, which is fine either way.
+      await client()
+        .scaleService(service.id, 1)
+        .catch((error: unknown) => {
+          if (!service.created && error instanceof NorthflankApiError && (error.status === 400 || error.status === 409))
+            return
+          throw error
+        })
     },
 
     async remove(info) {
       const service = await resolve(info.id)
+      forget(info.id)
       if (service) await client().deleteService(service.id)
       const volume = (await client().listVolumes()).find((item) => item.name === volumeName(info.id))
       if (volume) await client().deleteVolume(volume.id)
@@ -124,6 +162,7 @@ export function northflankAdapter(config: NorthflankConfig): WorkspaceAdapter {
           if (error instanceof NorthflankApiError && (error.status === 400 || error.status === 409)) return
           throw error
         })
+        .catch(gone(info.id))
     },
 
     async stop(info) {
@@ -134,6 +173,7 @@ export function northflankAdapter(config: NorthflankConfig): WorkspaceAdapter {
           if (error instanceof NorthflankApiError && (error.status === 400 || error.status === 409)) return
           throw error
         })
+        .catch(gone(info.id))
     },
 
     async busy(info): Promise<BusyReport> {

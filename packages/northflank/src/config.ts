@@ -14,6 +14,8 @@ export type NorthflankConfig = {
   /** Basic-auth credentials the control plane uses when proxying to the VM. */
   vmUsername: string
   vmPassword?: string
+  /** Global opencode config (JSON/JSONC) every VM writes to ~/.config/opencode/opencode.jsonc on boot. */
+  vmGlobalConfig?: string
 }
 
 export function configFromEnv(env: Record<string, string | undefined>): NorthflankConfig {
@@ -28,5 +30,6 @@ export function configFromEnv(env: Record<string, string | undefined>): Northfla
     scheme: env.NORTHFLANK_SERVICE_SCHEME === "http" ? "http" : "https",
     vmUsername: env.NORTHFLANK_VM_USERNAME ?? env.OPENCODE_SERVER_USERNAME ?? "omai",
     vmPassword: env.NORTHFLANK_VM_PASSWORD ?? env.OPENCODE_SERVER_PASSWORD,
+    vmGlobalConfig: env.NORTHFLANK_VM_GLOBAL_CONFIG,
   }
 }

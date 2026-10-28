@@ -76,6 +76,8 @@ import type {
   ExperimentalSessionListResponses,
   ExperimentalWorkspaceAdapterListErrors,
   ExperimentalWorkspaceAdapterListResponses,
+  ExperimentalWorkspaceBusyErrors,
+  ExperimentalWorkspaceBusyResponses,
   ExperimentalWorkspaceCreateErrors,
   ExperimentalWorkspaceCreateResponses,
   ExperimentalWorkspaceListErrors,
@@ -1396,6 +1398,40 @@ export class Workspace extends HeyApiClient {
   }
 
   /**
+   * Workspace busy report
+   *
+   * Aggregated activity (sessions, processes, preview dev server) used to decide whether the workspace may be suspended.
+   */
+  public busy<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      ExperimentalWorkspaceBusyResponses,
+      ExperimentalWorkspaceBusyErrors,
+      ThrowOnError
+    >({
+      url: "/experimental/workspace/busy",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Remove workspace
    *
    * Remove an existing workspace.
@@ -1565,6 +1601,8 @@ export class File extends HeyApiClient {
    */
   public create<ThrowOnError extends boolean = false>(
     parameters?: {
+      directory?: string
+      workspace?: string
       path?: string
       data?: Array<number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN">
     },
@@ -1575,6 +1613,8 @@ export class File extends HeyApiClient {
       [
         {
           args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
             { in: "body", key: "path" },
             { in: "body", key: "data" },
           ],
@@ -1602,11 +1642,32 @@ export class Preview extends HeyApiClient {
    */
   public start<ThrowOnError extends boolean = false>(
     parameters?: {
-      directory?: string
+      query_directory?: string
+      workspace?: string
+      body_directory?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
-    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "directory" }] }])
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            {
+              in: "query",
+              key: "query_directory",
+              map: "directory",
+            },
+            { in: "query", key: "workspace" },
+            {
+              in: "body",
+              key: "body_directory",
+              map: "directory",
+            },
+          ],
+        },
+      ],
+    )
     return (options?.client ?? this.client).post<GlobalPreviewStartResponses, GlobalPreviewStartErrors, ThrowOnError>({
       url: "/global/preview/start",
       ...options,
@@ -1626,11 +1687,32 @@ export class Preview extends HeyApiClient {
    */
   public stop<ThrowOnError extends boolean = false>(
     parameters?: {
-      directory?: string
+      query_directory?: string
+      workspace?: string
+      body_directory?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
-    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "directory" }] }])
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            {
+              in: "query",
+              key: "query_directory",
+              map: "directory",
+            },
+            { in: "query", key: "workspace" },
+            {
+              in: "body",
+              key: "body_directory",
+              map: "directory",
+            },
+          ],
+        },
+      ],
+    )
     return (options?.client ?? this.client).post<GlobalPreviewStopResponses, GlobalPreviewStopErrors, ThrowOnError>({
       url: "/global/preview/stop",
       ...options,
@@ -1648,10 +1730,28 @@ export class Preview extends HeyApiClient {
    *
    * Get the current status of the dev server for the current project.
    */
-  public status<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+  public status<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
     return (options?.client ?? this.client).get<GlobalPreviewStatusResponses, GlobalPreviewStatusErrors, ThrowOnError>({
       url: "/global/preview/status",
       ...options,
+      ...params,
     })
   }
 
@@ -1662,11 +1762,32 @@ export class Preview extends HeyApiClient {
    */
   public heartbeat<ThrowOnError extends boolean = false>(
     parameters?: {
-      directory?: string
+      query_directory?: string
+      workspace?: string
+      body_directory?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
-    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "directory" }] }])
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            {
+              in: "query",
+              key: "query_directory",
+              map: "directory",
+            },
+            { in: "query", key: "workspace" },
+            {
+              in: "body",
+              key: "body_directory",
+              map: "directory",
+            },
+          ],
+        },
+      ],
+    )
     return (options?.client ?? this.client).post<
       GlobalPreviewHeartbeatResponses,
       GlobalPreviewHeartbeatErrors,
@@ -1690,7 +1811,9 @@ export class Preview extends HeyApiClient {
    */
   public audit<ThrowOnError extends boolean = false>(
     parameters?: {
-      directory?: string
+      query_directory?: string
+      workspace?: string
+      body_directory?: string
       formFactor?: "mobile" | "desktop"
     },
     options?: Options<never, ThrowOnError>,
@@ -1700,7 +1823,17 @@ export class Preview extends HeyApiClient {
       [
         {
           args: [
-            { in: "body", key: "directory" },
+            {
+              in: "query",
+              key: "query_directory",
+              map: "directory",
+            },
+            { in: "query", key: "workspace" },
+            {
+              in: "body",
+              key: "body_directory",
+              map: "directory",
+            },
             { in: "body", key: "formFactor" },
           ],
         },

@@ -27,7 +27,9 @@ const run = <A, E>(program: Effect.Effect<A, E, Service | Scope.Scope>) =>
   Effect.runPromise(program.pipe(Effect.provide(layerFromConfig(configFromEnvironment())), Effect.scoped))
 
 async function fixture() {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "omai-sqlite-import-"))
+  // Storage roots must not sit behind a symlink, and macOS's tmpdir is under
+  // the /var -> /private/var link.
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "omai-sqlite-import-")))
   roots.push(root)
   const source = path.join(root, "source.db")
   const database = new Database(source)
