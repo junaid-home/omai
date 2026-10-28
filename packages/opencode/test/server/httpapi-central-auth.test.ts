@@ -37,12 +37,24 @@ const Api = HttpApi.make("central-probe").add(
     .add(
       HttpApiEndpoint.get("get", "/private", { success: Schema.String }),
       HttpApiEndpoint.post("post", "/private", { success: Schema.String }),
+      HttpApiEndpoint.get("share", "/global/share/:shareID/data", {
+        params: { shareID: Schema.String },
+        success: Schema.String,
+      }),
+      HttpApiEndpoint.post("sharePost", "/global/share/:shareID/data", {
+        params: { shareID: Schema.String },
+        success: Schema.String,
+      }),
     )
     .middleware(Authorization),
 )
 const principal = Authentication.Current.pipe(Effect.map((value) => value?.userID ?? "missing"))
 const handlers = HttpApiBuilder.group(Api, "probe", (handlers) =>
-  handlers.handle("get", () => principal).handle("post", () => principal),
+  handlers
+    .handle("get", () => principal)
+    .handle("post", () => principal)
+    .handle("share", () => Effect.succeed("shared"))
+    .handle("sharePost", () => Effect.succeed("shared")),
 )
 const routes = Layer.mergeAll(
   HttpApiBuilder.layer(Api).pipe(Layer.provide(handlers), Layer.provide(authorizationLayer)),
@@ -91,6 +103,14 @@ describe("central authenticated HTTP boundary", () => {
       for (const privatePath of ["/signup-secret-route-extra", "/auth/me", "/user-state", "/private"])
         expect((yield* HttpClient.get(privatePath)).status).toBe(401)
       expect((yield* HttpClient.post("/signup-secret-route")).status).toBe(401)
+    }),
+  )
+  it.live("serves shared session data to anyone holding the link, read-only", () =>
+    Effect.gen(function* () {
+      const response = yield* HttpClient.get("/global/share/DK5yv65J/data")
+      expect(response.status).toBe(200)
+      expect(yield* response.json).toBe("shared")
+      expect((yield* HttpClient.post("/global/share/DK5yv65J/data")).status).toBe(401)
     }),
   )
   it.live("protects typed and raw routes and propagates the DB-verified principal", () =>
