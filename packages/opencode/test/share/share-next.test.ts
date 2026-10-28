@@ -11,6 +11,7 @@ import { AccountRepo } from "../../src/account/repo"
 import { EventV2Bridge } from "../../src/event-v2-bridge"
 import { Session } from "@/session/session"
 import type { SessionID } from "../../src/session/schema"
+import { ShareData } from "../../src/share/share-data"
 import { ShareNext } from "@/share/share-next"
 import { SessionShareTable } from "@opencode-ai/core/share/sql"
 import { Database } from "@opencode-ai/core/database/database"
@@ -172,6 +173,47 @@ describe("ShareNext", () => {
         }).pipe(Effect.provide(integrationLayer(client)))
       },
       { config: { enterprise: { url: "https://legacy-share.example.com" } } },
+    ),
+  )
+
+  it.live("create hosts the share on the configured domain without calling any share service", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const session = yield* (yield* Session.Service).create({ title: "test" })
+          const service = yield* ShareNext.Service
+
+          const result = yield* service.create(session.id)
+
+          expect(result.id).toMatch(/^[A-Za-z0-9]{8}$/)
+          expect(result.url).toBe(`https://web.omai.ch/share/${result.id}`)
+          expect(result.secret.length).toBeGreaterThan(16)
+          expect((yield* share(session.id))?.id).toBe(result.id)
+
+          // Removing touches no remote service either.
+          yield* service.remove(session.id)
+          expect(yield* share(session.id)).toBeUndefined()
+        }).pipe(Effect.provide(integrationLayer(none))),
+      { config: { share: { url: "https://web.omai.ch", mode: "manual" } } },
+    ),
+  )
+
+  it.live("a locally hosted share serves its session from the database, and nothing else", () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const session = yield* (yield* Session.Service).create({ title: "shared work" })
+          yield* (yield* Session.Service).create({ title: "private work" })
+          const created = yield* (yield* ShareNext.Service).create(session.id)
+
+          const items = yield* ShareData.read(created.id)
+
+          expect(items?.[0]).toMatchObject({ type: "session", data: { id: session.id, title: "shared work" } })
+          expect(items?.filter((item) => item.type === "session")).toHaveLength(1)
+          expect(JSON.stringify(items)).not.toContain(created.secret)
+          expect(yield* ShareData.read("missing1")).toBeUndefined()
+        }).pipe(Effect.provide(integrationLayer(none))),
+      { config: { share: { url: "https://web.omai.ch", mode: "manual" } } },
     ),
   )
 

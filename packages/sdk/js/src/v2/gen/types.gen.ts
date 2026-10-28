@@ -7381,6 +7381,37 @@ export type GlobalHealthResponses = {
 
 export type GlobalHealthResponse = GlobalHealthResponses[keyof GlobalHealthResponses]
 
+export type GlobalShareDataData = {
+  body?: never
+  path: {
+    shareID: string
+  }
+  query?: never
+  url: "/global/share/{shareID}/data"
+}
+
+export type GlobalShareDataErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type GlobalShareDataError = GlobalShareDataErrors[keyof GlobalShareDataErrors]
+
+export type GlobalShareDataResponses = {
+  /**
+   * Shared session items
+   */
+  200: Array<unknown>
+}
+
+export type GlobalShareDataResponse = GlobalShareDataResponses[keyof GlobalShareDataResponses]
+
 export type GlobalEventData = {
   body?: never
   path?: never

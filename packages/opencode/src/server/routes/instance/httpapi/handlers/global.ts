@@ -19,6 +19,7 @@ import { Installation } from "@/installation"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { gitInitRepo } from "@/project/project"
+import { ShareData } from "@/share/share-data"
 import { vmProjectsRoot } from "@/control-plane/vm-projects"
 import { Effect, Layer, Queue, Schema } from "effect"
 import * as Stream from "effect/Stream"
@@ -200,6 +201,14 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
 
     return handlers
       .handleRaw("health", health)
+      .handle(
+        "shareData",
+        Effect.fn("GlobalHttpApi.shareData")(function* (ctx: { params: { shareID: string } }) {
+          const items = yield* ShareData.read(ctx.params.shareID)
+          if (!items) return yield* new HttpApiError.NotFound({})
+          return items
+        }),
+      )
       .handle("live", () => Effect.succeed({ healthy: true as const, version: InstallationVersion }))
       .handleRaw("event", event)
       .handle("configGet", configGet)

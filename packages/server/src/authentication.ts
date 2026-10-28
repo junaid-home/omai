@@ -54,6 +54,8 @@ export function publicRequest(method: string, pathname: string) {
     ].includes(pathname)
   )
     return true
+  // Anyone holding a share link may read that shared session.
+  if (/^\/global\/share\/[A-Za-z0-9]+\/data$/.test(pathname)) return true
   return pathname.startsWith("/assets/")
 }
 

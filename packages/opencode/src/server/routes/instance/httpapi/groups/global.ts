@@ -112,6 +112,7 @@ const GlobalUpgradeResult = Schema.Union([
 
 export const GlobalPaths = {
   health: "/global/health",
+  shareData: "/global/share/:shareID/data",
   event: "/global/event",
   config: "/global/config",
   dispose: "/global/dispose",
@@ -135,6 +136,17 @@ export const GlobalApi = HttpApi.make("global").add(
           identifier: "global.health",
           summary: "Get health",
           description: "Get health information about the OMAI+ server.",
+        }),
+      ),
+      HttpApiEndpoint.get("shareData", GlobalPaths.shareData, {
+        params: { shareID: Schema.String },
+        success: described(Schema.Array(Schema.Unknown), "Shared session items"),
+        error: HttpApiError.NotFound,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.share.data",
+          summary: "Get shared session data",
+          description: "Public, read-only data for a shared session: the session, its messages and parts.",
         }),
       ),
       HttpApiEndpoint.get("event", GlobalPaths.event, {

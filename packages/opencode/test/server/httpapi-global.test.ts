@@ -144,6 +144,14 @@ describe("global HttpApi", () => {
     }),
   )
 
+  it.live("share data for an unknown share is not found", () =>
+    Effect.gen(function* () {
+      const response = yield* HttpClient.get(GlobalPaths.shareData.replace(":shareID", "nOsUcH12"))
+
+      expect(response.status).toBe(404)
+    }),
+  )
+
   it.live("rejects fileCreate without a path", () =>
     Effect.gen(function* () {
       const response = yield* HttpClientRequest.post(GlobalPaths.fileCreate).pipe(

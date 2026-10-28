@@ -174,6 +174,8 @@ import type {
   GlobalPreviewStatusResponses,
   GlobalPreviewStopErrors,
   GlobalPreviewStopResponses,
+  GlobalShareDataErrors,
+  GlobalShareDataResponses,
   GlobalUpgradeErrors,
   GlobalUpgradeResponses,
   InstanceDisposeErrors,
@@ -1634,6 +1636,27 @@ export class Experimental extends HeyApiClient {
   }
 }
 
+export class Share extends HeyApiClient {
+  /**
+   * Get shared session data
+   *
+   * Public, read-only data for a shared session: the session, its messages and parts.
+   */
+  public data<ThrowOnError extends boolean = false>(
+    parameters: {
+      shareID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "shareID" }] }])
+    return (options?.client ?? this.client).get<GlobalShareDataResponses, GlobalShareDataErrors, ThrowOnError>({
+      url: "/global/share/{shareID}/data",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Config extends HeyApiClient {
   /**
    * Get global configuration
@@ -2029,6 +2052,11 @@ export class Global extends HeyApiClient {
         },
       },
     )
+  }
+
+  private _share?: Share
+  get share(): Share {
+    return (this._share ??= new Share({ client: this.client }))
   }
 
   private _config?: Config

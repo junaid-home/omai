@@ -33,6 +33,12 @@ export type Req = {
   headers: Record<string, string>
   api: Api
   baseUrl: string
+  /**
+   * Origin that hosts shares itself (the configured `share.url`) when no
+   * enterprise or console share service is set: the deployment serves shared
+   * sessions straight from its database, so nothing is uploaded anywhere.
+   */
+  local?: string
 }
 
 const ShareSchema = Schema.Struct({
@@ -93,6 +99,13 @@ function api(resource: string): Api {
 
 const legacyApi = api("share")
 const consoleApi = api("shares")
+
+const SHARE_ID_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+
+/** Short, URL-safe, unguessable enough for a link (62^8 combinations), matching the hosted format. */
+function shareID() {
+  return Array.from(crypto.getRandomValues(new Uint8Array(8)), (byte) => SHARE_ID_ALPHABET[byte % 62]).join("")
+}
 
 function key(item: Data) {
   switch (item.type) {
@@ -207,7 +220,16 @@ const layer = Layer.effect(
       const headers: Record<string, string> = {}
       const active = yield* account.active()
       if (Option.isNone(active) || !active.value.active_org_id) {
-        const baseUrl = (yield* cfg.get()).enterprise?.url ?? "https://opncd.ai"
+        const config = yield* cfg.get()
+        const domain = typeof config.share === "object" ? config.share?.url : undefined
+        if (!config.enterprise?.url && domain)
+          return {
+            headers,
+            api: legacyApi,
+            baseUrl: new URL(domain).origin,
+            local: new URL(domain).origin,
+          } satisfies Req
+        const baseUrl = config.enterprise?.url ?? "https://opncd.ai"
         return { headers, api: legacyApi, baseUrl } satisfies Req
       }
 
@@ -256,6 +278,8 @@ const layer = Layer.effect(
       if (!share) return
 
       const req = yield* request()
+      // Locally hosted shares are read from the database on demand.
+      if (req.local) return
       const res = yield* HttpClientRequest.post(`${req.baseUrl}${req.api.sync(share.id)}`).pipe(
         HttpClientRequest.setHeaders(req.headers),
         HttpClientRequest.bodyJson({ secret: share.secret, data: Array.from(queued.values()) }),
@@ -311,6 +335,18 @@ const layer = Layer.effect(
       if (disabled) return { id: "", url: "", secret: "" }
       yield* Effect.logInfo("creating share", { sessionID: sessionID })
       const req = yield* request()
+      if (req.local) {
+        const id = shareID()
+        const local = { id, secret: crypto.randomUUID(), url: `${req.local}/share/${id}` }
+        yield* db
+          .insert(SessionShareTable)
+          .values({ session_id: sessionID, ...local })
+          .onConflictDoUpdate({ target: SessionShareTable.session_id, set: local })
+          .pipe(Effect.orDie)
+        const s = yield* InstanceState.get(state)
+        s.shared.set(sessionID, local)
+        return local
+      }
       const result = yield* HttpClientRequest.post(`${req.baseUrl}${req.api.create}`).pipe(
         HttpClientRequest.setHeaders(req.headers),
         HttpClientRequest.bodyJson({ sessionID }),
@@ -355,11 +391,12 @@ const layer = Layer.effect(
       }
 
       const req = yield* request()
-      yield* HttpClientRequest.delete(`${req.baseUrl}${req.api.remove(share.id)}`).pipe(
-        HttpClientRequest.setHeaders(req.headers),
-        HttpClientRequest.bodyJson({ secret: share.secret }),
-        Effect.flatMap((r) => httpOk.execute(r)),
-      )
+      if (!req.local)
+        yield* HttpClientRequest.delete(`${req.baseUrl}${req.api.remove(share.id)}`).pipe(
+          HttpClientRequest.setHeaders(req.headers),
+          HttpClientRequest.bodyJson({ secret: share.secret }),
+          Effect.flatMap((r) => httpOk.execute(r)),
+        )
 
       yield* db.delete(SessionShareTable).where(eq(SessionShareTable.session_id, sessionID)).pipe(Effect.orDie)
       s.shared.delete(sessionID)

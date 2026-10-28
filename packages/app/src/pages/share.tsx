@@ -72,8 +72,13 @@ function normalizeData(shareID: string, items: ShareDataItem[]): NormalizedData 
 }
 
 async function fetchShareData(shareID: string): Promise<NormalizedData> {
-  const shareBase = "https://opncd.ai"
-  const response = await fetch(`${shareBase}/api/share/${shareID}/data`)
+  // Shares are hosted by this deployment's own server (the public opncd.ai
+  // share service is discontinued). In production the page is served from the
+  // same origin, which proxies /global to the control plane.
+  const shareBase = import.meta.env.DEV
+    ? `http://${import.meta.env.VITE_OPENCODE_SERVER_HOST ?? "localhost"}:${import.meta.env.VITE_OPENCODE_SERVER_PORT ?? "4096"}`
+    : window.location.origin
+  const response = await fetch(`${shareBase}/global/share/${encodeURIComponent(shareID)}/data`)
   if (!response.ok) {
     throw new Error(`Failed to fetch share data: ${response.status}`)
   }
