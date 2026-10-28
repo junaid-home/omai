@@ -68,4 +68,9 @@ describe("session routes", () => {
 
     expect(rootSession(sessions.child, async (id) => sessions[id]!)).rejects.toThrow("Session parent cycle: child")
   })
+
+  test("a missing session id lands on the route that opens one", () => {
+    const server = ServerConnection.Key.make("https://web.omai.ch")
+    expect(sessionHref(server, "")).toBe(`/server/${btoa("https://web.omai.ch").replace(/=+$/, "")}/session`)
+  })
 })

@@ -30,6 +30,7 @@ import {
   lazy,
   Match,
   onCleanup,
+  onMount,
   type ParentProps,
   Show,
   Switch,
@@ -39,7 +40,7 @@ import { makeEventListener } from "@solid-primitives/event-listener"
 import { CommandProvider, useCommand, type CommandOption } from "@/context/command"
 import { CommentsProvider } from "@/context/comments"
 import { FileProvider } from "@/context/file"
-import { ServerSDKProvider } from "@/context/server-sdk"
+import { ServerSDKProvider, useServerSDK } from "@/context/server-sdk"
 import { ServerSyncProvider, useServerSync } from "@/context/server-sync"
 import { GlobalProvider, useGlobal } from "@/context/global"
 import { HighlightsProvider } from "@/context/highlights"
@@ -64,6 +65,7 @@ import NewLayout from "@/pages/layout"
 import { ErrorPage } from "./pages/error"
 import { useCheckServerHealth } from "./utils/server-health"
 import { legacySessionHref, legacySessionServer, requireServerKey, sessionHref } from "./utils/session-route"
+import { openProjectImmediate } from "./utils/open-project"
 import { createSessionLineage } from "@/pages/session/session-lineage"
 
 import { SessionPage, SessionRouteErrorBoundary, TargetSessionRouteContent } from "@/pages/session"
@@ -126,6 +128,40 @@ const TargetSessionRoute = () => (
     <TargetSessionRouteContent />
   </TargetServerRoute>
 )
+
+// A server-scoped session URL without a session (a tab saved mid-create, an
+// interrupted open) matched no route and rendered an empty shell. Open the
+// project's newest session instead, creating one if needed.
+const SessionlessServerRoute = () => (
+  <TargetServerRoute>
+    <SessionlessServerRedirect />
+  </TargetServerRoute>
+)
+
+function SessionlessServerRedirect() {
+  const params = useParams<{ serverKey: string }>()
+  const [search] = useSearchParams<{ directory?: string }>()
+  const navigate = useNavigate()
+  const server = useServer()
+  const serverSDK = useServerSDK()
+  onMount(() => {
+    const directory = search.directory ?? server.projects.list()[0]?.worktree
+    if (!directory) return navigate("/projects", { replace: true })
+    const key = requireServerKey(params.serverKey)
+    void openProjectImmediate(
+      directory,
+      (href) => navigate(href, { replace: true }),
+      (id) => sessionHref(key, id),
+      () => serverSDK().client.session.list({ directory }),
+      () => serverSDK().client.session.create({ directory }),
+    )
+  })
+  return (
+    <div class="size-full flex items-center justify-center">
+      <BrandLogo size="large" class="opacity-50 animate-pulse" />
+    </div>
+  )
+}
 
 function LegacyTargetSessionRoute() {
   const params = useParams<{ serverKey: string; id: string }>()
@@ -640,6 +676,7 @@ function Routes(props: { serverScoped?: JSX.Element }) {
       </Route>
       <Route path="/:dir/session/:id" component={NewLayoutLegacySessionRedirect} />
       <Route path="/server/:serverKey/session/:id" component={TargetSessionRoute} />
+      <Route path="/server/:serverKey/session" component={SessionlessServerRoute} />
       <Route path="/new-session" component={DraftRoute} />
     </>
   )

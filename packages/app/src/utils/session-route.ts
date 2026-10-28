@@ -3,6 +3,8 @@ import { ServerConnection } from "@/context/server"
 import { decode64 } from "@/utils/base64"
 
 export function sessionHref(server: ServerConnection.Key, sessionID: string) {
+  // Without a session this is the route that opens (or creates) one.
+  if (!sessionID) return `/server/${base64Encode(server)}/session`
   return `/server/${base64Encode(server)}/session/${sessionID}`
 }
 

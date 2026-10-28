@@ -1,6 +1,6 @@
 import { centralRuntime } from "@/utils/central-state"
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js"
-import { A, useLocation, useNavigate } from "@solidjs/router"
+import { useLocation, useNavigate } from "@solidjs/router"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { Button } from "@opencode-ai/ui/button"
 import { LoaderV2 } from "@opencode-ai/ui/v2/loader-v2"
@@ -18,7 +18,7 @@ import { useAuth } from "@/context/auth"
 import { useDirectoryPicker } from "@/components/directory-picker"
 import { BrandLogo } from "@/components/brand-logo"
 import { DialogOpenPath } from "@/components/dialog-open-path"
-import { openProjectImmediate, projectHref } from "@/utils/open-project"
+import { openProjectImmediate } from "@/utils/open-project"
 import { sessionHref } from "@/utils/session-route"
 
 type ViewMode = "grid" | "list"
@@ -353,9 +353,9 @@ export default function AllProjectsPage() {
                   const projectName = createMemo(() => getProjectName(project.worktree))
                   return (
                     <div class="flex items-center w-full rounded-lg text-13-mono text-text-base hover:bg-surface-raised-base-hover transition-colors group">
-                      <A
-                        href={projectHref(project.worktree)}
-                        class="flex items-center gap-3 flex-1 text-left px-3 py-2.5 cursor-pointer"
+                      <button
+                        type="button"
+                        class="flex items-center gap-3 flex-1 min-w-0 text-left px-3 py-2.5 cursor-pointer"
                         onClick={(event) => handleOpen(project.worktree, event)}
                       >
                         <Icon
@@ -367,7 +367,7 @@ export default function AllProjectsPage() {
                         <Show when={opening() === project.worktree}>
                           <LoaderV2 class="shrink-0 text-text-weak" />
                         </Show>
-                      </A>
+                      </button>
                       <DropdownMenu>
                         <DropdownMenu.Trigger
                           as={IconButton}
@@ -412,13 +412,13 @@ export default function AllProjectsPage() {
                       </div>
                     </Show>
                     <div class="p-3 cursor-pointer flex items-start justify-between">
-                      <A
-                        href={projectHref(project.worktree)}
-                        class="flex flex-col gap-0.5 min-w-0 flex-1 cursor-pointer"
+                      <button
+                        type="button"
+                        class="flex flex-col gap-0.5 min-w-0 flex-1 text-left cursor-pointer"
                         onClick={(event) => handleOpen(project.worktree, event)}
                       >
                         <span class="text-14-medium text-text-strong truncate">{projectName()}</span>
-                      </A>
+                      </button>
                       <DropdownMenu>
                         <DropdownMenu.Trigger
                           as={IconButton}

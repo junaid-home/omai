@@ -38,3 +38,4 @@ tsconfig.tsbuildinfo
 *-plan.md
 **/graphify-out/
 docs/*
+.env.backup*

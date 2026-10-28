@@ -1,6 +1,6 @@
 import { centralRuntime } from "@/utils/central-state"
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js"
-import { A, useLocation, useNavigate } from "@solidjs/router"
+import { useLocation, useNavigate } from "@solidjs/router"
 import { Button } from "@opencode-ai/ui/button"
 import { LoaderV2 } from "@opencode-ai/ui/v2/loader-v2"
 import { Dialog } from "@opencode-ai/ui/dialog"
@@ -17,7 +17,7 @@ import { useServerSDK } from "@/context/server-sdk"
 import { useAuth } from "@/context/auth"
 import { useDirectoryPicker } from "@/components/directory-picker"
 import { DialogOpenPath } from "@/components/dialog-open-path"
-import { openProjectImmediate, projectHref } from "@/utils/open-project"
+import { openProjectImmediate } from "@/utils/open-project"
 import { sessionHref } from "@/utils/session-route"
 
 const INITIAL_SHOW = 5
@@ -236,9 +236,9 @@ export default function ProjectsPage() {
             <For each={visibleProjects()}>
               {(project) => (
                 <div class="flex items-center w-full rounded-lg text-13-mono text-text-base hover:bg-surface-raised-base-hover transition-colors group">
-                  <A
-                    href={projectHref(project.worktree)}
-                    class="flex items-center gap-3 flex-1 text-left px-3 py-2.5 cursor-pointer"
+                  <button
+                    type="button"
+                    class="flex items-center gap-3 flex-1 min-w-0 text-left px-3 py-2.5 cursor-pointer"
                     onClick={(event) => {
                       event.preventDefault()
                       openProject(project.worktree)
@@ -253,7 +253,7 @@ export default function ProjectsPage() {
                     <Show when={opening() === project.worktree}>
                       <LoaderV2 class="shrink-0 text-text-weak" />
                     </Show>
-                  </A>
+                  </button>
                   <DropdownMenu>
                     <DropdownMenu.Trigger
                       as={IconButton}
