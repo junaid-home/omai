@@ -134,7 +134,14 @@ export function northflankStub(input?: { dns?: string; token?: string; pageSize?
       if (kind === "services" && id === "deployment" && action && method === "PATCH") {
         const service = services.get(action)
         if (!service) return fail(404, `Could not find service '${action}'`)
-        service.instances = (payload?.["deployment"] as { instances?: number } | undefined)?.instances
+        const deployment = payload?.["deployment"] as
+          | { instances?: number; external?: { imagePath?: string } }
+          | undefined
+        if (deployment?.instances !== undefined) service.instances = deployment.instances
+        if (deployment?.external?.imagePath) {
+          const current = (service.payload["deployment"] ?? {}) as Record<string, unknown>
+          service.payload["deployment"] = { ...current, external: deployment.external }
+        }
         return json({ data: {} })
       }
 

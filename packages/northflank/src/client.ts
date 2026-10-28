@@ -89,6 +89,11 @@ export function createClient(config: NorthflankConfig) {
     // The /scale endpoint is deprecated in favor of patching the deployment.
     scaleService: (id: string, instances: number) =>
       request("PATCH", `/services/deployment/${id}`, { deployment: { instances } }),
+    getImage: async (id: string) =>
+      (await request<{ data: { deployment?: { external?: { imagePath?: string } } } }>("GET", `/services/${id}`)).data
+        .deployment?.external?.imagePath,
+    setImage: (id: string, imagePath: string) =>
+      request("PATCH", `/services/deployment/${id}`, { deployment: { external: { imagePath } } }),
     pauseService: (id: string) => request("POST", `/services/${id}/pause`, {}),
     resumeService: (id: string) => request("POST", `/services/${id}/resume`, {}),
     deleteService: (id: string) => tolerant(404)(request("DELETE", `/services/${id}`)),

@@ -80,15 +80,18 @@ export function northflankAdapter(config: NorthflankConfig): WorkspaceAdapter {
   }
 
   const ensureService = async (info: WorkspaceInfo, variables: Record<string, string | undefined>) => {
+    const image = /[:@][^/:@]*$/.test(config.image) ? config.image : `${config.image}:latest`
     const existing = await resolve(info.id)
     if (existing) {
       await client().setRuntimeEnvironment(existing.id, variables)
+      // A service keeps the image it was created with; re-provisioning is the
+      // point where it moves onto the currently configured one.
+      if ((await client().getImage(existing.id)) !== image) await client().setImage(existing.id, image)
       return { id: existing.id, created: false }
     }
-    const image = /[:@][^/:@]*$/.test(config.image) ? config.image : `${config.image}:latest`
     const created = await client().createService<{ data: { id: string } }>({
       name: serviceName(info.id),
-      description: "OpenCode project MicroVM",
+      description: describe(info),
       billing: { deploymentPlan: config.plan },
       // Start with no instances: attaching a volume to a running service
       // restarts it, so booting before the attach costs a whole extra boot.
@@ -212,4 +215,25 @@ export function northflankAdapter(config: NorthflankConfig): WorkspaceAdapter {
       }
     },
   }
+}
+
+// Northflank caps service descriptions at 200 characters.
+const DESCRIPTION_MAX = 200
+
+/** Who and what the VM is for, so the Northflank dashboard is readable without the control plane. */
+function describe(info: WorkspaceInfo) {
+  const owner = readOwner(info.extra)
+  const user = owner ? `user: ${owner.username}${owner.email ? ` (${owner.email})` : ""}` : undefined
+  const parts = ["OpenCode project MicroVM", user, `project: ${info.directory}`, `workspace: ${info.id}`]
+  const text = parts.filter((part) => part !== undefined).join(" · ")
+  return text.length <= DESCRIPTION_MAX ? text : `${text.slice(0, DESCRIPTION_MAX - 1)}…`
+}
+
+function readOwner(extra: unknown): { username: string; email?: string } | undefined {
+  if (!extra || typeof extra !== "object" || !("owner" in extra)) return undefined
+  const owner = extra.owner
+  if (!owner || typeof owner !== "object" || !("username" in owner) || typeof owner.username !== "string")
+    return undefined
+  const email = "email" in owner && typeof owner.email === "string" ? owner.email : undefined
+  return { username: owner.username, email }
 }

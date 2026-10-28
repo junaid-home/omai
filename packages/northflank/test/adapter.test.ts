@@ -117,6 +117,43 @@ describe("northflank.adapter", () => {
     ).toHaveLength(1)
   })
 
+  test("create describes the service with its project, owner and workspace", async () => {
+    const { stub, adapter, info, directory } = setup()
+    const configured = await adapter.configure(
+      { ...info, extra: { owner: { username: "alice", email: "alice@example.test" } } },
+      { instance: { directory } },
+    )
+
+    await adapter.create(configured, {})
+
+    const description = [...stub.services.values()][0]!.payload.description as string
+    expect(description).toContain(`project: ${directory}`)
+    expect(description).toContain("user: alice (alice@example.test)")
+    expect(description).toContain(`workspace: ${info.id}`)
+    expect(description.length).toBeLessThanOrEqual(200)
+  })
+
+  test("create describes a service with no known owner without failing", async () => {
+    const { stub, adapter, info, directory } = setup()
+    await adapter.create(await adapter.configure(info, { instance: { directory } }), {})
+
+    const description = [...stub.services.values()][0]!.payload.description as string
+    expect(description).toContain(`project: ${directory}`)
+    expect(description).not.toContain("user:")
+  })
+
+  test("create moves an existing service onto the configured image", async () => {
+    const { stub, adapter, info, directory } = setup()
+    const configured = await adapter.configure(info, { instance: { directory } })
+    await adapter.create(configured, {})
+    const service = [...stub.services.values()][0]!
+    service.payload["deployment"] = { instances: 1, external: { imagePath: "jj123dev/old-image:latest" } }
+
+    await adapter.create(configured, {})
+
+    expect(service.payload["deployment"]).toMatchObject({ external: { imagePath: "jj123dev/omaiflank:latest" } })
+  })
+
   test("start scales a service left at zero instances", async () => {
     const { stub, adapter, info, directory } = setup()
     const configured = await adapter.configure(info, { instance: { directory } })

@@ -163,7 +163,11 @@ function proxyRemote(
   workspace: Workspace.Info,
   target: RemoteTarget,
   url: URL,
-): Effect.Effect<HttpServerResponse.HttpServerResponse, never, Scope.Scope | Socket.WebSocketConstructor | Workspace.Service> {
+): Effect.Effect<
+  HttpServerResponse.HttpServerResponse,
+  never,
+  Scope.Scope | Socket.WebSocketConstructor | Workspace.Service
+> {
   return Effect.gen(function* () {
     // Touch first so a sweep already waiting on the lock sees the request and
     // aborts; then wake a suspended VM and hold until its sync stream is up.
@@ -190,20 +194,31 @@ function proxyRemote(
     // stream) is open, so a browser tab that is merely viewing does not get
     // paused by the idle sweeper. The fiber is scoped to this request and is
     // interrupted when the client disconnects.
-    const isEventStream = request.method === "GET" && (url.pathname === "/global/event" || request.headers["accept"]?.includes("text/event-stream"))
+    const isEventStream =
+      request.method === "GET" &&
+      (url.pathname === "/global/event" || request.headers["accept"]?.includes("text/event-stream"))
     if (isEventStream) {
       yield* Effect.forkScoped(
         Effect.gen(function* () {
           yield* lifecycle.touch(workspace.id)
           yield* Effect.sleep("30 seconds")
-        }).pipe(Effect.repeat(Schedule.spaced("30 seconds")), Effect.catchCause(() => Effect.void)),
+        }).pipe(
+          Effect.repeat(Schedule.spaced("30 seconds")),
+          Effect.catchCause(() => Effect.void),
+        ),
       )
     }
-    if (headers["upgrade"]?.toLowerCase() === "websocket") return yield* HttpApiProxy.websocket(request, proxyURL, target.headers)
+    if (headers["upgrade"]?.toLowerCase() === "websocket")
+      return yield* HttpApiProxy.websocket(request, proxyURL, target.headers)
     const response = yield* HttpApiProxy.http(client, proxyURL, target.headers, request)
     // A zip upload into a VM waiting at the provisioner's upload step is the
     // step itself: its success finishes the job.
-    if (request.method === "POST" && url.pathname === "/global/file/create" && response.status >= 200 && response.status < 300)
+    if (
+      request.method === "POST" &&
+      url.pathname === "/global/file/create" &&
+      response.status >= 200 &&
+      response.status < 300
+    )
       yield* provisioner.uploaded(workspace.id)
     const sync = Fence.parse(new Headers(response.headers))
     if (sync) {
@@ -271,8 +286,7 @@ function resolveRequestDirectory(
   // creation, ...) is control-plane scoped: falling back to the server's cwd
   // there provisioned a MicroVM for the repo itself and proxied global
   // endpoints into it.
-  const explicit =
-    session?.directory || url.searchParams.get("directory") || request.headers["x-opencode-directory"]
+  const explicit = session?.directory || url.searchParams.get("directory") || request.headers["x-opencode-directory"]
   if (!explicit) return Effect.succeed(undefined)
   const directory = decodeDirectory(explicit)
   // VM-backed project paths live under the VM projects root and are not part
@@ -331,7 +345,8 @@ function awaitProvisioned(
   return Effect.gen(function* () {
     const job = yield* provisioner.await(workspaceID, provisionWaitMs())
     if (!job) return RequestPlan.UnavailableWorkspace()
-    if (job.status === "failed") return RequestPlan.ProvisionFailed({ error: job.error ?? "Workspace provisioning failed" })
+    if (job.status === "failed")
+      return RequestPlan.ProvisionFailed({ error: job.error ?? "Workspace provisioning failed" })
     if (!ProvisionState.proxyable(job)) return RequestPlan.Provisioning({ step: job.step })
     const fresh = yield* Workspace.Service.use((svc) => svc.get(workspaceID))
     if (!fresh) return RequestPlan.UnavailableWorkspace()
@@ -373,7 +388,12 @@ function planRequest(
         const owned = yield* Workspace.Service.use((svc) => svc.getByDirectory(resolved))
         if (owned) return yield* planProvisioned(provisioner, request, url, owned)
         if (Flag.OPENCODE_WORKSPACE_ADAPTER) {
-          const job = yield* provisioner.start({ directory: resolved, mode: "empty" })
+          const principal = yield* Authentication.Current
+          const job = yield* provisioner.start({
+            directory: resolved,
+            mode: "empty",
+            owner: principal && { userID: principal.userID, username: principal.username, email: principal.email },
+          })
           return yield* awaitProvisioned(provisioner, request, url, job.workspaceID)
         }
       }
@@ -392,7 +412,11 @@ function routeWorkspace<E>(
   provisioner: Provisioner.Interface,
   effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, WorkspaceRouteContext>,
   plan: RequestPlan,
-): Effect.Effect<HttpServerResponse.HttpServerResponse, E, Scope.Scope | Socket.WebSocketConstructor | Workspace.Service> {
+): Effect.Effect<
+  HttpServerResponse.HttpServerResponse,
+  E,
+  Scope.Scope | Socket.WebSocketConstructor | Workspace.Service
+> {
   return RequestPlan.$match(plan, {
     InvalidWorkspace: () =>
       Effect.succeed(
@@ -435,12 +459,7 @@ function routeWorkspace<E>(
         }),
       ),
     Local: ({ directory, workspaceID }) =>
-      effect.pipe(
-        Effect.provideService(
-          WorkspaceRouteContext,
-          WorkspaceRouteContext.of({ directory, workspaceID }),
-        ),
-      ),
+      effect.pipe(Effect.provideService(WorkspaceRouteContext, WorkspaceRouteContext.of({ directory, workspaceID }))),
   })
 }
 

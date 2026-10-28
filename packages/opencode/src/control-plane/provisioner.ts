@@ -18,8 +18,13 @@ import { WorkspaceAdapterRuntime } from "./workspace-adapter-runtime"
 
 export type Job = ProvisionState.State & { workspaceID: WorkspaceV2.ID; directory: string }
 
+/** Who asked for the VM; stored on the row and shown in the VM's description. */
+export type Owner = { readonly userID: string; readonly username: string; readonly email: string }
+
+type StartInput = { directory: string; mode: ProvisionState.State["mode"]; owner?: Owner }
+
 export interface Interface {
-  readonly start: (input: { directory: string; mode: ProvisionState.State["mode"] }) => Effect.Effect<Job>
+  readonly start: (input: StartInput) => Effect.Effect<Job>
   readonly status: (directory: string) => Effect.Effect<Job | undefined>
   readonly recover: (workspace: Workspace.Info) => Effect.Effect<Job>
   /** Resolves once the job is ready, waiting for its upload, or failed, or once timeoutMs elapses. */
@@ -257,10 +262,7 @@ export const layer = Layer.effect(
         if (exit._tag === "Failure") yield* fail(id, message(exit.cause))
       })
 
-    const create = Effect.fn("Provisioner.create")(function* (input: {
-      directory: string
-      mode: ProvisionState.State["mode"]
-    }) {
+    const create = Effect.fn("Provisioner.create")(function* (input: StartInput) {
       const type = Flag.OPENCODE_WORKSPACE_ADAPTER
       if (!type) return yield* Effect.die(new Error("No workspace adapter is configured"))
       const ctx = yield* store.load({ directory: input.directory })
@@ -272,16 +274,18 @@ export const layer = Layer.effect(
       })
       // The row exists before any VM does, and carries the job from birth.
       const info = yield* workspace
-        .insert({ type, branch: null, projectID: ctx.project.id, extra: ProvisionState.write(null, state) })
+        .insert({
+          type,
+          branch: null,
+          projectID: ctx.project.id,
+          extra: ProvisionState.write(input.owner ? { owner: input.owner } : null, state),
+        })
         .pipe(Effect.provideService(InstanceRef, ctx))
       yield* fork(info.id, run(info.id))
       return toJob(info) ?? { ...state, workspaceID: info.id, directory: input.directory }
     })
 
-    const begin = Effect.fn("Provisioner.begin")(function* (input: {
-      directory: string
-      mode: ProvisionState.State["mode"]
-    }) {
+    const begin = Effect.fn("Provisioner.begin")(function* (input: StartInput) {
       const existing = yield* workspace.getByDirectory(input.directory)
       if (!existing) return yield* create(input)
       const state = ProvisionState.read(existing.extra)
@@ -308,10 +312,7 @@ export const layer = Layer.effect(
     })
 
     // Concurrent starts for one directory share a single attempt.
-    const start = Effect.fn("Provisioner.start")(function* (input: {
-      directory: string
-      mode: ProvisionState.State["mode"]
-    }) {
+    const start = Effect.fn("Provisioner.start")(function* (input: StartInput) {
       const entry = yield* Effect.sync(() => {
         const pending = starting.get(input.directory)
         if (pending) return { deferred: pending, owner: false }

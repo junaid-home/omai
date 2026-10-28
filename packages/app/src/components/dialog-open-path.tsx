@@ -1,5 +1,5 @@
 import { centralRuntime } from "@/utils/central-state"
-import { createMemo, createSignal, For, onCleanup, Show } from "solid-js"
+import { createMemo, createSignal, onCleanup, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Button } from "@opencode-ai/ui/button"
 import { Dialog } from "@opencode-ai/ui/dialog"
@@ -54,11 +54,6 @@ function uploadZip(url: string, file: File, headers: Record<string, string>, onP
 
 type ProvisionStep = "creating" | "booting" | "setup" | "upload" | "done"
 
-const PROGRESS_STEPS = ["creating", "booting", "setup", "done"] as const
-
-// "upload" is the zip variant of the setup step.
-const progressIndex = (step: ProvisionStep) => PROGRESS_STEPS.indexOf(step === "upload" ? "setup" : step)
-
 export function DialogOpenPath(props: DialogOpenPathProps) {
   const dialog = useDialog()
   const serverSync = useServerSync()
@@ -99,9 +94,12 @@ export function DialogOpenPath(props: DialogOpenPathProps) {
   const resetFailure = () => {
     if (progress.failed) setProgress({ active: false, failed: false, error: "" })
   }
+  const [tick, setTick] = createSignal(0)
+  const ticker = setInterval(() => setTick((value) => value + 1), 400)
   let disposed = false
   onCleanup(() => {
     disposed = true
+    clearInterval(ticker)
   })
 
   const handleFileChange = (e: Event) => {
@@ -362,59 +360,28 @@ export function DialogOpenPath(props: DialogOpenPathProps) {
           </Show>
 
           <Show when={progress.active}>
-            <div class="flex flex-col gap-3 rounded-lg border border-border-base p-4">
+            <div class="flex flex-col items-center gap-3 py-6">
               <Show when={running()}>
-                <div class="flex flex-col items-center gap-2 pb-2">
-                  <BrandLogo size="large" class="opacity-50 animate-pulse" />
-                  <div class="text-11-regular text-text-weak">{language.t("dialog.createProject.creating")}</div>
-                </div>
+                <BrandLogo size="large" class="opacity-50 animate-pulse" />
               </Show>
-              <For each={PROGRESS_STEPS}>
-                {(step, index) => {
-                  const state = () => {
-                    const current = progressIndex(progress.step)
-                    if (index() < current) return "done"
-                    if (index() > current) return "pending"
-                    return progress.failed ? "failed" : "active"
-                  }
-                  return (
-                    <div class="flex flex-col gap-1">
-                      <div class="flex items-center gap-2">
-                        <Show
-                          when={state() === "done"}
-                          fallback={
-                            <span
-                              classList={{
-                                "size-2 rounded-full shrink-0 mx-1": true,
-                                "bg-icon-weak-base": state() === "pending",
-                                "bg-icon-base animate-pulse": state() === "active",
-                                "bg-icon-critical-base": state() === "failed",
-                              }}
-                            />
-                          }
-                        >
-                          <Icon name="check-small" size="small" class="text-icon-success-base shrink-0" />
-                        </Show>
-                        <span
-                          classList={{
-                            "text-14-regular": true,
-                            "text-text-strong": state() === "active" || state() === "failed",
-                            "text-text-base": state() === "done",
-                            "text-text-weaker": state() === "pending",
-                          }}
-                        >
-                          {language.t(`dialog.createProject.progress.${step}`)}
-                        </span>
-                      </div>
-                      <Show when={state() === "failed"}>
-                        <div class="text-12-regular text-icon-critical-base pl-6">{progress.error}</div>
-                      </Show>
-                    </div>
-                  )
+              <div
+                classList={{
+                  "text-14-regular": true,
+                  "text-text-strong": running(),
+                  "text-icon-critical-base": progress.failed,
                 }}
-              </For>
+              >
+                {language.t(`dialog.createProject.progress.${progress.step === "upload" ? "setup" : progress.step}`)}
+                <Show when={running()}>
+                  {/* Fixed width so the growing dots never shift the label. */}
+                  <span class="inline-block w-[3ch] text-left">{".".repeat((tick() % 3) + 1)}</span>
+                </Show>
+              </div>
+              <Show when={progress.failed}>
+                <div class="text-12-regular text-text-weak text-center">{progress.error}</div>
+              </Show>
               <Show when={uploadPercent() !== null}>
-                <div class="w-full max-w-64 pl-6">
+                <div class="w-full max-w-64">
                   <Progress value={uploadPercent() ?? 0} showValueLabel>
                     {language.t("dialog.createProject.step.uploading")}
                   </Progress>

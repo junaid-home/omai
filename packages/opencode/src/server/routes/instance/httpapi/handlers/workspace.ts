@@ -6,6 +6,7 @@ import { Workspace } from "@/control-plane/workspace"
 import { Provisioner } from "@/control-plane/provisioner"
 import { vmProjectsRoot } from "@/control-plane/vm-projects"
 import { Flag } from "@opencode-ai/core/flag/flag"
+import { Authentication } from "@opencode-ai/core/authentication"
 import { WorkspaceRouteContext } from "../middleware/workspace-routing"
 import * as InstanceState from "@/effect/instance-state"
 import { Vcs } from "@/project/vcs"
@@ -99,7 +100,12 @@ export const workspaceHandlers = HttpApiBuilder.group(InstanceHttpApi, "workspac
       const relative = root ? path.relative(path.resolve(root), directory) : directory
       if (root && (!relative || relative.startsWith("..") || path.isAbsolute(relative)))
         return yield* rejected(`Project directory must be under ${root}`)
-      return yield* provisioner.start({ directory, mode: ctx.payload.mode })
+      const principal = yield* Authentication.Current
+      return yield* provisioner.start({
+        directory,
+        mode: ctx.payload.mode,
+        owner: principal && { userID: principal.userID, username: principal.username, email: principal.email },
+      })
     })
 
     const provisionStatus = Effect.fn("WorkspaceHttpApi.provisionStatus")(function* () {

@@ -1216,10 +1216,10 @@ export const dict = {
   // Create Project Dialog
   "dialog.createProject.title": "Create Project",
   "dialog.createProject.creating": "Creating project...",
-  "dialog.createProject.progress.creating": "Creating VM",
+  "dialog.createProject.progress.creating": "Creating microVM",
   "dialog.createProject.progress.booting": "Booting",
-  "dialog.createProject.progress.setup": "Setting up project",
-  "dialog.createProject.progress.done": "Opening",
+  "dialog.createProject.progress.setup": "Setting up",
+  "dialog.createProject.progress.done": "Starting",
   "dialog.createProject.retry": "Try again",
   "dialog.createProject.nameLabel": "Project Name",
   "dialog.createProject.namePlaceholder": "my-project",

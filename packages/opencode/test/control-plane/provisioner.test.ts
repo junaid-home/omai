@@ -103,7 +103,7 @@ type Script = {
 }
 
 function scriptedAdapter(vm: { url: string }, script: Script = {}) {
-  const calls = { create: 0, remove: [] as boolean[] }
+  const calls = { create: 0, remove: [] as boolean[], extra: [] as unknown[] }
   const adapter: WorkspaceAdapter = {
     name: "scripted",
     description: "scripted test adapter",
@@ -112,8 +112,9 @@ function scriptedAdapter(vm: { url: string }, script: Script = {}) {
       ...info,
       directory: info.directory ?? context?.instance?.directory ?? "/unused",
     }),
-    async create() {
+    async create(info) {
       calls.create += 1
+      calls.extra.push(info.extra)
       await script.create?.()
     },
     async remove(_info, context) {
@@ -170,6 +171,24 @@ describe("control-plane provisioner", () => {
         expect(job).toMatchObject({ status: "ready", step: "done" })
         expect(Object.keys(job.timings).sort()).toEqual(["booting", "creating", "setup"])
         expect(ctx.vm.state.created).toEqual([ctx.directory])
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "the job records who started it and hands that to the adapter",
+    () =>
+      Effect.gen(function* () {
+        const ctx = yield* setup()
+        const provisioner = yield* Provisioner.Service
+        const workspace = yield* Workspace.Service
+        const owner = { userID: "usr_1", username: "alice", email: "alice@example.test" }
+
+        const job = yield* provisioner.start({ directory: ctx.directory, mode: "empty", owner })
+        yield* settle(provisioner, ctx.directory, finished)
+
+        expect((yield* workspace.get(job.workspaceID))?.extra).toMatchObject({ owner })
+        expect(ctx.calls.extra[0]).toMatchObject({ owner })
       }),
     { git: true },
   )
