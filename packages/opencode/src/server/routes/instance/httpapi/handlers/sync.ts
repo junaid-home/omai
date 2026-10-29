@@ -2,12 +2,16 @@ import { Workspace } from "@/control-plane/workspace"
 import * as InstanceState from "@/effect/instance-state"
 import { Session } from "@/session/session"
 import { Database } from "@opencode-ai/core/database/database"
+import { WorkspaceV2 } from "@opencode-ai/core/workspace"
 import { EventV2 } from "@opencode-ai/core/event"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventTable } from "@opencode-ai/core/event/sql"
+import { Flag } from "@opencode-ai/core/flag/flag"
+import { SessionTable } from "@opencode-ai/core/session/sql"
 import { asc } from "drizzle-orm"
 import { and } from "drizzle-orm"
 import { eq } from "drizzle-orm"
+import { inArray } from "drizzle-orm"
 import { lte } from "drizzle-orm"
 import { not } from "drizzle-orm"
 import { or } from "drizzle-orm"
@@ -71,13 +75,28 @@ export const syncHandlers = HttpApiBuilder.group(InstanceHttpApi, "sync", (handl
 
     const history = Effect.fn("SyncHttpApi.history")(function* (ctx: { payload: typeof HistoryPayload.Type }) {
       const exclude = Object.entries(ctx.payload)
+      // A MicroVM shares the deployment's database: without this scope it
+      // returns every project's events (hundreds of MB), and building that
+      // reply gets the VM killed for memory each time a control plane connects.
+      const own = Flag.OPENCODE_WORKSPACE_ID
+        ? inArray(
+            EventTable.aggregate_id,
+            db
+              .select({ id: SessionTable.id })
+              .from(SessionTable)
+              .where(eq(SessionTable.workspace_id, WorkspaceV2.ID.make(Flag.OPENCODE_WORKSPACE_ID))),
+          )
+        : undefined
       return yield* db
         .select()
         .from(EventTable)
         .where(
-          exclude.length > 0
-            ? not(or(...exclude.map(([id, seq]) => and(eq(EventTable.aggregate_id, id), lte(EventTable.seq, seq))))!)
-            : undefined,
+          and(
+            own,
+            exclude.length > 0
+              ? not(or(...exclude.map(([id, seq]) => and(eq(EventTable.aggregate_id, id), lte(EventTable.seq, seq))))!)
+              : undefined,
+          ),
         )
         .orderBy(asc(EventTable.seq))
         .pipe(Effect.orDie)

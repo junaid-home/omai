@@ -215,26 +215,31 @@ export const layer = Layer.effect(
       if (!target || !info.directory) return
       const url = route(target.url, "/global/file/create")
       url.searchParams.set("directory", info.directory)
-      const response = yield* http
-        .execute(
-          HttpClientRequest.post(url, {
-            headers: new Headers(target.headers),
-            body: HttpBody.jsonUnsafe({ path: info.directory }),
-          }),
-        )
-        .pipe(
-          Effect.timeoutOrElse({
-            duration: "60 seconds",
-            orElse: () => Effect.die(new Error(`Timed out while ${describe("setup")}`)),
-          }),
-        )
-      const body = (yield* response.json.pipe(Effect.catchCause(() => Effect.succeed(undefined)))) as
-        | { success?: boolean; errors?: { message?: string }[] }
-        | undefined
-      if (response.status >= 200 && response.status < 300 && body?.success !== false) return
-      return yield* Effect.die(
-        new Error(body?.errors?.[0]?.message ?? `Project setup failed with HTTP ${response.status}`),
-      )
+      const directory = info.directory
+      // A failed setup deletes the VM, so a passing gateway 5xx or dropped
+      // connection is retried (setup is safe to re-run); a rejection is final.
+      yield* Effect.gen(function* () {
+        const response = yield* http
+          .execute(
+            HttpClientRequest.post(url, {
+              headers: new Headers(target.headers),
+              body: HttpBody.jsonUnsafe({ path: directory }),
+            }),
+          )
+          .pipe(
+            Effect.timeoutOrElse({
+              duration: "60 seconds",
+              orElse: () => Effect.fail(new Error(`Timed out while ${describe("setup")}`)),
+            }),
+          )
+        const body = (yield* response.json.pipe(Effect.catchCause(() => Effect.succeed(undefined)))) as
+          | { success?: boolean; errors?: { message?: string }[] }
+          | undefined
+        if (response.status >= 200 && response.status < 300 && body?.success !== false) return
+        const error = new Error(body?.errors?.[0]?.message ?? `Project setup failed with HTTP ${response.status}`)
+        if (response.status >= 500) return yield* Effect.fail(error)
+        return yield* Effect.die(error)
+      }).pipe(Effect.retry({ times: 5, schedule: Schedule.spaced("2 seconds") }), Effect.orDie)
     })
 
     const next = (state: ProvisionState.State): ProvisionState.State["step"] => {

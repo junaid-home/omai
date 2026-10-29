@@ -2,6 +2,7 @@ import { afterEach, describe, expect, mock } from "bun:test"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Context, Effect, Layer } from "effect"
 import { Flag } from "@opencode-ai/core/flag/flag"
+import { WorkspaceV2 } from "@opencode-ai/core/workspace"
 import { SyncPaths } from "../../src/server/routes/instance/httpapi/groups/sync"
 import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
 import { Session } from "@/session/session"
@@ -68,6 +69,31 @@ describe("sync HttpApi", () => {
         })
         expect(replayed.status).toBe(200)
         expect(yield* replayed.json).toEqual({ sessionID: session.id })
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
+
+  it.instance(
+    "a MicroVM's history only holds its own workspace's sessions",
+    () =>
+      Effect.gen(function* () {
+        const tmp = yield* TestInstance
+        const headers = { "x-opencode-directory": tmp.directory, "content-type": "application/json" }
+        const own = yield* Session.use.create({ title: "own" })
+        const other = yield* Session.use.create({ title: "another project" })
+        const workspaceID = WorkspaceV2.ID.make("wrk_own")
+        yield* Session.use.setWorkspace({ sessionID: own.id, workspaceID })
+        yield* Session.use.setWorkspace({ sessionID: other.id, workspaceID: WorkspaceV2.ID.make("wrk_other") })
+        const original = Flag.OPENCODE_WORKSPACE_ID
+        Flag.OPENCODE_WORKSPACE_ID = workspaceID
+        const history = yield* requestInDirectory(SyncPaths.history, tmp.directory, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({}),
+        }).pipe(Effect.ensuring(Effect.sync(() => (Flag.OPENCODE_WORKSPACE_ID = original))))
+
+        const rows = (yield* history.json) as Array<{ aggregate_id: string }>
+        expect(new Set(rows.map((row) => row.aggregate_id))).toEqual(new Set([own.id]))
       }),
     { git: true, config: { formatter: false, lsp: false } },
   )

@@ -66,7 +66,7 @@ const stops: Array<() => void> = []
 
 /** Stand-in for `omai serve` inside the MicroVM: health, sync stream, and folder creation. */
 function vmStub() {
-  const state = { up: true, created: [] as string[], createFails: undefined as string | undefined }
+  const state = { up: true, created: [] as string[], createFails: undefined as string | undefined, unavailable: 0 }
   const server = Bun.serve({
     port: 0,
     async fetch(request) {
@@ -84,6 +84,10 @@ function vmStub() {
         )
       if (url.pathname === "/sync/history") return Response.json([])
       if (url.pathname === "/global/file/create") {
+        if (state.unavailable > 0) {
+          state.unavailable -= 1
+          return new Response("no healthy upstream", { status: 503 })
+        }
         if (state.createFails)
           return Response.json({ success: false, errors: [{ message: state.createFails }] }, { status: 400 })
         state.created.push(url.searchParams.get("directory") ?? "")
@@ -171,6 +175,24 @@ describe("control-plane provisioner", () => {
         expect(job).toMatchObject({ status: "ready", step: "done" })
         expect(Object.keys(job.timings).sort()).toEqual(["booting", "creating", "setup"])
         expect(ctx.vm.state.created).toEqual([ctx.directory])
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "a passing 503 during setup is retried instead of deleting the VM",
+    () =>
+      Effect.gen(function* () {
+        const ctx = yield* setup()
+        const provisioner = yield* Provisioner.Service
+        ctx.vm.state.unavailable = 2
+
+        yield* provisioner.start({ directory: ctx.directory, mode: "empty" })
+        const job = yield* settle(provisioner, ctx.directory, finished)
+
+        expect(job).toMatchObject({ status: "ready", step: "done" })
+        expect(ctx.vm.state.created).toEqual([ctx.directory])
+        expect(ctx.calls.remove).toEqual([])
       }),
     { git: true },
   )
