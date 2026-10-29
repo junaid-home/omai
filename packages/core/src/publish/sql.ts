@@ -18,7 +18,7 @@ export const PublishDeploymentTable = namespace.table(
     status: text().notNull().$type<"deploying" | "live" | "failed">(),
     custom_domain: text(),
     custom_domain_status: text().$type<"initializing" | "pending" | "active" | "error">(),
-    runtime: text().$type<"pages" | "workers">(),
+    runtime: text().$type<"pages" | "workers" | "platform">(),
     ...Timestamps,
   },
   (table) => [index("publish_deployment_project_idx").on(table.project_id, table.time_created, table.id)],

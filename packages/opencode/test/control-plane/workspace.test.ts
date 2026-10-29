@@ -37,6 +37,7 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 const originalEnv = {
   OPENCODE_WORKSPACE_CONNECT_TIMEOUT_MS: process.env.OPENCODE_WORKSPACE_CONNECT_TIMEOUT_MS,
   OPENCODE_WORKSPACE_STREAM_IDLE_MS: process.env.OPENCODE_WORKSPACE_STREAM_IDLE_MS,
+  OPENCODE_WORKSPACE_HISTORY_TIMEOUT_MS: process.env.OPENCODE_WORKSPACE_HISTORY_TIMEOUT_MS,
   OPENCODE_AUTH_CONTENT: process.env.OPENCODE_AUTH_CONTENT,
   OPENCODE_EXPERIMENTAL_WORKSPACES: process.env.OPENCODE_EXPERIMENTAL_WORKSPACES,
   OTEL_EXPORTER_OTLP_HEADERS: process.env.OTEL_EXPORTER_OTLP_HEADERS,
@@ -1239,6 +1240,73 @@ describe("workspace sync state", () => {
     { git: true },
   )
 
+  // A VM that has just started can be slow to answer (or time out on) its
+  // history while it already serves prompts. The first prompt's live events
+  // must still reach the browser; a refresh reads them from the database.
+  const liveDuringHistory = (history: () => Promise<Response>) =>
+    Effect.gen(function* () {
+      const instance = yield* requireInstance
+      const workspace = yield* Workspace.Service
+      const encoder = new TextEncoder()
+      const live = JSON.stringify({ directory: "/vm/project", payload: { type: "message.part.delta", properties: { delta: "hi" } } })
+      const vm = Bun.serve({
+        port: 0,
+        idleTimeout: 0,
+        fetch(request) {
+          const url = new URL(request.url)
+          if (url.pathname === "/sync/history") return history()
+          return new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(encoder.encode(":\n\n"))
+                setTimeout(() => controller.enqueue(encoder.encode(`data: ${live}\n\n`)), 200)
+              },
+            }),
+            { headers: { "content-type": "text/event-stream" } },
+          )
+        },
+      })
+      yield* Effect.addFinalizer(() => Effect.sync(() => vm.stop(true)))
+      const type = unique("live-during-history")
+      const info = workspaceInfo(instance.project.id, type)
+      yield* insertWorkspace(info)
+      registerAdapter(instance.project.id, type, remoteAdapter(`http://127.0.0.1:${vm.port}`).adapter)
+      yield* Effect.addFinalizer(() => workspace.remove(info.id).pipe(Effect.ignore))
+      const captured = captureGlobalEvents()
+      yield* Effect.addFinalizer(() => Effect.sync(() => captured.dispose()))
+
+      yield* workspace.startSync(info)
+
+      yield* eventuallyEffect(
+        Effect.sync(() => {
+          expect(
+            captured.events.some(
+              (event) => event.workspace === info.id && (event.payload as { type?: string }).type === "message.part.delta",
+            ),
+          ).toBe(true)
+        }),
+        2_500,
+      )
+      return { workspace, info }
+    })
+
+  it.instance(
+    "live events reach the browser while history is still loading",
+    () => liveDuringHistory(() => Bun.sleep(5_000).then(() => Response.json([]))).pipe(Effect.asVoid),
+    { git: true },
+  )
+
+  it.instance(
+    "a history timeout keeps the live stream instead of dropping it",
+    () =>
+      Effect.gen(function* () {
+        process.env.OPENCODE_WORKSPACE_HISTORY_TIMEOUT_MS = "100"
+        const result = yield* liveDuringHistory(() => Bun.sleep(5_000).then(() => Response.json([])))
+        expect(yield* result.workspace.isSynced(result.info.id)).toBe(true)
+      }),
+    { git: true },
+  )
+
   it.instance(
     "a sync stream that goes silent counts as disconnected",
     () =>
@@ -1519,14 +1587,14 @@ describe("workspace sync state", () => {
     }),
   )
 
-  it.live("remote history HTTP failures set error", () =>
+  it.live("remote history HTTP failures keep the live stream connected", () =>
     Effect.gen(function* () {
       yield* HttpServer.serveEffect()(
         Effect.gen(function* () {
           const req = yield* HttpServerRequest.HttpServerRequest
           const url = new URL(req.url, "http://localhost")
           if (url.pathname === "/history-failed/global/event")
-            return HttpServerResponse.fromWeb(eventStreamResponse([], false))
+            return HttpServerResponse.fromWeb(eventStreamResponse())
           if (url.pathname === "/history-failed/sync/history")
             return HttpServerResponse.text("history failed", { status: 500 })
           return HttpServerResponse.fromWeb(Response.json([]))
@@ -1547,12 +1615,18 @@ describe("workspace sync state", () => {
 
             yield* workspace.startWorkspaceSyncing(instance.project.id)
 
+            // History is retried, then given up on: the live stream is what
+            // carries the user's prompts, so the workspace stays usable.
             yield* eventuallyEffect(
               Effect.gen(function* () {
-                expect((yield* workspace.status()).find((item) => item.workspaceID === info.id)?.status).toBe("error")
+                expect((yield* workspace.status()).find((item) => item.workspaceID === info.id)?.status).toBe(
+                  "connected",
+                )
               }),
+              8_000,
             )
-            expect(yield* workspace.isSyncing(info.id)).toBe(false)
+            expect(yield* workspace.isSyncing(info.id)).toBe(true)
+            expect(yield* workspace.isSynced(info.id)).toBe(true)
             yield* workspace.remove(info.id)
           }),
         { git: true },
@@ -1705,6 +1779,72 @@ describe("workspace sync state", () => {
         { git: true },
       )
     }),
+  )
+
+  it.instance(
+    "a live sync event that arrives during history is replayed after it, in order",
+    () =>
+      Effect.gen(function* () {
+        const instance = yield* requireInstance
+        const workspace = yield* Workspace.Service
+        const sessionSvc = yield* SessionNs.Service
+        const type = unique("ordered")
+        const info = workspaceInfo(instance.project.id, type)
+        yield* insertWorkspace(info)
+        const created = yield* sessionSvc.create({ title: "before" })
+        yield* attachSessionToWorkspace(created.id, info.id)
+        const next = ((yield* sessionSequence(created.id)) ?? -1) + 1
+        const syncEvent = (seq: number, title: string) => ({
+          id: `evt_ordered_${seq}_${created.id}`,
+          aggregateID: created.id,
+          seq,
+          type: "session.updated.1",
+          data: { sessionID: created.id, info: { ...created, workspaceID: info.id, title } },
+        })
+        const encoder = new TextEncoder()
+        // The live event (seq N+1) is sent at once; history (seq N) only after
+        // a delay, so the live one arrives first.
+        const vm = Bun.serve({
+          port: 0,
+          idleTimeout: 0,
+          async fetch(request) {
+            const url = new URL(request.url)
+            if (url.pathname === "/sync/history") {
+              await Bun.sleep(500)
+              const event = syncEvent(next, "history")
+              return Response.json([
+                { id: event.id, aggregate_id: event.aggregateID, seq: event.seq, type: event.type, data: event.data },
+              ])
+            }
+            const live = JSON.stringify({ directory: "remote-dir", payload: { type: "sync", syncEvent: syncEvent(next + 1, "live") } })
+            return new Response(
+              new ReadableStream({
+                start(controller) {
+                  controller.enqueue(encoder.encode(`:\n\ndata: ${live}\n\n`))
+                },
+              }),
+              { headers: { "content-type": "text/event-stream" } },
+            )
+          },
+        })
+        yield* Effect.addFinalizer(() => Effect.sync(() => vm.stop(true)))
+        registerAdapter(instance.project.id, type, remoteAdapter(`http://127.0.0.1:${vm.port}`).adapter)
+        yield* Effect.addFinalizer(() => workspace.remove(info.id).pipe(Effect.ignore))
+
+        yield* workspace.startSync(info)
+
+        const database = yield* Database.Service
+        yield* eventuallyEffect(
+          Effect.gen(function* () {
+            expect((yield* sessionSvc.get(created.id).pipe(Effect.orDie)).title).toBe("live")
+            expect(yield* sessionSequence(created.id).pipe(Effect.provideService(Database.Service, database))).toBe(
+              next + 1,
+            )
+          }),
+          3_000,
+        )
+      }),
+    { git: true },
   )
 
   it.live("SSE sync events are replayed and forwarded", () => {

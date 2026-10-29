@@ -23,8 +23,12 @@ import {
   setupZone,
   getZoneByName,
 } from "@/publish/cloudflare-workers"
+import { CloudflarePlatform } from "@/publish/cloudflare-platform"
+import { PlatformBuild } from "@/publish/platform-build"
+import { PlatformName } from "@/publish/platform-name"
 import { collectProjectFiles, resolveDeployDirectory } from "@/publish/collect"
-import { eq } from "drizzle-orm"
+import path from "path"
+import { eq, inArray } from "drizzle-orm"
 import { InstanceHttpApi } from "../api"
 import { InvalidRequestError, notFound } from "../errors"
 
@@ -50,9 +54,67 @@ function cfError(err: unknown): InvalidRequestError {
   })
 }
 
+function platformError(err: unknown): InvalidRequestError {
+  if (CloudflarePlatform.isSaasDisabledError(err))
+    return new InvalidRequestError({ message: "Custom domains aren't enabled yet.", kind: "cloudflare" })
+  return cfError(err)
+}
+
+// Each step tolerates "not found" so a partially removed domain can still be cleaned up.
+function removePlatformDomain(domain: string) {
+  return Effect.gen(function* () {
+    const hostname = yield* CloudflarePlatform.getCustomHostname(domain)
+    if (hostname)
+      yield* CloudflarePlatform.deleteCustomHostname(hostname.id).pipe(
+        Effect.catch((err) => (CloudflarePlatform.isStatus(err, 404) ? Effect.void : Effect.fail(err))),
+      )
+    yield* CloudflarePlatform.deleteHostname(domain)
+    yield* CloudflarePlatform.deleteRouteByPattern(`${domain}/*`)
+  }).pipe(Effect.catch((err) => Effect.fail(cfError(err))))
+}
+
+function platformDomainState(row: { cf_project_name: string; custom_domain_status: string | null }, domain: string) {
+  return Effect.gen(function* () {
+    const hostname = yield* CloudflarePlatform.getCustomHostname(domain).pipe(
+      Effect.catch(() => Effect.succeed(undefined)),
+    )
+    const status = hostname ? CloudflarePlatform.domainStatus(hostname) : (row.custom_domain_status ?? "pending")
+    return { status, target: `${row.cf_project_name}.${CloudflarePlatform.PLATFORM.zone}` }
+  })
+}
+
+function saveError<A, R>(effect: Effect.Effect<A, Error, R>) {
+  return effect.pipe(
+    Effect.mapError(
+      (error) =>
+        new InvalidRequestError({
+          message: `Failed to save deployment: ${error.message}`,
+          kind: "configuration",
+        }),
+    ),
+  )
+}
+
+/** Refuses to touch a platform script whose owner tag names a different project. A missing script is fine. */
+function requireOwner(name: string, projectID: string) {
+  return Effect.gen(function* () {
+    const owner = yield* CloudflarePlatform.scriptOwner(name).pipe(Effect.catch((err) => Effect.fail(cfError(err))))
+    if (owner !== undefined && owner !== projectID)
+      return yield* new InvalidRequestError({ message: "This app belongs to another project.", kind: "configuration" })
+  })
+}
+
 export const publishHandlers = HttpApiBuilder.group(InstanceHttpApi, "publish", (handlers) =>
   Effect.gen(function* () {
     const database = yield* Database.Service
+
+    const markLive = (id: string, result: { id: string; url: string }) =>
+      database.db
+        .update(PublishDeploymentTable)
+        .set({ url: result.url, cf_deployment_id: result.id, status: "live", time_updated: Date.now() })
+        .where(eq(PublishDeploymentTable.id, id))
+        .execute()
+        .pipe(saveError)
 
     const deploy = Effect.fn("PublishHttpApi.deploy")(function* (ctx: { payload: { directory?: string } }) {
       yield* requirePublishEnv()
@@ -68,6 +130,84 @@ export const publishHandlers = HttpApiBuilder.group(InstanceHttpApi, "publish", 
       }
 
       const directory = ctx.payload.directory
+
+      const current = yield* database.db
+        .select()
+        .from(PublishDeploymentTable)
+        .where(eq(PublishDeploymentTable.project_id, context.project.id))
+        .pipe(Database.first)
+
+      // New apps and existing platform apps go to Workers for Platforms; legacy rows fall through.
+      if (current?.runtime === "platform") {
+        yield* requireOwner(current.cf_project_name, current.project_id)
+        const result = yield* PlatformBuild.deployToPlatform(directory, current.cf_project_name).pipe(
+          Effect.catch((err) => Effect.fail(cfError(err))),
+        )
+        yield* markLive(current.id, result)
+        return { id: current.id, url: result.url, name: current.name, status: "live", runtime: "platform" }
+      }
+
+      if (!current) {
+        const projectID = context.project.id
+        const name = yield* PlatformName.choose(context.project.name ?? path.basename(directory), (candidate) =>
+          CloudflarePlatform.scriptExists(candidate).pipe(
+            Effect.flatMap((exists) => (exists ? Effect.succeed(true) : CloudflarePlatform.hostnameHasRecord(candidate))),
+          ),
+        ).pipe(Effect.catch((err) => Effect.fail(cfError(err))))
+
+        // Claim the name with a tagged placeholder before the (slow) build so no one else can take it.
+        const release = CloudflarePlatform.deleteScript(name).pipe(Effect.ignore)
+        yield* CloudflarePlatform.claimScript(name, projectID).pipe(
+          Effect.onError(() => release),
+          Effect.catch((err) => Effect.fail(cfError(err))),
+        )
+        // Tag reads are eventually consistent, so poll briefly. Another project's tag wins (last write) and we back off
+        // without deleting its script; a still-missing tag is treated as ours since we just wrote it.
+        const outcome = yield* Effect.gen(function* () {
+          for (let attempt = 0; attempt < 5; attempt++) {
+            if (attempt > 0) yield* Effect.sleep("400 millis")
+            const owner = yield* CloudflarePlatform.scriptOwner(name)
+            const result = PlatformName.claimOutcome(owner, projectID)
+            if (result !== "unknown") return result
+          }
+          return "unknown" as const
+        }).pipe(Effect.catch((err) => Effect.fail(cfError(err))))
+        if (outcome === "taken")
+          return yield* new InvalidRequestError({
+            message: "That app name was just taken. Please try again.",
+            kind: "cloudflare",
+          })
+
+        const id = `pub_${randomUUID().replace(/-/g, "").slice(0, 24)}`
+        yield* database.db
+          .insert(PublishDeploymentTable)
+          .values({
+            id,
+            project_id: projectID,
+            name,
+            label: name,
+            url: `https://${name}.${CloudflarePlatform.PLATFORM.zone}`,
+            cf_project_name: name,
+            status: "deploying",
+            runtime: "platform",
+            time_created: Date.now(),
+            time_updated: Date.now(),
+          })
+          .execute()
+          .pipe(saveError, Effect.onError(() => release))
+
+        const result = yield* PlatformBuild.deployToPlatform(directory, name).pipe(
+          Effect.catch((err) =>
+            database.db
+              .delete(PublishDeploymentTable)
+              .where(eq(PublishDeploymentTable.id, id))
+              .execute()
+              .pipe(Effect.ignore, Effect.andThen(release), Effect.andThen(Effect.fail(cfError(err)))),
+          ),
+        )
+        yield* markLive(id, result)
+        return { id, url: result.url, name, status: "live", runtime: "platform" }
+      }
 
       const resolved = yield* Effect.tryPromise({
         try: () => resolveDeployDirectory(directory),
@@ -218,7 +358,7 @@ export const publishHandlers = HttpApiBuilder.group(InstanceHttpApi, "publish", 
           cf_project_name: ctx.payload.name,
           cf_deployment_id: "",
           status: "live",
-          runtime: ctx.payload.runtime ?? "pages",
+          runtime: ctx.payload.runtime === "workers" ? "workers" : "pages",
           custom_domain: null,
           custom_domain_status: null,
           time_created: Date.now(),
@@ -227,13 +367,23 @@ export const publishHandlers = HttpApiBuilder.group(InstanceHttpApi, "publish", 
       }
 
       const directory = ctx.payload.directory || context.directory
-      const isWorkers = row.runtime === "workers" || (!row.url.endsWith(".pages.dev") && row.runtime !== "pages")
+      const isWorkers =
+        row.runtime !== "platform" &&
+        (row.runtime === "workers" || (!row.url.endsWith(".pages.dev") && row.runtime !== "pages"))
 
       let url: string
       let deploymentId: string
-      let runtime: "pages" | "workers"
+      let runtime: "pages" | "workers" | "platform"
 
-      if (isWorkers) {
+      if (row.runtime === "platform") {
+        yield* requireOwner(row.cf_project_name, row.project_id)
+        const result = yield* PlatformBuild.deployToPlatform(directory, row.cf_project_name).pipe(
+          Effect.catch((err) => Effect.fail(cfError(err))),
+        )
+        url = result.url
+        deploymentId = result.id
+        runtime = "platform"
+      } else if (isWorkers) {
         const result = yield* deployToWorkers(directory, row.cf_project_name).pipe(
           Effect.catch((err) => Effect.fail(cfError(err))),
         )
@@ -314,7 +464,13 @@ export const publishHandlers = HttpApiBuilder.group(InstanceHttpApi, "publish", 
 
       if (!row) return yield* notFound("Deployment not found")
 
-      if (row.runtime === "workers" || (!row.url.endsWith(".pages.dev") && row.runtime !== "pages")) {
+      if (row.runtime === "platform") {
+        yield* requireOwner(row.cf_project_name, row.project_id)
+        if (row.custom_domain) yield* removePlatformDomain(row.custom_domain)
+        yield* CloudflarePlatform.deleteScript(row.cf_project_name).pipe(
+          Effect.catch((err) => Effect.fail(cfError(err))),
+        )
+      } else if (row.runtime === "workers" || (!row.url.endsWith(".pages.dev") && row.runtime !== "pages")) {
         yield* deleteWorkerScript(row.cf_project_name).pipe(Effect.ignore)
       } else {
         yield* deleteProject(row.cf_project_name).pipe(Effect.ignore)
@@ -337,6 +493,56 @@ export const publishHandlers = HttpApiBuilder.group(InstanceHttpApi, "publish", 
         .pipe(Database.first)
 
       if (!row) return yield* notFound("Deployment not found")
+
+      if (row.runtime === "platform") {
+        const zone = CloudflarePlatform.PLATFORM.zone
+        const domain = ctx.payload.domain.trim().toLowerCase()
+        if (!PlatformName.isHostname(domain))
+          return yield* new InvalidRequestError({
+            message: "Enter a valid domain like app.example.com.",
+            kind: "configuration",
+          })
+        if (domain === zone || domain.endsWith(`.${zone}`))
+          return yield* new InvalidRequestError({
+            message: `Custom domains must be outside ${zone}.`,
+            kind: "configuration",
+          })
+        if (row.custom_domain)
+          return yield* new InvalidRequestError({
+            message: "Remove the current custom domain first.",
+            kind: "configuration",
+          })
+        const taken = yield* database.db
+          .select()
+          .from(PublishDeploymentTable)
+          .where(eq(PublishDeploymentTable.custom_domain, domain))
+        if (taken.some((other) => other.id !== row.id))
+          return yield* new InvalidRequestError({
+            message: "This domain is already connected to another app.",
+            kind: "configuration",
+          })
+
+        // Undo earlier steps in reverse if a later one fails.
+        yield* Effect.gen(function* () {
+          yield* CloudflarePlatform.ensureFallbackOrigin()
+          const hostname = yield* CloudflarePlatform.addCustomHostname(domain)
+          const undoHostname = CloudflarePlatform.deleteCustomHostname(hostname.id).pipe(Effect.ignore)
+          yield* CloudflarePlatform.putHostname(domain, row.cf_project_name).pipe(Effect.onError(() => undoHostname))
+          yield* CloudflarePlatform.addRoute(`${domain}/*`, CloudflarePlatform.PLATFORM.dispatcher).pipe(
+            Effect.onError(() =>
+              CloudflarePlatform.deleteHostname(domain).pipe(Effect.ignore, Effect.andThen(undoHostname)),
+            ),
+          )
+        }).pipe(Effect.catch((err) => Effect.fail(platformError(err))))
+
+        yield* database.db
+          .update(PublishDeploymentTable)
+          .set({ custom_domain: domain, custom_domain_status: "pending", time_updated: Date.now() })
+          .where(eq(PublishDeploymentTable.id, row.id))
+          .execute()
+
+        return { domain, status: "pending", cname_target: `${row.cf_project_name}.${zone}` }
+      }
 
       const isWorkers = row.runtime === "workers" || (!row.url.endsWith(".pages.dev") && row.runtime !== "pages")
 
@@ -400,6 +606,17 @@ export const publishHandlers = HttpApiBuilder.group(InstanceHttpApi, "publish", 
       const latest = rows.sort((a, b) => b.time_created - a.time_created)[0]
       if (!latest || !latest.custom_domain) return []
 
+      if (latest.runtime === "platform") {
+        const state = yield* platformDomainState(latest, latest.custom_domain)
+        if (state.status !== latest.custom_domain_status)
+          yield* database.db
+            .update(PublishDeploymentTable)
+            .set({ custom_domain_status: state.status, time_updated: Date.now() })
+            .where(eq(PublishDeploymentTable.id, latest.id))
+            .execute()
+        return [{ domain: latest.custom_domain, status: state.status, cname_target: state.target }]
+      }
+
       const isWorkers =
         latest.runtime === "workers" || (!latest.url.endsWith(".pages.dev") && latest.runtime !== "pages")
 
@@ -458,7 +675,9 @@ export const publishHandlers = HttpApiBuilder.group(InstanceHttpApi, "publish", 
 
       const isWorkers = row.runtime === "workers" || (!row.url.endsWith(".pages.dev") && row.runtime !== "pages")
 
-      if (isWorkers) {
+      if (row.runtime === "platform") {
+        yield* removePlatformDomain(ctx.payload.domain.trim().toLowerCase())
+      } else if (isWorkers) {
         const domains = yield* listWorkerDomains(row.cf_project_name).pipe(Effect.catch(() => Effect.succeed([])))
         const matched = domains.find((d) => d.hostname === ctx.payload.domain)
         if (matched) {
@@ -515,13 +734,40 @@ export const publishHandlers = HttpApiBuilder.group(InstanceHttpApi, "publish", 
       const rows = yield* database.db
         .select()
         .from(PublishDeploymentTable)
-        .where(eq(PublishDeploymentTable.custom_domain, ctx.payload.domain))
+        .where(inArray(PublishDeploymentTable.custom_domain, [ctx.payload.domain, ctx.payload.domain.trim().toLowerCase()]))
 
       const latest = rows.sort((a, b) => b.time_created - a.time_created)[0]
       if (!latest) {
         return yield* Effect.fail(
           new InvalidRequestError({ message: "No deployment found for this domain", kind: "configuration" }),
         )
+      }
+
+      if (latest.runtime === "platform") {
+        const domain = ctx.payload.domain.trim().toLowerCase()
+        const state = yield* platformDomainState(latest, domain)
+        const resolved = yield* Effect.promise(() =>
+          dnsPromises.resolveCname(domain).catch(() => [] as string[]),
+        )
+        // An apex domain can't hold a CNAME, so an active hostname is accepted without one.
+        const cnameOk =
+          state.status !== "error" &&
+          (state.status === "active" ||
+            resolved.some((target) => target.toLowerCase().replace(/\.$/, "") === state.target))
+        if (state.status !== latest.custom_domain_status)
+          yield* database.db
+            .update(PublishDeploymentTable)
+            .set({ custom_domain_status: state.status, time_updated: Date.now() })
+            .where(eq(PublishDeploymentTable.id, latest.id))
+            .execute()
+        return {
+          domain,
+          cname_ok: cnameOk,
+          nameservers_ok: true,
+          cname_target: state.target,
+          expected_nameservers: [],
+          status: state.status,
+        }
       }
 
       const isWorkers =

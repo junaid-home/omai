@@ -397,6 +397,8 @@ export function PublishDialog() {
     return r === "workers" || (!url.endsWith(".pages.dev") && r !== "pages")
   }
 
+  const isPlatformDeployment = () => state.existing?.runtime === "platform"
+
   const isValidDomain = (input: string) => {
     const domain = input.trim().toLowerCase()
     if (!domain) return false
@@ -615,7 +617,7 @@ export function PublishDialog() {
                       {language.t("publish.live.title")}
                     </span>
                     <span class="text-12-regular text-green-600/70 dark:text-green-400/60">
-                      {isWorkersDeployment()
+                      {isWorkersDeployment() || isPlatformDeployment()
                         ? language.t("publish.live.runtime.workers")
                         : language.t("publish.live.runtime.pages")}
                     </span>
@@ -666,7 +668,7 @@ export function PublishDialog() {
               </Show>
 
               {/* Custom domain section - Pages */}
-              <Show when={!isWorkersDeployment()}>
+              <Show when={isPlatformDeployment() || !isWorkersDeployment()}>
                 <div class="flex flex-col gap-3">
                   <div
                     class="h-px w-full"
@@ -935,7 +937,7 @@ export function PublishDialog() {
               </Show>
 
               {/* Custom domain section - Workers */}
-              <Show when={isWorkersDeployment()}>
+              <Show when={!isPlatformDeployment() && isWorkersDeployment()}>
                 <div class="flex flex-col gap-3">
                   <div
                     class="h-px w-full"

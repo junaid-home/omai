@@ -43,7 +43,7 @@ export function collectProjectFiles(directory: string): Effect.Effect<Map<string
   })
 }
 
-interface FrameworkInfo {
+export interface FrameworkInfo {
   name: string
   buildCommand: string
   outputDir: string
@@ -51,7 +51,7 @@ interface FrameworkInfo {
   runtime?: boolean
 }
 
-const FRAMEWORKS: FrameworkInfo[] = [
+export const FRAMEWORKS: FrameworkInfo[] = [
   {
     name: "next",
     buildCommand: "npx next build",
@@ -148,7 +148,7 @@ const FRAMEWORKS: FrameworkInfo[] = [
   },
 ]
 
-async function detectFramework(directory: string): Promise<FrameworkInfo | null> {
+export async function detectFramework(directory: string): Promise<FrameworkInfo | null> {
   const pkgPath = path.join(directory, "package.json")
   let pkg: Record<string, unknown>
   try {
@@ -208,7 +208,11 @@ async function detectFramework(directory: string): Promise<FrameworkInfo | null>
   return null
 }
 
-export async function runBuild(directory: string, framework: FrameworkInfo): Promise<string> {
+export async function runBuild(
+  directory: string,
+  framework: FrameworkInfo,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string> {
   const pkgPath = path.join(directory, "package.json")
   let pkg: Record<string, unknown>
   try {
@@ -221,7 +225,7 @@ export async function runBuild(directory: string, framework: FrameworkInfo): Pro
   const buildCmd = scripts["build"] ? `npm run build` : framework.buildCommand
 
   await new Promise<void>((resolve, reject) => {
-    const child = exec(buildCmd, { cwd: directory, env: { ...process.env, NODE_ENV: "production" } })
+    const child = exec(buildCmd, { cwd: directory, env: { ...env, NODE_ENV: "production" } })
     let stderr = ""
     child.stdout?.on("data", (data: string) => process.stdout.write(data))
     child.stderr?.on("data", (data: string) => {

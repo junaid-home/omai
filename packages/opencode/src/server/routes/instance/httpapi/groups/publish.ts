@@ -144,7 +144,7 @@ export const PublishApi = HttpApi.make("publish")
           query: WorkspaceRoutingQuery,
           payload: PublishDeleteBody,
           success: described(Schema.Struct({ success: Schema.Boolean }), "Success"),
-          error: [ApiNotFoundError],
+          error: [ApiNotFoundError, InvalidRequestError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "publish.delete",

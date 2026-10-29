@@ -2,6 +2,8 @@ import { afterEach, expect, mock, test } from "bun:test"
 import { Database } from "@opencode-ai/core/database/database"
 import { PublishDeploymentTable } from "@opencode-ai/core/publish/sql"
 import { Context, Effect } from "effect"
+import { eq } from "drizzle-orm"
+import path from "path"
 
 if (process.env.OPENCODE_TEST_PUBLISH_WORKER !== "1") {
   test("publish handlers persist successful deployments through native PostgreSQL", async () => {
@@ -37,8 +39,81 @@ if (process.env.OPENCODE_TEST_PUBLISH_WORKER !== "1") {
     getCustomDomain: unexpected,
     deleteCustomDomain: unexpected,
   }))
+  const workerCalls: string[] = []
+  const platformCalls: string[] = []
+  const domainCalls: string[] = []
+  const platformFail = { current: false }
+  // Ordered log of name-claim, build and cleanup calls, plus the owner tag per claimed script.
+  const claimCalls: string[] = []
+  const owners = new Map<string, string>()
+  const staleReads = { current: 0 }
+  const claimOverride = { current: undefined as string | undefined }
+  const dnsTaken = new Set<string>()
+  class CloudflareError extends Error {
+    constructor(
+      readonly status: number,
+      readonly codes: number[],
+      readonly body: string,
+    ) {
+      super(body)
+    }
+  }
+  mock.module("../../src/publish/platform-build", () => ({
+    PlatformBuild: {
+      deployToPlatform: (_directory: string, name: string) =>
+        Effect.suspend(() => {
+          platformCalls.push(name)
+          claimCalls.push(`deploy:${name}`)
+          if (platformFail.current) return Effect.fail(new Error("platform build failed"))
+          return Effect.succeed({ id: `platform-${platformCalls.length}`, url: `https://${name}.omai.ch` })
+        }),
+    },
+  }))
+  mock.module("../../src/publish/cloudflare-platform", () => ({
+    CloudflarePlatform: {
+      PLATFORM: { zone: "omai.ch", namespace: "omai-apps", dispatcher: "omai-dispatcher", kvTitle: "omai-hostnames" },
+      CloudflareError,
+      isSaasDisabledError: (e: unknown) =>
+        e instanceof CloudflareError && e.codes.some((code) => code === 1404 || code === 1456),
+      isStatus: (e: unknown, status: number) => e instanceof CloudflareError && e.status === status,
+      scriptExists: (name: string) => Effect.sync(() => owners.has(name)),
+      hostnameHasRecord: (name: string) => Effect.sync(() => dnsTaken.has(name)),
+      claimScript: (name: string, projectID: string) =>
+        Effect.sync(() => {
+          claimCalls.push(`claim:${name}`)
+          owners.set(name, claimOverride.current ?? projectID)
+        }),
+      scriptOwner: (name: string) =>
+        Effect.sync(() => {
+          if (staleReads.current > 0) {
+            staleReads.current--
+            return undefined
+          }
+          return owners.get(name)
+        }),
+      ensurePlatform: () => Effect.void,
+      ensureFallbackOrigin: () => Effect.void,
+      addCustomHostname: () => Effect.fail(new CloudflareError(403, [1404], "SaaS disabled")),
+      getCustomHostname: () => Effect.succeed(undefined),
+      deleteCustomHostname: () => Effect.void,
+      putHostname: () => Effect.sync(() => void domainCalls.push("putHostname")),
+      deleteHostname: () => Effect.void,
+      addRoute: () => Effect.sync(() => (domainCalls.push("addRoute"), "route")),
+      deleteRouteByPattern: () => Effect.void,
+      deleteScript: (name: string) =>
+        Effect.sync(() => {
+          claimCalls.push(`delete:${name}`)
+          owners.delete(name)
+        }),
+      domainStatus: () => "pending",
+    },
+  }))
   mock.module("../../src/publish/cloudflare-workers", () => ({
-    deployToWorkers: unexpected,
+    deployToWorkers: (_directory: string, name: string) =>
+      Effect.sync(() => {
+        workerCalls.push(name)
+        return { id: `worker-${workerCalls.length}`, url: `https://${name}.example.workers.dev`, name }
+      }),
     deleteWorkerScript: unexpected,
     addWorkerDomain: unexpected,
     listWorkerDomains: unexpected,
@@ -50,6 +125,7 @@ if (process.env.OPENCODE_TEST_PUBLISH_WORKER !== "1") {
   process.env.CLOUDFLARE_ACCOUNT_ID = "local-test-account"
 
   const { HttpApiApp } = await import("../../src/server/routes/instance/httpapi/server")
+  const { PlatformName } = await import("../../src/publish/platform-name")
   const { disposeAllInstances, tmpdir } = await import("../fixture/fixture")
   afterEach(disposeAllInstances)
 
@@ -70,23 +146,150 @@ if (process.env.OPENCODE_TEST_PUBLISH_WORKER !== "1") {
       ),
     )
 
-  test("deploy inserts a row and subsequent deploy updates that row", async () => {
+  test("deploy to the platform inserts a row and a second deploy updates it", async () => {
     await using directory = await tmpdir({ git: true })
-    await Bun.write(`${directory.path}/index.html`, "<h1>Local publishing fixture</h1>")
+    const calls = platformCalls.length
     const created = await request("/publish", directory.path, { directory: directory.path })
     expect(created.status).toBe(200)
     const first = await rows()
+    const name = PlatformName.slug(path.basename(directory.path))
     expect(first).toHaveLength(1)
-    expect(first[0]?.cf_deployment_id).toBe(deployments.at(-1)!.id)
-    expect(first[0]?.runtime).toBe("pages")
+    expect(first[0]?.runtime).toBe("platform")
+    expect(first[0]?.url).toBe(`https://${name}.omai.ch`)
+    expect(platformCalls.length).toBe(calls + 1)
+    expect(claimCalls.slice(-2)).toEqual([`claim:${name}`, `deploy:${name}`])
 
     const updated = await request("/publish", directory.path, { directory: directory.path })
     expect(updated.status).toBe(200)
     const second = await rows()
     expect(second).toHaveLength(1)
     expect(second[0]?.id).toBe(first[0]?.id)
-    expect(second[0]?.cf_deployment_id).toBe(deployments.at(-1)!.id)
+    expect(second[0]?.cf_project_name).toBe(first[0]?.cf_project_name)
     expect(second[0]?.cf_deployment_id).not.toBe(first[0]?.cf_deployment_id)
+  })
+
+  test("a stale claim read-back is retried until the tag shows", async () => {
+    await using directory = await tmpdir({ git: true })
+    staleReads.current = 2
+    const created = await request("/publish", directory.path, { directory: directory.path })
+    expect(created.status).toBe(200)
+    expect(staleReads.current).toBe(0)
+    expect(await rows()).toHaveLength(1)
+  })
+
+  test("a claim lost to another project fails without deleting its script", async () => {
+    await using directory = await tmpdir({ git: true })
+    const name = PlatformName.slug(path.basename(directory.path))
+    claimOverride.current = "omai-project-other"
+    const created = await request("/publish", directory.path, { directory: directory.path })
+    claimOverride.current = undefined
+    expect(created.status).toBe(400)
+    expect(await created.text()).toContain("That app name was just taken.")
+    expect(claimCalls).not.toContain(`delete:${name}`)
+    expect(owners.get(name)).toBe("omai-project-other")
+    expect(await rows()).toHaveLength(0)
+  })
+
+  test("a failed platform deploy saves no row", async () => {
+    await using directory = await tmpdir({ git: true })
+    platformFail.current = true
+    const response = await request("/publish", directory.path, { directory: directory.path }).finally(() => {
+      platformFail.current = false
+    })
+    expect(response.status).not.toBe(200)
+    expect(await rows()).toHaveLength(0)
+    const name = PlatformName.slug(path.basename(directory.path))
+    expect(claimCalls.slice(-3)).toEqual([`claim:${name}`, `deploy:${name}`, `delete:${name}`])
+    expect(owners.has(name)).toBe(false)
+  })
+
+  test("a name with an existing DNS record is treated as taken", async () => {
+    await using directory = await tmpdir({ git: true })
+    const base = PlatformName.slug(path.basename(directory.path))
+    dnsTaken.add(base)
+    const response = await request("/publish", directory.path, { directory: directory.path })
+    expect(response.status).toBe(200)
+    const [row] = await rows()
+    expect(row?.cf_project_name).not.toBe(base)
+    expect(row?.cf_project_name.startsWith(base.slice(0, 35).replace(/-+$/, ""))).toBe(true)
+  })
+
+  test("redeploy and delete refuse a script owned by another project", async () => {
+    await using directory = await tmpdir({ git: true })
+    await request("/publish", directory.path, { directory: directory.path })
+    const [row] = await rows()
+    owners.set(row!.cf_project_name, "someone-else")
+    const calls = platformCalls.length
+    const redeploy = await request("/publish/redeploy", directory.path, { id: row!.id, directory: directory.path })
+    expect(redeploy.status).toBe(400)
+    expect(await redeploy.text()).toContain("This app belongs to another project.")
+    const deploy = await request("/publish", directory.path, { directory: directory.path })
+    expect(deploy.status).toBe(400)
+    expect(platformCalls.length).toBe(calls)
+    const removed = await request("/publish/delete", directory.path, { id: row!.id })
+    expect(removed.status).toBe(400)
+    expect(await removed.text()).toContain("This app belongs to another project.")
+    expect(owners.get(row!.cf_project_name)).toBe("someone-else")
+    expect(await rows()).toHaveLength(1)
+  })
+
+  test("platform custom domains reject malformed hostnames", async () => {
+    await using directory = await tmpdir({ git: true })
+    await request("/publish", directory.path, { directory: directory.path })
+    const [row] = await rows()
+    const bad = await request("/publish/domain", directory.path, { deployment_id: row!.id, domain: "not a domain" })
+    expect(bad.status).toBe(400)
+    expect(await bad.text()).toContain("Enter a valid domain like app.example.com.")
+  })
+
+  test("platform custom domains report SaaS disabled and reject domains inside the zone", async () => {
+    await using directory = await tmpdir({ git: true })
+    await request("/publish", directory.path, { directory: directory.path })
+    const [row] = await rows()
+    const disabled = await request("/publish/domain", directory.path, { deployment_id: row!.id, domain: "example.com" })
+    expect(disabled.status).toBe(400)
+    expect(await disabled.text()).toContain("Custom domains aren't enabled yet.")
+    expect((await rows())[0]?.custom_domain).toBeNull()
+    expect(domainCalls).toEqual([])
+
+    const inside = await request("/publish/domain", directory.path, { deployment_id: row!.id, domain: "foo.omai.ch" })
+    expect(inside.status).toBe(400)
+    expect(await inside.text()).toContain("Custom domains must be outside omai.ch.")
+  })
+
+  test("recovered redeploy never creates a platform row", async () => {
+    await using directory = await tmpdir({ git: true })
+    await Bun.write(`${directory.path}/index.html`, "<h1>Local publishing fixture</h1>")
+    const calls = platformCalls.length
+    const response = await request("/publish/redeploy", directory.path, {
+      id: "pub_forged",
+      name: "x",
+      directory: directory.path,
+      runtime: "platform",
+    })
+    expect(platformCalls.length).toBe(calls)
+    expect((await rows()).every((row) => row.runtime !== "platform")).toBe(true)
+    if (response.status === 200) expect((await rows())[0]?.runtime).toBe("pages")
+  })
+
+  test("redeploy of a legacy row keeps using the Workers path", async () => {
+    await using directory = await tmpdir({ git: true })
+    await request("/publish", directory.path, { directory: directory.path })
+    const [row] = await rows()
+    await Effect.runPromise(
+      Database.Service.use(({ db }) =>
+        db
+          .update(PublishDeploymentTable)
+          .set({ runtime: null, url: "https://x.y.workers.dev", cf_project_name: "legacy-app" })
+          .where(eq(PublishDeploymentTable.id, row!.id))
+          .execute(),
+      ).pipe(Effect.provide(Database.layerFromConfig(Database.configFromEnvironment())), Effect.scoped),
+    )
+    const platform = platformCalls.length
+    const response = await request("/publish/redeploy", directory.path, { id: row!.id, directory: directory.path })
+    expect(response.status).toBe(200)
+    expect(workerCalls).toEqual(["legacy-app"])
+    expect(platformCalls.length).toBe(platform)
   })
 
   test("redeploy inserts a recovered deployment and updates it on the next request", async () => {

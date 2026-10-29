@@ -40,7 +40,7 @@ interface WorkerDeployResult {
   name: string
 }
 
-async function installDependencies(directory: string): Promise<void> {
+export async function installDependencies(directory: string, env: NodeJS.ProcessEnv = process.env): Promise<void> {
   const pkgPath = path.join(directory, "package.json")
   let pkg: Record<string, unknown>
   try {
@@ -60,6 +60,7 @@ async function installDependencies(directory: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const child = exec("npm install @opennextjs/cloudflare@latest wrangler@latest --save-dev", {
       cwd: directory,
+      env,
     })
     let stderr = ""
     child.stdout?.on("data", (data: string) => process.stdout.write(data))
@@ -89,12 +90,13 @@ async function configExists(directory: string): Promise<boolean> {
   return false
 }
 
-async function migrateConfig(directory: string): Promise<void> {
+export async function migrateConfig(directory: string, env: NodeJS.ProcessEnv = process.env): Promise<void> {
   if (await configExists(directory)) return
 
   await new Promise<void>((resolve, reject) => {
     const child = exec("npx opennextjs-cloudflare migrate", {
       cwd: directory,
+      env,
     })
     let stderr = ""
     child.stdout?.on("data", (data: string) => process.stdout.write(data))
@@ -113,7 +115,7 @@ async function migrateConfig(directory: string): Promise<void> {
   })
 }
 
-async function patchWranglerConfig(directory: string, projectName: string): Promise<void> {
+export async function patchWranglerConfig(directory: string, projectName: string): Promise<void> {
   const configs = ["wrangler.jsonc", "wrangler.json", "wrangler.toml"]
   for (const file of configs) {
     const configPath = path.join(directory, file)
@@ -131,11 +133,11 @@ async function patchWranglerConfig(directory: string, projectName: string): Prom
   }
 }
 
-async function buildForWorkers(directory: string): Promise<void> {
+export async function buildForWorkers(directory: string, env: NodeJS.ProcessEnv = process.env): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const child = exec("npx opennextjs-cloudflare build", {
       cwd: directory,
-      env: { ...process.env, NODE_ENV: "production" },
+      env: { ...env, NODE_ENV: "production" },
     })
     let stderr = ""
     child.stdout?.on("data", (data: string) => process.stdout.write(data))

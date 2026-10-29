@@ -1,6 +1,6 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
-import { Context, Effect, FiberMap, Iterable, Layer, Schema, Stream } from "effect"
+import { Context, Effect, FiberMap, Iterable, Layer, Schedule, Schema, Semaphore, Stream } from "effect"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { FetchHttpClient, HttpBody, HttpClient, HttpClientError, HttpClientRequest } from "effect/unstable/http"
 import { Database } from "@opencode-ai/core/database/database"
@@ -433,7 +433,6 @@ const layer = Layer.effect(
 
         const stream = yield* connectSSE(target.url, target.headers).pipe(
           Effect.tap(() => Effect.sync(() => reachable.add(space.id))),
-          Effect.tap(() => syncHistory(space, target.url, target.headers)),
           Effect.catch((err) =>
             Effect.gen(function* () {
               reachable.delete(space.id)
@@ -450,13 +449,15 @@ const layer = Layer.effect(
         if (stream) {
           attempt = 0
 
-          setStatus(space.id, "connected")
-
-          // A suspended (or crashed) MicroVM drops the stream abruptly; treat
-          // an interrupted stream as a disconnect so this loop survives and
-          // retries, reconnecting once the VM resumes, instead of dying and
-          // leaving the workspace unsyncable until a full restart.
-          yield* parseSSE(stream, (evt) =>
+          // The live stream is read from the start: the VM is already serving
+          // requests, so the first prompt's events must neither wait behind a
+          // slow history catch-up nor be dropped when it times out. Only
+          // durable sync events wait, since they replay in strict sequence
+          // after the history.
+          const caughtUp = { done: false }
+          const pending: unknown[] = []
+          const lock = Semaphore.makeUnsafe(1)
+          const handle = (evt: unknown) =>
             Effect.gen(function* () {
               if (!evt || typeof evt !== "object" || !("payload" in evt)) return
               const payload = evt.payload as { type?: string; syncEvent?: EventV2.SerializedEvent }
@@ -489,8 +490,42 @@ const layer = Layer.effect(
                   error: errorData(error),
                 })
               }
-            }),
-          ).pipe(
+            })
+          const catchUp = syncHistory(space, target.url, target.headers).pipe(
+            Effect.retry({ times: 2, schedule: Schedule.spaced("2 seconds") }),
+            Effect.catch((err) =>
+              Effect.logWarning("workspace history catch-up failed; continuing with the live stream", {
+                workspace: space.name,
+                error: errorData(err),
+              }),
+            ),
+            Effect.andThen(
+              lock.withPermit(
+                Effect.suspend(() => {
+                  caughtUp.done = true
+                  return Effect.forEach(pending.splice(0), handle, { discard: true })
+                }),
+              ),
+            ),
+            // "connected" still means caught up: callers such as create()
+            // wait for it before using the workspace's local history.
+            Effect.andThen(Effect.sync(() => setStatus(space.id, "connected"))),
+          )
+          const live = parseSSE(stream, (evt) => {
+            if (caughtUp.done || (evt as { payload?: { type?: string } } | null)?.payload?.type !== "sync")
+              return handle(evt)
+            return lock.withPermit(
+              Effect.suspend(() => {
+                if (caughtUp.done) return handle(evt)
+                pending.push(evt)
+                return Effect.void
+              }),
+            )
+          }).pipe(
+            // A suspended (or crashed) MicroVM drops the stream abruptly; treat
+            // an interrupted stream as a disconnect so this loop survives and
+            // retries, reconnecting once the VM resumes, instead of dying and
+            // leaving the workspace unsyncable until a full restart.
             Effect.catchCause((cause) =>
               Effect.logWarning("workspace sync stream interrupted", {
                 workspaceID: space.id,
@@ -498,6 +533,9 @@ const layer = Layer.effect(
               }),
             ),
           )
+          // The catch-up is time-bounded, so a stream that ends first simply
+          // waits for it before reconnecting.
+          yield* Effect.all([live, catchUp], { concurrency: 2, discard: true })
 
           reachable.delete(space.id)
           setStatus(space.id, "disconnected")
@@ -640,6 +678,12 @@ const layer = Layer.effect(
         OPENCODE_FRONTEND_PORT: process.env.OPENCODE_FRONTEND_PORT ?? "80",
         OPENCODE_SERVER_PROTOCOL: process.env.OPENCODE_SERVER_PROTOCOL ?? "http",
         OPENCODE_HOST: process.env.OPENCODE_HOST ?? "0.0.0.0",
+        // Publish runs inside the VM, so it needs the deployment's Cloudflare
+        // account. Build commands never see these: publish strips them first.
+        CLOUDFLARE_API_TOKEN: process.env.CLOUDFLARE_API_TOKEN,
+        CLOUDFLARE_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID,
+        CLOUDFLARE_PLATFORM_ZONE: process.env.CLOUDFLARE_PLATFORM_ZONE,
+        CLOUDFLARE_DISPATCH_NAMESPACE: process.env.CLOUDFLARE_DISPATCH_NAMESPACE,
       }
 
       // Adapters receive the persisted fields only, never control-plane bookkeeping.
