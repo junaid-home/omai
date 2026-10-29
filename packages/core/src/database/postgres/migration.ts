@@ -24,6 +24,17 @@ ALTER TABLE "__OPENCODE_SCHEMA__"."user" ADD COLUMN IF NOT EXISTS "settings_perm
 ALTER TABLE "__OPENCODE_SCHEMA__"."user" ADD COLUMN IF NOT EXISTS "model" jsonb;
 `,
   },
+  {
+    id: "0004_project_thumbnail",
+    source: `
+CREATE TABLE IF NOT EXISTS "__OPENCODE_SCHEMA__"."project_thumbnail" (
+	"directory" text PRIMARY KEY,
+	"png" text NOT NULL,
+	"time_created" bigint NOT NULL,
+	"time_updated" bigint NOT NULL
+);
+`,
+  },
 ].map((migration) => ({
   ...migration,
   checksum: createHash("sha256").update(migration.source).digest("hex"),
@@ -44,6 +55,7 @@ const applicationTables = [
   "instance_state",
   "permission",
   "project_directory",
+  "project_thumbnail",
   "project",
   "publish_deployment",
   "message",

@@ -1,6 +1,9 @@
 name: Build and push Docker images
 
 on:
+  push:
+    branches:
+      - feature/microvm
   workflow_dispatch:
     inputs:
       image:
