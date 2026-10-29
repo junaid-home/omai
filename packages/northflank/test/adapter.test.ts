@@ -98,6 +98,17 @@ describe("northflank.adapter", () => {
     expect(variables.OPENCODE_GLOBAL_CONFIG).toBe(global)
   })
 
+  test("two control planes creating the same VM at once both succeed on one service", async () => {
+    const { stub, adapter, info, directory, config } = setup()
+    const configured = await adapter.configure(info, { instance: { directory } })
+
+    await Promise.all([adapter.create(configured, {}), northflankAdapter(config).create(configured, {})])
+
+    expect(stub.services.size).toBe(1)
+    expect(stub.volumes.size).toBe(1)
+    expect([...stub.services.values()][0]!.instances).toBe(1)
+  })
+
   test("create finds an existing service beyond the first page", async () => {
     const { stub, adapter, info, directory, config } = setup()
     const configured = await adapter.configure(info, { instance: { directory } })

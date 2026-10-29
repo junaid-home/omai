@@ -94,30 +94,48 @@ export function northflankAdapter(config: NorthflankConfig): WorkspaceAdapter {
       if ((await client().getImage(existing.id)) !== image) await client().setImage(existing.id, image)
       return { id: existing.id, created: false }
     }
-    const created = await client().createService<{ data: { id: string } }>({
-      name: serviceName(info.id),
-      description: describe(info),
-      billing: { deploymentPlan: config.plan },
-      // Start with no instances: attaching a volume to a running service
-      // restarts it, so booting before the attach costs a whole extra boot.
-      // create() scales to one once the volume is in place.
-      deployment: { instances: 0, external: { imagePath: image }, docker: { configType: "default" } },
-      ports: [{ name: "p01", internalPort: config.port, public: true, protocol: "HTTP" }],
-      runtimeEnvironment: { ...variables },
-    })
-    ids.set(info.id, created.data.id)
-    return { id: created.data.id, created: true }
+    // Two control planes (or a retried job) can race to create the same VM:
+    // the loser adopts the winner's service instead of failing the project.
+    const service = await client()
+      .createService<{ data: { id: string } }>({
+        name: serviceName(info.id),
+        description: describe(info),
+        billing: { deploymentPlan: config.plan },
+        // Start with no instances: attaching a volume to a running service
+        // restarts it, so booting before the attach costs a whole extra boot.
+        // create() scales to one once the volume is in place.
+        deployment: { instances: 0, external: { imagePath: image }, docker: { configType: "default" } },
+        ports: [{ name: "p01", internalPort: config.port, public: true, protocol: "HTTP" }],
+        runtimeEnvironment: { ...variables },
+      })
+      .then((created) => ({ id: created.data.id, created: true }))
+      .catch(async (error: unknown) => {
+        if (!(error instanceof NorthflankApiError) || error.status !== 409) throw error
+        forget(info.id)
+        const raced = await resolve(info.id)
+        if (!raced) throw error
+        return { id: raced.id, created: false }
+      })
+    ids.set(info.id, service.id)
+    return service
   }
 
   const ensureVolume = async (info: WorkspaceInfo) => {
     const name = volumeName(info.id)
     const existing = (await client().listVolumes()).find((item) => item.name === name)
     if (existing) return existing.id
-    const created = await client().createVolume<{ data: { id: string } }>({
-      name,
-      mounts: [{ containerMountPath: mountPath(requireDirectory(info)) }],
-      spec: { accessMode: "ReadWriteOnce", storageSize: config.volumeSizeMB },
-    })
+    const created = await client()
+      .createVolume<{ data: { id: string } }>({
+        name,
+        mounts: [{ containerMountPath: mountPath(requireDirectory(info)) }],
+        spec: { accessMode: "ReadWriteOnce", storageSize: config.volumeSizeMB },
+      })
+      .catch(async (error: unknown) => {
+        if (!(error instanceof NorthflankApiError) || error.status !== 409) throw error
+        const raced = (await client().listVolumes()).find((item) => item.name === name)
+        if (!raced) throw error
+        return { data: { id: raced.id } }
+      })
     return created.data.id
   }
 
