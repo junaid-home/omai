@@ -40,6 +40,7 @@ import { Project } from "../../src/project/project"
 import { Session } from "../../src/session/session"
 import { testEffect } from "../lib/effect"
 import { tmpdirScoped } from "../fixture/fixture"
+import { Workspace } from "@/control-plane/workspace"
 
 // The global file and preview endpoints sit behind workspace routing; these
 // tests exercise the control plane itself, so requests stay local.
@@ -70,6 +71,7 @@ const apiLayer = HttpRouter.serve(
 ).pipe(
   Layer.provideMerge(NodeHttpServer.layerTest),
   Layer.provide(Layer.mock(Auth.Service)({})),
+  Layer.provide(Layer.mock(Workspace.Service)({})),
   Layer.provide(Layer.mock(Config.Service)({})),
   Layer.provide(Layer.mock(MoveSession.Service)({})),
   Layer.provide(

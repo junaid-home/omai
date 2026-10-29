@@ -34,6 +34,7 @@ import {
 import { Project } from "../../src/project/project"
 import { Session } from "../../src/session/session"
 import { testEffect } from "../lib/effect"
+import { Workspace } from "@/control-plane/workspace"
 
 const input = MoveSession.Input.make({
   sessionID: SessionV2.ID.make("ses_move"),
@@ -71,6 +72,7 @@ const apiLayer = HttpRouter.serve(
 ).pipe(
   Layer.provideMerge(NodeHttpServer.layerTest),
   Layer.provide(Layer.mock(Auth.Service)({})),
+  Layer.provide(Layer.mock(Workspace.Service)({})),
   Layer.provide(Layer.mock(Config.Service)({})),
   Layer.provide(Layer.mock(Project.Service)({})),
   Layer.provide(Layer.mock(Installation.Service)({})),

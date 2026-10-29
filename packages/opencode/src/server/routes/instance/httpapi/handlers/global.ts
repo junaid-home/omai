@@ -33,6 +33,7 @@ import { mkdir } from "fs/promises"
 import path from "path"
 import { startDevServer, stopDevServer, getDevServerStatus, touchDevServer } from "@/preview/server"
 import { captureAndStoreThumbnail } from "@/preview/capture"
+import { ThumbnailStore } from "@/preview/thumbnail-store"
 import { auditPreview } from "@/preview/lighthouse"
 import { ProjectArchive } from "@/server/project-archive"
 import { Project } from "@/project/project"
@@ -354,7 +355,13 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
               { success: false, error: "Dev server failed to start" },
               { status: 400 },
             )
-          void captureAndStoreThumbnail(safePath.value).catch(() => {})
+          // Also copied to the shared database: on a MicroVM the file lives on
+          // the VM's volume, out of the project list's reach.
+          yield* Effect.promise(() => captureAndStoreThumbnail(safePath.value).catch(() => "skipped" as const)).pipe(
+            Effect.andThen(ThumbnailStore.persist(safePath.value)),
+            Effect.ignoreCause,
+            Effect.forkDetach,
+          )
           const hostname = process.env.OPENCODE_HOST || status.hostname || "localhost"
           const proto = ctx.request.headers["x-forwarded-proto"] ?? "http"
           const scheme = proto === "wss" ? "https" : proto

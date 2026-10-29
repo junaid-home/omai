@@ -1,4 +1,5 @@
 import { Effect } from "effect"
+import { rm } from "node:fs/promises"
 import path from "node:path"
 import { array, check, object } from "./assertions"
 import { http } from "./dsl"
@@ -182,6 +183,30 @@ export const fileScenarios = [
         check(
           result.contentType.includes("image/png") && Buffer.from(result.bytes).equals(png),
           "thumbnail must resolve the encoded workspace and stream exact bytes",
+        )
+      }),
+    ),
+  http.protected
+    .get("/preview/thumbnail/{encodedDir}", "omai.media.thumbnail.get.database")
+    // A MicroVM project's file lives on the VM; only the database copy is
+    // reachable from the server answering the project list.
+    .seeded((ctx) =>
+      Effect.gen(function* () {
+        const saved = yield* ctx.request("POST", {
+          path: `/preview/thumbnail/${encoded(ctx.directory!)}`,
+          headers: ctx.headers(),
+          body: { png: png.toString("base64") },
+        })
+        check(saved.status === 200, "thumbnail fixture must be stored through HTTP")
+        yield* Effect.promise(() => rm(path.join(ctx.directory!, ".OMAI+/thumbnails/preview.png")))
+      }),
+    )
+    .at((ctx) => ({ path: `/preview/thumbnail/${encoded(ctx.directory!)}`, headers: ctx.headers() }))
+    .status(200, (_ctx, result) =>
+      Effect.sync(() => {
+        check(
+          result.contentType.includes("image/png") && Buffer.from(result.bytes).equals(png),
+          "thumbnail must fall back to the database copy when the file is not on this server",
         )
       }),
     ),
