@@ -190,24 +190,20 @@ function proxyRemote(
     if (directory && !proxyURL.searchParams.has("directory")) {
       proxyURL.searchParams.set("directory", decodeDirectory(directory))
     }
-    // Keep the VM alive for as long as a long-lived stream (SSE event
-    // stream) is open, so a browser tab that is merely viewing does not get
-    // paused by the idle sweeper. The fiber is scoped to this request and is
-    // interrupted when the client disconnects.
-    const isEventStream =
-      request.method === "GET" &&
-      (url.pathname === "/global/event" || request.headers["accept"]?.includes("text/event-stream"))
-    if (isEventStream) {
-      yield* Effect.forkScoped(
-        Effect.gen(function* () {
-          yield* lifecycle.touch(workspace.id)
-          yield* Effect.sleep("30 seconds")
-        }).pipe(
-          Effect.repeat(Schedule.spaced("30 seconds")),
-          Effect.catchCause(() => Effect.void),
-        ),
-      )
-    }
+    // Keep the VM alive for as long as any proxied request is in flight: an
+    // open event stream from a tab that is merely viewing, or a long request
+    // such as publish, whose build can outlast the idle sweeper's window
+    // without the VM reporting itself busy. The fiber is scoped to this
+    // request and is interrupted when it completes or the client disconnects.
+    yield* Effect.forkScoped(
+      Effect.gen(function* () {
+        yield* lifecycle.touch(workspace.id)
+        yield* Effect.sleep("30 seconds")
+      }).pipe(
+        Effect.repeat(Schedule.spaced("30 seconds")),
+        Effect.catchCause(() => Effect.void),
+      ),
+    )
     if (headers["upgrade"]?.toLowerCase() === "websocket")
       return yield* HttpApiProxy.websocket(request, proxyURL, target.headers)
     const response = yield* HttpApiProxy.http(client, proxyURL, target.headers, request)
