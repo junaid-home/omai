@@ -364,9 +364,15 @@ export const layer = Layer.effect(
       // Someone else took it first; fall back to a fresh VM.
       if (!claimed) return undefined
       yield* Effect.logInfo("claimed reserve VM", { workspaceID: claimed.id, directory: input.directory })
-      // The boot opened sync for the placeholder folder and project; the next
-      // routed request reconnects it for the claimed project.
-      yield* workspace.stopSync(claimed.id)
+      // Keep the reserve's sync stream (it is keyed by workspace id only, not
+      // the folder). A request that finds the VM unsynced takes the wake path:
+      // it resumes and rescales a VM that is already running (which can make
+      // Northflank roll it) and holds the request until a new stream connects,
+      // so the project opened late and a zip upload landed on a dead stream.
+      yield* workspace.startSync(claimed)
+      yield* Effect.gen(function* () {
+        while (!(yield* workspace.isSynced(claimed.id))) yield* Effect.sleep(HEALTH_POLL_MS)
+      }).pipe(Effect.timeoutOrElse({ duration: "15 seconds", orElse: () => Effect.void }))
       if (step === "setup") yield* fork(claimed.id, run(claimed.id))
       yield* fork(RESERVE_REFILL, ensureReserve)
       return toJob(claimed) ?? { ...state, workspaceID: claimed.id, directory: input.directory }

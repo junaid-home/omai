@@ -601,11 +601,38 @@ describe("control-plane provisioner", () => {
           expect(ctx.vm.state.created).toEqual([ctx.directory])
           // The claimed VM was not created again.
           expect(ctx.calls.create).toBe(1)
+          // Still synced, so the project's first request proxies straight in
+          // instead of "waking" (and so redeploying) a VM that is running.
+          expect(yield* workspace.isSynced(reserve.id)).toBe(true)
 
           yield* provisioner.reconcile
           const next = yield* awaitReserveReady(workspace)
           expect(next.id).not.toBe(reserve.id)
           expect(ctx.calls.create).toBe(2)
+        }),
+      { git: true },
+    )
+
+    it.instance(
+      "a zip project claims the reserve straight into its synced upload step",
+      () =>
+        Effect.gen(function* () {
+          const ctx = yield* setupReserve()
+          const provisioner = yield* Provisioner.Service
+          const workspace = yield* Workspace.Service
+          Provisioner.touchDemand()
+          yield* provisioner.reconcile
+          const reserve = yield* awaitReserveReady(workspace)
+
+          const job = yield* provisioner.start({ directory: ctx.directory, mode: "upload" })
+
+          expect(job).toMatchObject({ workspaceID: reserve.id, status: "running", step: "upload" })
+          expect(yield* workspace.isSynced(reserve.id)).toBe(true)
+          yield* provisioner.uploaded(job.workspaceID)
+          expect((yield* provisioner.status(ctx.directory))?.status).toBe("ready")
+          expect(ctx.vm.state.created).toEqual([])
+          // Let the refill finish booting before the instance is torn down.
+          expect((yield* awaitReserveReady(workspace)).id).not.toBe(reserve.id)
         }),
       { git: true },
     )
