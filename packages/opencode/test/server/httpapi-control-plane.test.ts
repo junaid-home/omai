@@ -1,4 +1,6 @@
 import { PreviewCapability } from "@opencode-ai/core/preview-capability"
+import { AppProcess } from "@opencode-ai/core/process"
+import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { InstanceStateStore } from "@opencode-ai/core/instance-state/store"
 import { AuthSession } from "../../src/auth/session"
 import { UserState } from "@opencode-ai/core/user-state"
@@ -74,6 +76,8 @@ const apiLayer = HttpRouter.serve(
   Layer.provide(Layer.mock(Auth.Service)({})),
   Layer.provide(Layer.mock(Workspace.Service)({})),
   Layer.provide(Layer.mock(Config.Service)({})),
+  Layer.provide(Layer.mock(SessionExecution.Service)({})),
+  Layer.provide(Layer.mock(AppProcess.Service)({})),
   Layer.provide(Layer.mock(Project.Service)({})),
   Layer.provide(Layer.mock(Installation.Service)({})),
   Layer.provide(

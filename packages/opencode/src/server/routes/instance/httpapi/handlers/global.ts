@@ -22,6 +22,10 @@ import { gitInitRepo } from "@/project/project"
 import { ShareData } from "@/share/share-data"
 import { vmProjectsRoot } from "@/control-plane/vm-projects"
 import { WorkspaceViewers } from "@/control-plane/workspace-viewers"
+import { WorkspaceBusy } from "@/control-plane/workspace-busy"
+import { Flag } from "@opencode-ai/core/flag/flag"
+import { AppProcess } from "@opencode-ai/core/process"
+import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { Effect, Layer, Queue, Schema } from "effect"
 import * as Stream from "effect/Stream"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
@@ -32,7 +36,13 @@ import { RootHttpApi } from "../api"
 import { GlobalUpgradeInput } from "../groups/global"
 import { mkdir } from "fs/promises"
 import path from "path"
-import { startDevServer, stopDevServer, getDevServerStatus, touchDevServer } from "@/preview/server"
+import {
+  startDevServer,
+  stopDevServer,
+  getDevServerStatus,
+  touchDevServer,
+  anyDevServerRunning,
+} from "@/preview/server"
 import { captureAndStoreThumbnail } from "@/preview/capture"
 import { ThumbnailStore } from "@/preview/thumbnail-store"
 import { auditPreview } from "@/preview/lighthouse"
@@ -65,7 +75,9 @@ function parseBody(body: string) {
   }
 }
 
-function eventResponse() {
+// `busy` is set on a workspace VM: it reports what keeps it busy on every
+// heartbeat, so the control plane holding this stream need not poll it.
+function eventResponse(busy?: Effect.Effect<WorkspaceBusy.Report>) {
   return Effect.gen(function* () {
     yield* Effect.logInfo("global event connected")
     const principal = yield* Authentication.Current
@@ -80,7 +92,8 @@ function eventResponse() {
     })
     const heartbeat = Stream.tick("10 seconds").pipe(
       Stream.drop(1),
-      Stream.map(() => ({ payload: { id: EventV2.ID.create(), type: "server.heartbeat", properties: {} } })),
+      Stream.mapEffect(() => busy ?? Effect.succeed({})),
+      Stream.map((properties) => ({ payload: { id: EventV2.ID.create(), type: "server.heartbeat", properties } })),
     )
 
     return HttpServerResponse.stream(
@@ -120,6 +133,11 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const bridge = yield* EffectBridge.make()
     const projectSvc = yield* Project.Service
+    const execution = yield* SessionExecution.Service
+    const appProcess = yield* AppProcess.Service
+    const busy = Flag.OPENCODE_WORKSPACE_ID
+      ? Effect.suspend(() => WorkspaceBusy.report({ execution, appProcess, preview: anyDevServerRunning() }))
+      : undefined
 
     const health = Effect.fn("GlobalHttpApi.health")(function* () {
       const available = yield* Effect.all(
@@ -135,7 +153,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     })
 
     const event = Effect.fn("GlobalHttpApi.event")(function* () {
-      return yield* eventResponse()
+      return yield* eventResponse(busy)
     })
 
     const configGet = Effect.fn("GlobalHttpApi.configGet")(function* () {

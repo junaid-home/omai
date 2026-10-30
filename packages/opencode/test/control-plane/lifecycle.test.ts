@@ -7,6 +7,7 @@ import { Lifecycle } from "../../src/control-plane/lifecycle"
 import type { WorkspaceAdapter } from "../../src/control-plane/types"
 import { Workspace } from "../../src/control-plane/workspace"
 import { ProvisionState } from "../../src/control-plane/provision-state"
+import { WorkspaceBusy } from "../../src/control-plane/workspace-busy"
 import { testEffect } from "../lib/effect"
 
 const projectID = ProjectV2.ID.make("proj_lifecycle_wake")
@@ -229,6 +230,35 @@ describe("control-plane lifecycle", () => {
 
         yield* lifecycle.sweep
         // One that never answers is suspended rather than kept up forever.
+        expect(yield* Ref.get(stops)).toBe(1)
+      }),
+    ),
+  )
+
+  it.live("sweep trusts a VM's pushed busy report instead of probing it", () =>
+    withEnv(
+      { OPENCODE_WORKSPACE_IDLE_MS: "0", OPENCODE_WORKSPACE_SWEEP_MS: "100000", OPENCODE_PROVISION_RECONCILE: "true" },
+      Effect.gen(function* () {
+        const probes = yield* Ref.make(0)
+        const stops = yield* Ref.make(0)
+        registerAdapter(projectID, "sweep-pushed-test", {
+          ...adapter,
+          busy: async () => {
+            Effect.runSync(Ref.update(probes, (count) => count + 1))
+            return { busy: false, reasons: [] }
+          },
+          stop: async () => Effect.runSync(Ref.update(stops, (count) => count + 1)),
+        })
+        const working: Workspace.Info = { ...space, id: WorkspaceV2.ID.ascending(), type: "sweep-pushed-test" }
+        const finished: Workspace.Info = { ...space, id: WorkspaceV2.ID.ascending(), type: "sweep-pushed-test" }
+        WorkspaceBusy.record(working.id, { busy: true, reasons: ["sessions:1"] })
+        WorkspaceBusy.record(finished.id, { busy: false, reasons: [] })
+        const lifecycle = yield* lifecycleWith(fakeWorkspace({ all: () => Effect.succeed([working, finished]) }))
+
+        yield* lifecycle.sweep
+
+        // The busy VM stays up and the idle one is paused, without one probe.
+        expect(yield* Ref.get(probes)).toBe(0)
         expect(yield* Ref.get(stops)).toBe(1)
       }),
     ),

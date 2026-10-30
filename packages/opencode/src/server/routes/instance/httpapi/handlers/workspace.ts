@@ -3,6 +3,7 @@ import { AppProcess } from "@opencode-ai/core/process"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { listAdapters } from "@/control-plane/adapters"
 import { Workspace } from "@/control-plane/workspace"
+import { WorkspaceBusy } from "@/control-plane/workspace-busy"
 import { Provisioner } from "@/control-plane/provisioner"
 import { vmProjectsRoot } from "@/control-plane/vm-projects"
 import { Flag } from "@opencode-ai/core/flag/flag"
@@ -11,7 +12,6 @@ import { WorkspaceRouteContext } from "../middleware/workspace-routing"
 import * as InstanceState from "@/effect/instance-state"
 import { Vcs } from "@/project/vcs"
 import { getDevServerStatus } from "@/preview/server"
-import { SessionStatus } from "@/session/status"
 import { Cause, Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
@@ -77,14 +77,12 @@ export const workspaceHandlers = HttpApiBuilder.group(InstanceHttpApi, "workspac
       const instance = yield* InstanceState.context
       const execution = yield* SessionExecution.Service
       const appProcess = yield* AppProcess.Service
-      const reasons: string[] = []
-      // The app's agent loop tracks its turns in SessionStatus, not V2 execution.
-      const sessions = new Set([...(yield* execution.active), ...SessionStatus.busySessions()])
-      if (sessions.size > 0) reasons.push(`sessions:${sessions.size}`)
-      const running = yield* appProcess.running
-      if (running > 0) reasons.push(`processes:${running}`)
-      if (getDevServerStatus(instance.directory).running) reasons.push("preview")
-      return { busy: reasons.length > 0, reasons }
+      const report = yield* WorkspaceBusy.report({
+        execution,
+        appProcess,
+        preview: getDevServerStatus(instance.directory).running,
+      })
+      return { busy: report.busy, reasons: [...report.reasons] }
     })
 
     const provision = Effect.fn("WorkspaceHttpApi.provision")(function* (ctx: {

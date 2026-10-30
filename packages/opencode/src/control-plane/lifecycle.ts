@@ -3,6 +3,7 @@ import { Context, Deferred, Effect, Layer, Schedule, Semaphore } from "effect"
 import { ProvisionState } from "./provision-state"
 import { Workspace } from "./workspace"
 import { WorkspaceAdapterRuntime } from "./workspace-adapter-runtime"
+import { WorkspaceBusy } from "./workspace-busy"
 
 function env(key: string, fallback: number) {
   const value = Number(process.env[key] ?? fallback)
@@ -17,6 +18,7 @@ const wakeRetryMs = () => env("OPENCODE_WORKSPACE_WAKE_RETRY_MS", 1_000)
 // A VM that cannot answer the busy probe may be mid-turn under load, so it
 // keeps running; only this many unanswered idle windows in a row suspend it.
 const UNANSWERED_PROBES = 3
+const SWEEP_CONCURRENCY = 8
 
 type Phase = "STOPPED" | "STARTING" | "RUNNING" | "STOPPING"
 
@@ -121,6 +123,20 @@ export const layer = Layer.effect(
       return yield* Deferred.await(entry.deferred)
     })
 
+    const probe = (space: Workspace.Info) =>
+      WorkspaceAdapterRuntime.busy(space).pipe(
+        Effect.tap(() => Effect.sync(() => unanswered.delete(space.id))),
+        Effect.catchCause((cause) => {
+          const misses = (unanswered.get(space.id) ?? 0) + 1
+          unanswered.set(space.id, misses)
+          return Effect.logWarning("workspace busy probe failed", {
+            workspaceID: space.id,
+            misses,
+            error: String(cause),
+          }).pipe(Effect.as(misses < UNANSWERED_PROBES ? { busy: true, reasons: ["unanswered"] } : undefined))
+        }),
+      )
+
     const sweep = Effect.gen(function* () {
       // Only the deployed control plane suspends VMs. Every `serve` sharing
       // the database (e.g. a developer's laptop) sees all workspace rows but
@@ -157,18 +173,9 @@ export const layer = Layer.effect(
                 phases.set(id, "STOPPED")
                 return
               }
-              const report = yield* WorkspaceAdapterRuntime.busy(space).pipe(
-                Effect.tap(() => Effect.sync(() => unanswered.delete(id))),
-                Effect.catchCause((cause) => {
-                  const misses = (unanswered.get(id) ?? 0) + 1
-                  unanswered.set(id, misses)
-                  return Effect.logWarning("workspace busy probe failed", {
-                    workspaceID: id,
-                    misses,
-                    error: String(cause),
-                  }).pipe(Effect.as(misses < UNANSWERED_PROBES ? { busy: true, reasons: ["unanswered"] } : undefined))
-                }),
-              )
+              // A current VM pushes its busy report on every heartbeat; only an
+              // older image, or a stream gone quiet, is asked directly.
+              const report = WorkspaceBusy.latest(id) ?? (yield* probe(space))
               if (report?.busy) {
                 activity.set(id, Date.now())
                 phases.set(id, "RUNNING")
@@ -186,12 +193,16 @@ export const layer = Layer.effect(
               phases.set(id, "STOPPED")
               activity.set(id, Date.now())
               unanswered.delete(id)
+              WorkspaceBusy.forget(id)
               if (stopped) {
                 yield* Effect.logInfo("workspace suspended", { workspaceID: id, reasons: report?.reasons ?? [] })
               }
             }),
           )
         }),
+        // One slow VM (a probe waits up to 10s, a pause calls the Northflank
+        // API) must not hold back every other VM's check.
+        { concurrency: SWEEP_CONCURRENCY, discard: true },
       )
     })
 

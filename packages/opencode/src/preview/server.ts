@@ -445,6 +445,11 @@ export function getDevServerStatus(directory: string): {
   return { running: true, hostname: server.hostname, port: server.port, framework: server.projectInfo.framework }
 }
 
+/** Whether any directory on this instance has a live dev server. */
+export function anyDevServerRunning() {
+  return [...servers.keys()].some((directory) => getDevServerStatus(directory).running)
+}
+
 export function previewDirectoryForPort(port: number) {
   for (const server of servers.values()) {
     if (

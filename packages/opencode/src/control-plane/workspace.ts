@@ -34,6 +34,7 @@ import { WorkspaceRef } from "@/effect/instance-ref"
 import { Vcs } from "@/project/vcs"
 import { InstanceStore } from "@/project/instance-store"
 import { WorkspaceAdapterRuntime } from "./workspace-adapter-runtime"
+import { WorkspaceBusy } from "./workspace-busy"
 import { AppNodeBuilderV1 } from "@/effect/app-node-builder-v1"
 import { WorkspaceEvent } from "@opencode-ai/schema/workspace-event"
 
@@ -460,8 +461,15 @@ const layer = Layer.effect(
           const handle = (evt: unknown) =>
             Effect.gen(function* () {
               if (!evt || typeof evt !== "object" || !("payload" in evt)) return
-              const payload = evt.payload as { type?: string; syncEvent?: EventV2.SerializedEvent }
-              if (payload.type === "server.heartbeat") return
+              const payload = evt.payload as {
+                type?: string
+                syncEvent?: EventV2.SerializedEvent
+                properties?: unknown
+              }
+              if (payload.type === "server.heartbeat") {
+                WorkspaceBusy.record(space.id, payload.properties)
+                return
+              }
 
               if (payload.type === "sync" && payload.syncEvent) {
                 const sync = payload.syncEvent
