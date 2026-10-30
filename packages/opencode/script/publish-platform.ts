@@ -69,9 +69,11 @@ const program = Effect.gen(function* () {
     })
   log(`dns ${wildcard}`, hasWildcard)
 
-  // 4. Bypass routes keep existing hostnames away from the dispatcher
+  // 4. Bypass routes keep existing hostnames, and the apex, away from the
+  // dispatcher's `*/*` custom-hostname route
   const hosts = new Set([
-    ...routed.map((r) => r.name).filter((name) => name !== PLATFORM.zone && name !== wildcard),
+    PLATFORM.zone,
+    ...routed.map((r) => r.name).filter((name) => name !== wildcard),
     ...[...PlatformName.RESERVED].map((name) => `${name}.${PLATFORM.zone}`),
   ])
   console.log(`bypass routes for ${hosts.size} hosts:\n${[...hosts].map((host) => `  ${host}`).join("\n")}`)
@@ -111,6 +113,15 @@ const program = Effect.gen(function* () {
   const routeExisted = yield* CloudflarePlatform.routeExists(dispatcherPattern)
   yield* CloudflarePlatform.addRoute(dispatcherPattern, PLATFORM.dispatcher)
   log(`route ${dispatcherPattern} -> ${PLATFORM.dispatcher}`, routeExisted)
+
+  // 7. Custom hostnames (Cloudflare for SaaS) arrive on this zone under the
+  // customer's hostname. Cloudflare only accepts route patterns within the
+  // zone, so one `*/*` route catches them all; the bypass routes above are
+  // more specific and keep omai.ch's own hosts out of it.
+  const saasPattern = "*/*"
+  const saasExisted = yield* CloudflarePlatform.routeExists(saasPattern)
+  yield* CloudflarePlatform.addRoute(saasPattern, PLATFORM.dispatcher)
+  log(`route ${saasPattern} -> ${PLATFORM.dispatcher}`, saasExisted)
   console.log(
     `\nReminder: re-run this script after adding new DNS records to ${PLATFORM.zone} so they get bypass routes.`,
   )

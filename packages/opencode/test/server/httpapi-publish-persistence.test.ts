@@ -49,6 +49,7 @@ if (process.env.OPENCODE_TEST_PUBLISH_WORKER !== "1") {
   const staleReads = { current: 0 }
   const claimOverride = { current: undefined as string | undefined }
   const dnsTaken = new Set<string>()
+  const saasEnabled = { current: false }
   class CloudflareError extends Error {
     constructor(
       readonly status: number,
@@ -93,10 +94,14 @@ if (process.env.OPENCODE_TEST_PUBLISH_WORKER !== "1") {
         }),
       ensurePlatform: () => Effect.void,
       ensureFallbackOrigin: () => Effect.void,
-      addCustomHostname: () => Effect.fail(new CloudflareError(403, [1404], "SaaS disabled")),
+      addCustomHostname: (hostname: string) =>
+        saasEnabled.current
+          ? Effect.sync(() => (domainCalls.push(`addCustomHostname:${hostname}`), { id: "ch_1", hostname }))
+          : Effect.fail(new CloudflareError(403, [1404], "SaaS disabled")),
       getCustomHostname: () => Effect.succeed(undefined),
       deleteCustomHostname: () => Effect.void,
-      putHostname: () => Effect.sync(() => void domainCalls.push("putHostname")),
+      putHostname: (hostname: string, script: string) =>
+        Effect.sync(() => void domainCalls.push(`putHostname:${hostname}->${script}`)),
       deleteHostname: () => Effect.void,
       addRoute: () => Effect.sync(() => (domainCalls.push("addRoute"), "route")),
       deleteRouteByPattern: () => Effect.void,
@@ -255,6 +260,31 @@ if (process.env.OPENCODE_TEST_PUBLISH_WORKER !== "1") {
     const inside = await request("/publish/domain", directory.path, { deployment_id: row!.id, domain: "foo.omai.ch" })
     expect(inside.status).toBe(400)
     expect(await inside.text()).toContain("Custom domains must be outside omai.ch.")
+  })
+
+  test("platform custom domains map the hostname to the app without adding a route", async () => {
+    await using directory = await tmpdir({ git: true })
+    await request("/publish", directory.path, { directory: directory.path })
+    const [row] = await rows()
+    saasEnabled.current = true
+    domainCalls.length = 0
+    try {
+      const added = await request("/publish/domain", directory.path, { deployment_id: row!.id, domain: "app.example.com" })
+      expect(added.status).toBe(200)
+      expect(await added.json()).toMatchObject({
+        domain: "app.example.com",
+        status: "pending",
+        cname_target: `${row!.cf_project_name}.omai.ch`,
+      })
+      // Cloudflare rejects a route outside the zone; the zone's `*/*` route serves it.
+      expect(domainCalls).toEqual([
+        "addCustomHostname:app.example.com",
+        `putHostname:app.example.com->${row!.cf_project_name}`,
+      ])
+      expect((await rows())[0]).toMatchObject({ custom_domain: "app.example.com", custom_domain_status: "pending" })
+    } finally {
+      saasEnabled.current = false
+    }
   })
 
   test("recovered redeploy never creates a platform row", async () => {

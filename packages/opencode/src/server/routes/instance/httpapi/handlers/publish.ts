@@ -69,7 +69,6 @@ function removePlatformDomain(domain: string) {
         Effect.catch((err) => (CloudflarePlatform.isStatus(err, 404) ? Effect.void : Effect.fail(err))),
       )
     yield* CloudflarePlatform.deleteHostname(domain)
-    yield* CloudflarePlatform.deleteRouteByPattern(`${domain}/*`)
   }).pipe(Effect.catch((err) => Effect.fail(cfError(err))))
 }
 
@@ -522,16 +521,15 @@ export const publishHandlers = HttpApiBuilder.group(InstanceHttpApi, "publish", 
             kind: "configuration",
           })
 
-        // Undo earlier steps in reverse if a later one fails.
+        // The zone's `*/*` route already sends every custom hostname to the
+        // dispatcher (Cloudflare rejects a route for a hostname outside the
+        // zone), which finds the app through the KV entry written here.
+        // Undo the custom hostname if the KV write fails.
         yield* Effect.gen(function* () {
           yield* CloudflarePlatform.ensureFallbackOrigin()
           const hostname = yield* CloudflarePlatform.addCustomHostname(domain)
-          const undoHostname = CloudflarePlatform.deleteCustomHostname(hostname.id).pipe(Effect.ignore)
-          yield* CloudflarePlatform.putHostname(domain, row.cf_project_name).pipe(Effect.onError(() => undoHostname))
-          yield* CloudflarePlatform.addRoute(`${domain}/*`, CloudflarePlatform.PLATFORM.dispatcher).pipe(
-            Effect.onError(() =>
-              CloudflarePlatform.deleteHostname(domain).pipe(Effect.ignore, Effect.andThen(undoHostname)),
-            ),
+          yield* CloudflarePlatform.putHostname(domain, row.cf_project_name).pipe(
+            Effect.onError(() => CloudflarePlatform.deleteCustomHostname(hostname.id).pipe(Effect.ignore)),
           )
         }).pipe(Effect.catch((err) => Effect.fail(platformError(err))))
 
