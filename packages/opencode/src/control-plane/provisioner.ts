@@ -58,6 +58,10 @@ const reserveIdleMs = () => env("OPENCODE_RESERVE_IDLE_MS", 600_000)
 // Caps the booted reserves across all users, so a crowd of visitors cannot
 // boot an unbounded number of idle VMs.
 const reserveMax = () => env("OPENCODE_RESERVE_MAX", 20)
+// After a user's reserve fails, wait this long before warming another: a
+// failure that repeats (e.g. Northflank rejecting the volume) would otherwise
+// create and tear down a VM every reconcile tick.
+const reserveRetryMs = () => env("OPENCODE_RESERVE_RETRY_MS", 300_000)
 const HEALTH_POLL_MS = 500
 // The Northflank rate limit is shared by the whole team: ask it about the
 // VM far less often than we ask the VM itself.
@@ -398,6 +402,14 @@ export const layer = Layer.effect(
       // Someone else took it first; fall back to a fresh VM.
       if (!claimed) return undefined
       yield* Effect.logInfo("claimed reserve VM", { workspaceID: claimed.id, directory: input.directory, booting })
+      // The VM still carries the reserve's label; rename it after the project.
+      // Cosmetic, so it never delays or fails the claim.
+      yield* WorkspaceAdapterRuntime.relabel(claimed).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("reserve relabel failed", { workspaceID: claimed.id, error: message(cause) }),
+        ),
+        Effect.forkDetach,
+      )
       if (booting) {
         // The reserve runner stops at its next step; resume the job as the
         // project from wherever it got to.
@@ -428,10 +440,19 @@ export const layer = Layer.effect(
       if (!Flag.OPENCODE_WORKSPACE_ADAPTER) return
       const now = Date.now()
       const active = (user: string) => now - lastSeen(user) < reserveIdleMs()
-      const reserves = (yield* workspace.all()).filter((row) => {
+      const rows = yield* workspace.all()
+      const reserves = rows.filter((row) => {
         const state = ProvisionState.read(row.extra)
         return state?.kind === "reserve" && state.status !== "failed"
       })
+      const backingOff = new Set(
+        rows.flatMap((row) => {
+          const state = ProvisionState.read(row.extra)
+          return state?.kind === "reserve" && state.status === "failed" && now - state.updatedAt < reserveRetryMs()
+            ? [reserveUser(row)]
+            : []
+        }),
+      )
       yield* Effect.forEach(
         reserves.filter((row) => !runners.has(row.id) && !active(reserveUser(row))),
         (row) =>
@@ -442,7 +463,7 @@ export const layer = Layer.effect(
       )
       const kept = reserves.filter((row) => active(reserveUser(row)))
       const held = new Set(kept.map(reserveUser))
-      const missing = [...demand.entries()].filter(([user]) => active(user) && !held.has(user))
+      const missing = [...demand.entries()].filter(([user]) => active(user) && !held.has(user) && !backingOff.has(user))
       const root = vmProjectsRoot() ?? "/home/runner"
       yield* Effect.forEach(
         missing.slice(0, Math.max(0, reserveMax() - kept.length)),

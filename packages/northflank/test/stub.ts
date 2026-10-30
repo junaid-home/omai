@@ -147,6 +147,7 @@ export function northflankStub(input?: { dns?: string; token?: string; pageSize?
         const deployment = payload?.["deployment"] as
           | { instances?: number; external?: { imagePath?: string } }
           | undefined
+        if (typeof payload?.["description"] === "string") service.payload["description"] = payload["description"]
         if (deployment?.instances !== undefined) service.instances = deployment.instances
         if (deployment?.external?.imagePath) {
           const current = (service.payload["deployment"] ?? {}) as Record<string, unknown>

@@ -1,3 +1,4 @@
+import path from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
 import { northflankAdapter } from "../src/adapter.js"
 import { configFromEnv } from "../src/config.js"
@@ -69,7 +70,7 @@ describe("northflank.adapter", () => {
     expect(volume.payload).toMatchObject({
       // Mounted at the shared workspace folder so a reserve VM fits any project.
       mounts: [{ containerMountPath: "/workspace" }],
-      spec: { accessMode: "ReadWriteOnce", storageSize: 3 * 1024 },
+      spec: { accessMode: "ReadWriteOnce", storageSize: 6 * 1024 },
     })
     const paths = stub.requests.map((request) => request.path)
     const attach = paths.findIndex((path) => path.endsWith("/attach"))
@@ -129,7 +130,7 @@ describe("northflank.adapter", () => {
     ).toHaveLength(1)
   })
 
-  test("create describes the service with its project, owner and workspace", async () => {
+  test("create describes the service with its user, project name and email", async () => {
     const { stub, adapter, info, directory } = setup()
     const configured = await adapter.configure(
       { ...info, extra: { owner: { username: "alice", email: "alice@example.test" } } },
@@ -139,9 +140,7 @@ describe("northflank.adapter", () => {
     await adapter.create(configured, {})
 
     const description = [...stub.services.values()][0]!.payload.description as string
-    expect(description).toContain(`project: ${directory}`)
-    expect(description).toContain("user: alice (alice at example.test)")
-    expect(description).toContain(`workspace: ${info.id}`)
+    expect(description).toBe(`user: alice; projectName: ${path.basename(directory)}; email: alice at example.test;`)
     expect(description.length).toBeLessThanOrEqual(200)
     // Northflank's documented description pattern; anything else is a 400.
     expect(description).toMatch(/^[a-zA-Z0-9.,?\s\\/'"()[\];`%^&*\-_:!]+$/)
@@ -167,8 +166,28 @@ describe("northflank.adapter", () => {
     await adapter.create(await adapter.configure(info, { instance: { directory } }), {})
 
     const description = [...stub.services.values()][0]!.payload.description as string
-    expect(description).toContain(`project: ${directory}`)
-    expect(description).not.toContain("user:")
+    expect(description).toBe(`projectName: ${path.basename(directory)};`)
+  })
+
+  test("relabel renames a claimed reserve after its project without touching its state", async () => {
+    const { stub, adapter, info, directory } = setup()
+    const reserve = await adapter.configure(info, {
+      instance: { directory: path.join(path.dirname(directory), ".reserve-1") },
+    })
+    await adapter.create(reserve, {})
+    const service = [...stub.services.values()][0]!
+    const instances = service.instances
+
+    await adapter.relabel?.({
+      ...reserve,
+      directory,
+      extra: { owner: { username: "alice", email: "alice@example.test" } },
+    })
+
+    expect(service.payload.description).toBe(
+      `user: alice; projectName: ${path.basename(directory)}; email: alice at example.test;`,
+    )
+    expect(service.instances).toBe(instances)
   })
 
   test("create moves an existing service onto the configured image", async () => {

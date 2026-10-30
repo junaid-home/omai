@@ -92,6 +92,9 @@ export function createClient(config: NorthflankConfig) {
     getImage: async (id: string) =>
       (await request<{ data: { deployment?: { external?: { imagePath?: string } } } }>("GET", `/services/${id}`)).data
         .deployment?.external?.imagePath,
+    // Description only: Northflank applies it without redeploying the service.
+    setDescription: (id: string, description: string) =>
+      request("PATCH", `/services/deployment/${id}`, { description }),
     setImage: (id: string, imagePath: string) =>
       request("PATCH", `/services/deployment/${id}`, { deployment: { external: { imagePath } } }),
     pauseService: (id: string) => request("POST", `/services/${id}/pause`, {}),

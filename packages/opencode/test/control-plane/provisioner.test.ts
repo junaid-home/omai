@@ -108,7 +108,7 @@ type Script = {
 }
 
 function scriptedAdapter(vm: { url: string }, script: Script = {}) {
-  const calls = { create: 0, remove: [] as boolean[], extra: [] as unknown[] }
+  const calls = { create: 0, remove: [] as boolean[], extra: [] as unknown[], relabel: [] as (string | null | undefined)[] }
   const adapter: WorkspaceAdapter = {
     name: "scripted",
     description: "scripted test adapter",
@@ -130,6 +130,9 @@ function scriptedAdapter(vm: { url: string }, script: Script = {}) {
     start: async () => {},
     stop: async () => {},
     health: async () => script.health?.() ?? { state: "running" },
+    relabel: async (info) => {
+      calls.relabel.push(info.directory)
+    },
   }
   return { adapter, calls }
 }
@@ -588,9 +591,7 @@ describe("control-plane provisioner", () => {
       })
 
     const reserveOf = (workspace: Workspace.Interface) =>
-      workspace
-        .all()
-        .pipe(Effect.map((rows) => rows.find((row) => ProvisionState.read(row.extra)?.kind === "reserve")))
+      workspace.all().pipe(Effect.map((rows) => rows.find((row) => ProvisionState.read(row.extra)?.kind === "reserve")))
 
     const awaitReserveReady = (workspace: Workspace.Interface) =>
       Effect.gen(function* () {
@@ -617,7 +618,9 @@ describe("control-plane provisioner", () => {
           yield* provisioner.reconcile
 
           expect(ctx.calls.create).toBe(1)
-          expect((yield* workspace.all()).filter((row) => ProvisionState.read(row.extra)?.kind === "reserve")).toHaveLength(1)
+          expect(
+            (yield* workspace.all()).filter((row) => ProvisionState.read(row.extra)?.kind === "reserve"),
+          ).toHaveLength(1)
           // A reserve is never set up as a project.
           expect(ctx.vm.state.created).toEqual([])
           expect(reserve.directory).not.toBe(ctx.directory)
@@ -644,8 +647,9 @@ describe("control-plane provisioner", () => {
           expect(ready).toMatchObject({ status: "ready", kind: "new", directory: ctx.directory })
           expect(Date.now() - started).toBeLessThan(2_000)
           expect(ctx.vm.state.created).toEqual([ctx.directory])
-          // The claimed VM was not created again.
+          // The claimed VM was not created again, but now carries the project's label.
           expect(ctx.calls.create).toBe(1)
+          expect(ctx.calls.relabel).toContain(ctx.directory)
           // Still synced, so the project's first request proxies straight in
           // instead of "waking" (and so redeploying) a VM that is running.
           expect(yield* workspace.isSynced(reserve.id)).toBe(true)
@@ -768,6 +772,29 @@ describe("control-plane provisioner", () => {
 
           const left = yield* awaitReserves(workspace, 1)
           expect(left.map(ownerOf)).toEqual([bob.userID])
+        }),
+      { git: true },
+    )
+
+    it.instance(
+      "a reserve Northflank rejects is not retried every tick",
+      () =>
+        Effect.gen(function* () {
+          // Like a volume below the storage class minimum: every create fails.
+          const ctx = yield* setup({ create: () => Promise.reject(new Error("Storage class nvme requires 6144MB")) })
+          process.env.OPENCODE_VM_PROJECTS_ROOT = ctx.instance.directory
+          const provisioner = yield* Provisioner.Service
+          const workspace = yield* Workspace.Service
+
+          yield* provisioner.touch(user("alice"))
+          yield* Effect.gen(function* () {
+            while (!(yield* workspace.all()).some((row) => ProvisionState.read(row.extra)?.status === "failed"))
+              yield* Effect.sleep("20 millis")
+          })
+          yield* provisioner.reconcile
+          yield* provisioner.reconcile
+
+          expect(ctx.calls.create).toBe(1)
         }),
       { git: true },
     )

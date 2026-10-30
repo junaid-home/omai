@@ -60,4 +60,6 @@ export type WorkspaceAdapter = {
   stop?(info: WorkspaceInfo, context?: AdapterContext): Promise<void>
   busy?(info: WorkspaceInfo, context?: AdapterContext): Promise<BusyReport>
   health?(info: WorkspaceInfo, context?: AdapterContext): Promise<HealthReport>
+  /** Rewrites the VM's label after its row changed (a claimed reserve); never touches its state. */
+  relabel?(info: WorkspaceInfo, context?: AdapterContext): Promise<void>
 }

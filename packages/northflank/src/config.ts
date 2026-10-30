@@ -18,6 +18,8 @@ export type NorthflankConfig = {
   vmGlobalConfig?: string
 }
 
+const MIN_VOLUME_GB = 6
+
 export function configFromEnv(env: Record<string, string | undefined>): NorthflankConfig {
   return {
     apiBase: env.NORTHFLANK_API_BASE ?? "https://api.northflank.com/v1",
@@ -25,7 +27,9 @@ export function configFromEnv(env: Record<string, string | undefined>): Northfla
     project: env.NORTHFLANK_PROJECT_ID ?? env.NORTHFLANK_PROJECT ?? "omai",
     image: env.NORTHFLANK_IMAGE ?? "jj123dev/microvm",
     plan: env.NORTHFLANK_DEPLOYMENT_PLAN ?? "nf-compute-100-4",
-    volumeSizeMB: Number(env.NORTHFLANK_VOLUME_SIZE_GB ?? 3) * 1024,
+    // Northflank's nvme storage class rejects volumes under 6 GB, and a
+    // rejected volume fails every new VM, so a smaller setting is raised to it.
+    volumeSizeMB: Math.max(Number(env.NORTHFLANK_VOLUME_SIZE_GB ?? MIN_VOLUME_GB), MIN_VOLUME_GB) * 1024,
     port: Number(env.NORTHFLANK_SERVICE_PORT ?? 4096),
     scheme: env.NORTHFLANK_SERVICE_SCHEME === "http" ? "http" : "https",
     vmUsername: env.NORTHFLANK_VM_USERNAME ?? env.OPENCODE_SERVER_USERNAME ?? "omai",

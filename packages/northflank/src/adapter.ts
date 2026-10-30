@@ -1,3 +1,4 @@
+import path from "node:path"
 import { createClient, NorthflankApiError, type NorthflankClient } from "./client.js"
 import type { NorthflankConfig } from "./config.js"
 import type {
@@ -183,6 +184,11 @@ export function northflankAdapter(config: NorthflankConfig): WorkspaceAdapter {
       if (volume) await client().deleteVolume(volume.id)
     },
 
+    async relabel(info) {
+      const service = await resolve(info.id)
+      if (service) await client().setDescription(service.id, describe(info))
+    },
+
     async target(info): Promise<WorkspaceTarget> {
       const headers = authHeaders()
       return { type: "remote", url: await vmURL(info.id), ...(headers ? { headers } : {}) }
@@ -246,16 +252,17 @@ const DESCRIPTION_DISALLOWED = /[^a-zA-Z0-9.,?\s\\/'"()[\];`%^&*\-_:!]/g
 /** Who and what the VM is for, so the Northflank dashboard is readable without the control plane. */
 function describe(info: WorkspaceInfo) {
   const owner = readOwner(info.extra)
-  const email = owner?.email ? ` (${owner.email.replace("@", " at ")})` : ""
+  // Northflank rejects ">" and "@" in descriptions, so "key: value" pairs and
+  // an email written with "at".
   const parts = [
-    "OpenCode project MicroVM",
-    owner ? `user: ${owner.username}${email}` : undefined,
-    `project: ${info.directory}`,
-    `workspace: ${info.id}`,
+    owner ? `user: ${owner.username}` : undefined,
+    info.directory ? `projectName: ${path.posix.basename(info.directory)}` : undefined,
+    owner?.email ? `email: ${owner.email.replace("@", " at ")}` : undefined,
   ]
   const text = parts
     .filter((part) => part !== undefined)
-    .join("; ")
+    .map((part) => `${part};`)
+    .join(" ")
     .replace(DESCRIPTION_DISALLOWED, "-")
   return text.length <= DESCRIPTION_MAX ? text : `${text.slice(0, DESCRIPTION_MAX - 3)}...`
 }

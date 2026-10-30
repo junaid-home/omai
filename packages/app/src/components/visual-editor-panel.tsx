@@ -245,7 +245,7 @@ export function VisualEditorPanel() {
   const [sourceInfo, setSourceInfo] = createSignal<{ path: string; line: number; column: number } | null>(null)
   const [styles, setStyles] = createSignal<ComputedStyles>({} as ComputedStyles)
   const [saving, setSaving] = createSignal(false)
-  const [saveMessage, setSaveMessage] = createSignal<string | null>(null)
+  const [saveMessage, setSaveMessage] = createSignal<{ text: string; ok: boolean } | null>(null)
   const [imageUrl, setImageUrl] = createSignal("")
   const [altValue, setAltValue] = createSignal("")
   const [uploading, setUploading] = createSignal(false)
@@ -365,13 +365,13 @@ export function VisualEditorPanel() {
       const filesWritten = result.data?.filesWritten ?? []
       if (filesWritten.length > 0) {
         editor.clearChanges()
-        setSaveMessage(`Saved to ${filesWritten.length} file${filesWritten.length > 1 ? "s" : ""}`)
+        setSaveMessage({ text: `Saved to ${filesWritten.length} file${filesWritten.length > 1 ? "s" : ""}`, ok: true })
       } else {
-        setSaveMessage(`Failed to write files — ${result.data?.error ?? "the model did not respond"}`)
+        setSaveMessage({ text: `Failed to write files — ${result.data?.error ?? "the model did not respond"}`, ok: false })
       }
       setTimeout(() => setSaveMessage(null), 4000)
     } catch (err) {
-      setSaveMessage("Save failed")
+      setSaveMessage({ text: "Save failed", ok: false })
       console.error("Visual editor save failed:", err)
     } finally {
       setSaving(false)
@@ -823,10 +823,10 @@ export function VisualEditorPanel() {
               <span
                 class="text-[10px]"
                 style={{
-                  color: saveMessage() === "Saved!" ? "#16a34a" : "#dc2626",
+                  color: saveMessage()?.ok ? "#16a34a" : "#dc2626",
                 }}
               >
-                {saveMessage()}
+                {saveMessage()?.text}
               </span>
             </Show>
             <Show when={!saveMessage()}>

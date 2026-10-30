@@ -72,4 +72,6 @@ export type WorkspaceAdapter = {
   stop?(info: WorkspaceInfo, context?: WorkspaceAdapterContext): Promise<void>
   busy?(info: WorkspaceInfo, context?: WorkspaceAdapterContext): Promise<WorkspaceBusyReport>
   health?(info: WorkspaceInfo, context?: WorkspaceAdapterContext): Promise<WorkspaceHealthReport>
+  /** Rewrites the remote resource's label after its row changed (a claimed reserve); never its state. */
+  relabel?(info: WorkspaceInfo, context?: WorkspaceAdapterContext): Promise<void>
 }

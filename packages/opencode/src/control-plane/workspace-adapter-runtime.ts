@@ -125,4 +125,12 @@ export const busy = (info: WorkspaceInfo) =>
     return yield* EffectBridge.fromPromise(() => adapter.busy?.(info, ctx))
   })
 
+export const relabel = (info: WorkspaceInfo) =>
+  Effect.gen(function* () {
+    const adapter = lifecycleAdapter(info)
+    if (!adapter?.relabel) return
+    const ctx = yield* context
+    return yield* EffectBridge.fromPromise(() => adapter.relabel!(info, ctx))
+  })
+
 export * as WorkspaceAdapterRuntime from "./workspace-adapter-runtime"
