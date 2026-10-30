@@ -112,11 +112,11 @@ export function createClient(config: NorthflankConfig) {
       ).data.containers.map((container) => container.status),
     createVolume: <A>(payload: unknown) => request<A>("POST", "/volumes", payload),
     deleteVolume: (id: string) => tolerant(404)(request("DELETE", `/volumes/${id}`)),
+    // 409: already attached (a re-provision). A 404 is not tolerated: right
+    // after a create it means Northflank does not see the service yet, and
+    // swallowing it booted VMs with their project volume never attached.
     attachVolume: (volumeID: string, serviceID: string) =>
-      tolerant(
-        404,
-        409,
-      )(request("POST", `/volumes/${volumeID}/attach`, { nfObject: { id: serviceID, type: "service" } })),
+      tolerant(409)(request("POST", `/volumes/${volumeID}/attach`, { nfObject: { id: serviceID, type: "service" } })),
   }
 }
 

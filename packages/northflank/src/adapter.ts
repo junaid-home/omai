@@ -23,6 +23,20 @@ const slug = (value: string, max: number) => {
 const serviceName = (workspaceID: string) => `vm-${slug(workspaceID, 51)}`
 const volumeName = (workspaceID: string) => `vol-${slug(workspaceID, 35)}`
 
+// Northflank's API is eventually consistent: a service it has just created can
+// answer "Could not find service" (404) to the next calls naming it. Treating
+// that as fatal failed one of every two reserves warmed at once, so those
+// calls are retried for a while instead.
+const SETTLE_MS = 30_000
+const SETTLE_RETRY_MS = 500
+
+const settle = <A>(call: () => Promise<A>, until = Date.now() + SETTLE_MS): Promise<A> =>
+  call().catch(async (error: unknown) => {
+    if (!(error instanceof NorthflankApiError) || error.status !== 404 || Date.now() >= until) throw error
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_RETRY_MS))
+    return settle(call, until)
+  })
+
 export function northflankAdapter(config: NorthflankConfig): WorkspaceAdapter {
   let api: NorthflankClient | undefined
   const client = () => (api ??= createClient(config))
@@ -169,12 +183,11 @@ export function northflankAdapter(config: NorthflankConfig): WorkspaceAdapter {
       }
       const service = await ensureService(info, variables)
       const volumeID = await ensureVolume(info)
-      await client().attachVolume(volumeID, service.id)
+      await settle(() => client().attachVolume(volumeID, service.id))
       // An existing service is either already scaled or left at zero by a
       // create that failed after provisioning; scaling a paused or running
       // service is rejected or a no-op, which is fine either way.
-      await client()
-        .scaleService(service.id, 1)
+      await settle(() => client().scaleService(service.id, 1))
         .catch((error: unknown) => {
           if (!service.created && error instanceof NorthflankApiError && (error.status === 400 || error.status === 409))
             return

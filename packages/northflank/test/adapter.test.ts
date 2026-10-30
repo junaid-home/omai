@@ -80,6 +80,31 @@ describe("northflank.adapter", () => {
     expect(service.instances).toBe(1)
   })
 
+  test("create waits out Northflank not yet seeing a service it just created", async () => {
+    const vm = vmStub()
+    // The real API answers 404 to the first calls naming a brand-new service.
+    const stub = northflankStub({ dns: vm.host, serviceLag: 3 })
+    active.push(vm.stop, stub.stop)
+    const adapter = northflankAdapter(
+      configFromEnv({
+        NORTHFLANK_API_TOKEN: stub.token,
+        NORTHFLANK_API_BASE: stub.apiBase,
+        NORTHFLANK_SERVICE_SCHEME: "http",
+      }),
+    )
+    const configured = await adapter.configure(
+      { id: "w_01JXAMPLE0000000000000000LG", type: "northflank", name: "lag", branch: null, directory: null, extra: null, projectID: "proj_1" },
+      { instance: { directory: "/workspace/projects/lag" } },
+    )
+
+    await adapter.create(configured, {})
+
+    // The volume really is attached (never skipped on a 404), then the VM is scaled up.
+    const attaches = stub.requests.filter((request) => request.path.endsWith("/attach"))
+    expect(attaches.length).toBeGreaterThan(1)
+    expect([...stub.services.values()][0]?.instances).toBe(1)
+  })
+
   test("create hands the global config to the VM only when configured", async () => {
     const plain = setup()
     await plain.adapter.create(

@@ -20,8 +20,17 @@ export type RecordedRequest = { method: string; path: string; authorization?: st
  * adapter uses. Tests assert against recorded requests and server state —
  * no module mocks.
  */
-export function northflankStub(input?: { dns?: string; token?: string; pageSize?: number }) {
+export function northflankStub(input?: { dns?: string; token?: string; pageSize?: number; serviceLag?: number }) {
   const services = new Map<string, Service>()
+  // The real API is eventually consistent: a service it just created answers
+  // 404 to the next few calls naming it. `serviceLag` is how many.
+  const unseen = new Map<string, number>()
+  const seen = (id: string) => {
+    const left = unseen.get(id) ?? 0
+    if (left <= 0) return services.has(id)
+    unseen.set(id, left - 1)
+    return false
+  }
   const volumes = new Map<string, Volume>()
   const requests: RecordedRequest[] = []
   const throttle = { remaining: 0 }
@@ -91,6 +100,7 @@ export function northflankStub(input?: { dns?: string; token?: string; pageSize?
         const serviceID = name.toLowerCase().replace(/[^a-z0-9-]+/g, "-")
         if (services.has(serviceID)) return fail(409, `Service '${name}' already exists`)
         services.set(serviceID, { id: serviceID, name, payload: payload ?? {}, paused: false })
+        unseen.set(serviceID, input?.serviceLag ?? 0)
         return json({ data: { id: serviceID, name } })
       }
 
@@ -143,7 +153,7 @@ export function northflankStub(input?: { dns?: string; token?: string; pageSize?
 
       if (kind === "services" && id === "deployment" && action && method === "PATCH") {
         const service = services.get(action)
-        if (!service) return fail(404, `Could not find service '${action}'`)
+        if (!service || !seen(action)) return fail(404, `Could not find service '${action}'`)
         const deployment = payload?.["deployment"] as
           | { instances?: number; external?: { imagePath?: string } }
           | undefined
@@ -184,6 +194,8 @@ export function northflankStub(input?: { dns?: string; token?: string; pageSize?
 
       if (kind === "volumes" && id && action === "attach") {
         if (!volumes.has(id)) return fail(404, `Could not find volume '${id}'`)
+        const target = (payload?.["nfObject"] as { id?: string } | undefined)?.id
+        if (!target || !seen(target)) return fail(404, `Could not find service '${target}'`)
         return json({ data: {} })
       }
 
