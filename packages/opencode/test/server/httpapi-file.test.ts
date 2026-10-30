@@ -140,6 +140,50 @@ describe("file HttpApi", () => {
     expect(llm.models).toEqual(["test-model"])
   })
 
+  test("a visual edit never switches away from the chat's model", async () => {
+    using llm = completions(
+      JSON.stringify([{ path: "index.html", find: "<h1>Unchanged</h1>", replace: "<h1>Changed</h1>" }]),
+    )
+    const base = testProviderConfig(llm.url)
+    await using tmp = await tmpdir({
+      git: true,
+      config: {
+        ...base,
+        // A working fallback the save must not use instead of the chat's model.
+        visual_editor_model: "test/test-model",
+        provider: {
+          ...base.provider,
+          down: {
+            ...base.provider.test,
+            id: "down",
+            name: "Down",
+            options: { apiKey: "k", baseURL: "http://127.0.0.1:1" },
+          },
+        },
+      },
+    })
+    await Bun.write(path.join(tmp.path, "index.html"), "<h1>Unchanged</h1>")
+
+    const response = await HttpApiApp.webHandler().handler(
+      new Request(`http://localhost${FilePaths.visualEdit}`, {
+        method: "POST",
+        headers: { "x-opencode-directory": tmp.path, "content-type": "application/json" },
+        body: JSON.stringify({
+          modifiedHtml: "<h1>Changed</h1>",
+          changes: [{ selector: "h1", type: "text", content: "Changed", sourcePath: "index.html" }],
+          model: { providerID: "down", modelID: "test-model" },
+        }),
+      }),
+      context,
+    )
+
+    const body = (await response.json()) as { success: boolean; error?: string }
+    expect(body.success).toBe(false)
+    expect(body.error).toStartWith("down/test-model: ")
+    expect(llm.models).toEqual([])
+    expect(await Bun.file(path.join(tmp.path, "index.html")).text()).toBe("<h1>Unchanged</h1>")
+  })
+
   test("a visual edit that cannot reach any model says why", async () => {
     await using tmp = await tmpdir({ git: true, config: testProviderConfig("http://127.0.0.1:1") })
     await Bun.write(path.join(tmp.path, "index.html"), "<h1>Unchanged</h1>")

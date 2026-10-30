@@ -14,7 +14,7 @@ import { AbsolutePath, RelativePath } from "@opencode-ai/core/schema"
 import { Provider } from "@/provider/provider"
 import { Config } from "@/config/config"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { Effect, Layer, Option, Schema } from "effect"
+import { Cause, Effect, Layer, Option, Schema } from "effect"
 import type { LanguageModelV3 } from "@ai-sdk/provider"
 import { generateText, wrapLanguageModel } from "ai"
 import ignore from "ignore"
@@ -248,28 +248,37 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
         }
       }
 
+      const unresolved: string[] = []
       const resolveCandidates = Effect.fnUntraced(function* () {
         const candidates: { id: string; language: LanguageModelV3 }[] = []
         const push = function* (providerID: ProviderV2.ID, modelID: ModelV2.ID) {
-          const model = yield* provider
-            .getModel(providerID, modelID)
-            .pipe(Effect.catch(() => Effect.succeed(undefined)))
-          if (!model) return
-          const language = yield* provider.getLanguage(model).pipe(Effect.catch(() => Effect.succeed(undefined)))
           const id = `${providerID}/${modelID}`
+          // catchCause, not catch: a provider can throw while it loads (e.g. a
+          // gateway missing its env), and that must not abort the whole save.
+          const language = yield* provider.getModel(providerID, modelID).pipe(
+            Effect.flatMap((model) => provider.getLanguage(model)),
+            Effect.catchCause((cause) =>
+              Effect.sync(() => {
+                unresolved.push(`${id}: ${errorText(Cause.squash(cause))}`)
+                return undefined
+              }),
+            ),
+          )
           if (language && !candidates.some((c) => c.id === id)) candidates.push({ id, language })
         }
 
-        // The model the user is chatting with comes first: it is the one they
-        // chose (or were assigned), and it is known to be reachable.
-        if (ctx.payload.model)
+        // The model the user is chatting with (chosen, or assigned by an
+        // admin) is the only one used: never silently switch to another.
+        if (ctx.payload.model) {
           yield* push(ProviderV2.ID.make(ctx.payload.model.providerID), ModelV2.ID.make(ctx.payload.model.modelID))
+          return candidates
+        }
         if (cfg.visual_editor_model) {
           const parsed = Provider.parseModel(cfg.visual_editor_model)
           yield* push(parsed.providerID, parsed.modelID)
         }
 
-        const predefined = yield* provider.defaultModel().pipe(Effect.catch(() => Effect.succeed(undefined)))
+        const predefined = yield* provider.defaultModel().pipe(Effect.catchCause(() => Effect.succeed(undefined)))
         if (predefined) {
           yield* push(predefined.providerID, predefined.modelID)
         }
@@ -280,9 +289,13 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
       })
 
       const candidates = yield* resolveCandidates()
-      yield* Effect.logInfo("visualEdit: resolved model", { models: candidates.map((c) => c.id) })
+      yield* Effect.logInfo("visualEdit: resolved model", { models: candidates.map((c) => c.id), unresolved })
       if (candidates.length === 0)
-        return { success: false, filesWritten: [], error: "No usable model: select a model in the chat first" }
+        return {
+          success: false,
+          filesWritten: [],
+          error: unresolved[0] ?? "No usable model: select a model in the chat first",
+        }
 
       yield* Effect.logInfo("visualEdit: resolved language model", { count: candidates.length })
 
