@@ -58,6 +58,7 @@ afterEach(async () => {
     else process.env[key] = value
   }
   stops.splice(0).forEach((stop) => stop())
+  Provisioner.resetDemand()
   await disposeAllInstances()
   await resetDatabase()
 })
@@ -562,7 +563,29 @@ describe("control-plane provisioner", () => {
     afterEach(() => {
       delete process.env.OPENCODE_VM_PROJECTS_ROOT
       delete process.env.OPENCODE_RESERVE_IDLE_MS
+      delete process.env.OPENCODE_RESERVE_MAX
     })
+
+    const user = (name: string): Provisioner.Owner => ({
+      userID: `usr_${name}_${crypto.randomUUID()}`,
+      username: name,
+      email: `${name}@example.invalid`,
+    })
+    const ownerOf = (row: Workspace.Info) => (row.extra as { owner?: Provisioner.Owner } | null)?.owner?.userID
+
+    const awaitReserves = (workspace: Workspace.Interface, count: number) =>
+      Effect.gen(function* () {
+        const deadline = Date.now() + 8_000
+        while (Date.now() < deadline) {
+          const rows = (yield* workspace.all()).filter((row) => {
+            const state = ProvisionState.read(row.extra)
+            return state?.kind === "reserve" && state.status === "ready"
+          })
+          if (rows.length === count) return rows
+          yield* Effect.sleep("50 millis")
+        }
+        throw new Error(`${count} reserves never became ready`)
+      })
 
     const reserveOf = (workspace: Workspace.Interface) =>
       workspace
@@ -588,7 +611,7 @@ describe("control-plane provisioner", () => {
           const provisioner = yield* Provisioner.Service
           const workspace = yield* Workspace.Service
 
-          Provisioner.touchDemand()
+          yield* provisioner.touch()
           yield* provisioner.reconcile
           const reserve = yield* awaitReserveReady(workspace)
           yield* provisioner.reconcile
@@ -609,7 +632,7 @@ describe("control-plane provisioner", () => {
           const ctx = yield* setupReserve()
           const provisioner = yield* Provisioner.Service
           const workspace = yield* Workspace.Service
-          Provisioner.touchDemand()
+          yield* provisioner.touch()
           yield* provisioner.reconcile
           const reserve = yield* awaitReserveReady(workspace)
 
@@ -642,7 +665,7 @@ describe("control-plane provisioner", () => {
           const ctx = yield* setupReserve()
           const provisioner = yield* Provisioner.Service
           const workspace = yield* Workspace.Service
-          Provisioner.touchDemand()
+          yield* provisioner.touch()
           yield* provisioner.reconcile
           const reserve = yield* awaitReserveReady(workspace)
 
@@ -660,6 +683,115 @@ describe("control-plane provisioner", () => {
     )
 
     it.instance(
+      "a user becoming active gets their own reserve, and a project claims only its owner's",
+      () =>
+        Effect.gen(function* () {
+          const ctx = yield* setupReserve()
+          const provisioner = yield* Provisioner.Service
+          const workspace = yield* Workspace.Service
+          const alice = user("alice")
+          const bob = user("bob")
+
+          // No reconcile tick: signing in alone warms the VM.
+          yield* provisioner.touch(alice)
+          yield* provisioner.touch(bob)
+          const reserves = yield* awaitReserves(workspace, 2)
+          expect(new Set(reserves.map(ownerOf))).toEqual(new Set([alice.userID, bob.userID]))
+          const bobs = reserves.find((row) => ownerOf(row) === bob.userID)!
+
+          const job = yield* provisioner.start({ directory: ctx.directory, mode: "empty", owner: bob })
+
+          expect(job.workspaceID).toBe(bobs.id)
+          expect((yield* provisioner.await(job.workspaceID, 8_000))?.status).toBe("ready")
+          // Bob is warmed a fresh one; Alice's is still hers.
+          const after = yield* awaitReserves(workspace, 2)
+          expect(new Set(after.map(ownerOf))).toEqual(new Set([alice.userID, bob.userID]))
+          expect(after.map((row) => row.id)).toContain(reserves.find((row) => ownerOf(row) === alice.userID)!.id)
+        }),
+      { git: true },
+    )
+
+    it.instance(
+      "a project created while the user's reserve is still booting takes that VM over",
+      () =>
+        Effect.gen(function* () {
+          const ctx = yield* setupReserve()
+          const provisioner = yield* Provisioner.Service
+          const workspace = yield* Workspace.Service
+          const alice = user("alice")
+          // The VM is not answering yet: the reserve sits in its boot.
+          ctx.vm.state.up = false
+          yield* provisioner.touch(alice)
+          const reserve = yield* Effect.gen(function* () {
+            while (true) {
+              const row = yield* reserveOf(workspace)
+              if (row && ProvisionState.read(row.extra)?.step === "booting") return row
+              yield* Effect.sleep("20 millis")
+            }
+          })
+
+          const job = yield* provisioner.start({ directory: ctx.directory, mode: "empty", owner: alice })
+
+          expect(job).toMatchObject({ workspaceID: reserve.id, kind: "new", status: "running", step: "booting" })
+          ctx.vm.state.up = true
+          const booted = Date.now()
+          const ready = yield* provisioner.await(job.workspaceID, 8_000)
+          expect(ready).toMatchObject({ status: "ready", kind: "new", directory: ctx.directory })
+          // Only the rest of the one boot, then setup: no second VM, no re-boot.
+          expect(Date.now() - booted).toBeLessThan(2_000)
+          expect(ctx.vm.state.created).toEqual([ctx.directory])
+          const refilled = yield* awaitReserves(workspace, 1)
+          expect(refilled[0]?.id).not.toBe(reserve.id)
+          expect(ctx.calls.create).toBe(2)
+        }),
+      { git: true },
+    )
+
+    it.instance(
+      "a user's reserve is deleted once they go idle while an active user's stays",
+      () =>
+        Effect.gen(function* () {
+          process.env.OPENCODE_RESERVE_IDLE_MS = "1000"
+          yield* setupReserve()
+          const provisioner = yield* Provisioner.Service
+          const workspace = yield* Workspace.Service
+          const alice = user("alice")
+          const bob = user("bob")
+          yield* provisioner.touch(alice)
+          yield* provisioner.touch(bob)
+          yield* awaitReserves(workspace, 2)
+
+          yield* Effect.sleep("1100 millis")
+          // Bob comes back; Alice has left.
+          yield* provisioner.touch(bob)
+          yield* provisioner.reconcile
+
+          const left = yield* awaitReserves(workspace, 1)
+          expect(left.map(ownerOf)).toEqual([bob.userID])
+        }),
+      { git: true },
+    )
+
+    it.instance(
+      "never boots more reserves than OPENCODE_RESERVE_MAX",
+      () =>
+        Effect.gen(function* () {
+          process.env.OPENCODE_RESERVE_MAX = "1"
+          const ctx = yield* setupReserve()
+          const provisioner = yield* Provisioner.Service
+          const workspace = yield* Workspace.Service
+
+          yield* provisioner.touch(user("alice"))
+          yield* provisioner.touch(user("bob"))
+          yield* awaitReserves(workspace, 1)
+          yield* provisioner.reconcile
+
+          expect(ctx.calls.create).toBe(1)
+        }),
+      { git: true },
+    )
+
+    it.instance(
       "the reserve is deleted once the deployment has been idle",
       () =>
         Effect.gen(function* () {
@@ -667,7 +799,7 @@ describe("control-plane provisioner", () => {
           const ctx = yield* setupReserve()
           const provisioner = yield* Provisioner.Service
           const workspace = yield* Workspace.Service
-          Provisioner.touchDemand()
+          yield* provisioner.touch()
           yield* provisioner.reconcile
           const reserve = yield* awaitReserveReady(workspace)
 

@@ -34,6 +34,11 @@ export interface Interface {
   /** The zip upload into the VM succeeded: finishes a job waiting at step "upload". */
   readonly uploaded: (workspaceID: WorkspaceV2.ID) => Effect.Effect<void>
   readonly reconcile: Effect.Effect<void>
+  /**
+   * Records a signed-in user's activity (`undefined`: the single local user).
+   * A user becoming active gets a reserve VM of their own warmed at once.
+   */
+  readonly touch: (owner?: Owner) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/control-plane/Provisioner") {}
@@ -47,9 +52,12 @@ const bootDeadlineMs = () => env("OPENCODE_PROVISION_BOOT_DEADLINE_MS", 120_000)
 const uploadDeadlineMs = () => env("OPENCODE_PROVISION_UPLOAD_DEADLINE_MS", 1_800_000)
 const reconcileMs = () => Math.max(env("OPENCODE_PROVISION_RECONCILE_MS", 15_000), 100)
 const failedTtlMs = () => env("OPENCODE_PROVISION_FAILED_TTL_MS", 3_600_000)
-// A reserve VM is kept while the deployment is in use and deleted after this
-// long without any activity (it is recreated on the next request).
-const reserveIdleMs = () => env("OPENCODE_RESERVE_IDLE_MS", 1_800_000)
+// Each active user keeps one reserve VM; it is deleted once its user has made
+// no request for this long, and warmed again on their next one.
+const reserveIdleMs = () => env("OPENCODE_RESERVE_IDLE_MS", 600_000)
+// Caps the booted reserves across all users, so a crowd of visitors cannot
+// boot an unbounded number of idle VMs.
+const reserveMax = () => env("OPENCODE_RESERVE_MAX", 20)
 const HEALTH_POLL_MS = 500
 // The Northflank rate limit is shared by the whole team: ask it about the
 // VM far less often than we ask the VM itself.
@@ -68,11 +76,29 @@ const starting = new Map<string, Deferred.Deferred<Job>>()
 // developer .env that enables the adapter it would otherwise resume, fail and
 // clean up the control plane's jobs (and hold short-lived commands open).
 const reconciler = { enabled: false }
-// Last time anyone used the deployment; drives whether a reserve VM is kept.
-const demand = { last: 0 }
-/** Records deployment activity (any routed request, any project start). */
-export function touchDemand() {
-  demand.last = Date.now()
+// Each user's last request, keyed by user ID ("" for the single local user).
+// After a restart nobody is known yet, so reserves get one idle window of grace.
+const demand = new Map<string, { at: number; owner?: Owner }>()
+const bootedAt = Date.now()
+// A touch that arrives while a refill pass runs makes it run once more.
+const refill = { again: false }
+const userOf = (owner?: Owner) => owner?.userID ?? ""
+const reserveUser = (row: Workspace.Info) => {
+  const userID = (row.extra as { owner?: { userID?: unknown } } | null)?.owner?.userID
+  return typeof userID === "string" ? userID : ""
+}
+const lastSeen = (user: string) => demand.get(user)?.at ?? bootedAt
+/** Forgets every user's activity, as after a restart (tests start each case fresh). */
+export function resetDemand() {
+  demand.clear()
+}
+/** Records a user's activity; true when they were not active before. */
+function seen(owner?: Owner) {
+  const user = userOf(owner)
+  const previous = demand.get(user)
+  const now = Date.now()
+  demand.set(user, { at: now, owner: owner ?? previous?.owner })
+  return !previous || now - previous.at >= reserveIdleMs()
 }
 export function enableReconcile() {
   reconciler.enabled = true
@@ -335,31 +361,34 @@ export const layer = Layer.effect(
       return yield* create(input)
     })
 
-    // Turns the booted reserve into this project: only the project setup is
-    // left to run, so creation takes seconds instead of a full VM boot.
+    // Turns the user's reserve into this project. A booted one only needs the
+    // project setup, so creation takes seconds; one still booting carries on
+    // as the project, so the wait is only what is left of its boot.
     const claimReserve = Effect.fn("Provisioner.claimReserve")(function* (input: StartInput) {
-      const reserve = (yield* workspace.all()).find((row) => {
-        const state = ProvisionState.read(row.extra)
-        return (
-          state?.kind === "reserve" &&
-          state.status === "ready" &&
-          !runners.has(row.id) &&
+      const rows = (yield* workspace.all()).filter(
+        (row) =>
+          ProvisionState.read(row.extra)?.kind === "reserve" &&
+          reserveUser(row) === userOf(input.owner) &&
           // The reserve's volume is mounted at its parent folder: only a
           // project inside that folder is persisted by it.
           row.directory &&
-          input.directory.startsWith(`${path.posix.dirname(row.directory)}/`)
-        )
-      })
-      if (!reserve?.directory) return undefined
+          input.directory.startsWith(`${path.posix.dirname(row.directory)}/`),
+      )
+      const reserve =
+        rows.find((row) => ProvisionState.read(row.extra)?.status === "ready") ??
+        rows.find((row) => ProvisionState.read(row.extra)?.status === "running")
+      const current = reserve && ProvisionState.read(reserve.extra)
+      if (!reserve?.directory || !current) return undefined
       const ctx = yield* store.load({ directory: input.directory })
       const now = Date.now()
+      const booting = current.status === "running"
       const fresh = ProvisionState.begin({ kind: "new", mode: input.mode, now, bootDeadlineMs: bootDeadlineMs() })
       const step = input.mode === "upload" ? "upload" : "setup"
-      const state: ProvisionState.State = {
-        ...fresh,
-        step,
-        deadline: step === "upload" ? now + uploadDeadlineMs() : fresh.deadline,
-      }
+      const state: ProvisionState.State = booting
+        ? // A new updatedAt makes the reserve runner's next commit fail, so it
+          // can never finish this row as a reserve.
+          { ...current, kind: "new", mode: input.mode, updatedAt: Math.max(now, current.updatedAt + 1) }
+        : { ...fresh, step, deadline: step === "upload" ? now + uploadDeadlineMs() : fresh.deadline }
       const claimed = yield* workspace.claim(reserve.id, {
         from: reserve.directory,
         directory: input.directory,
@@ -368,7 +397,14 @@ export const layer = Layer.effect(
       })
       // Someone else took it first; fall back to a fresh VM.
       if (!claimed) return undefined
-      yield* Effect.logInfo("claimed reserve VM", { workspaceID: claimed.id, directory: input.directory })
+      yield* Effect.logInfo("claimed reserve VM", { workspaceID: claimed.id, directory: input.directory, booting })
+      if (booting) {
+        // The reserve runner stops at its next step; resume the job as the
+        // project from wherever it got to.
+        yield* settled(claimed.id).pipe(Effect.andThen(fork(claimed.id, run(claimed.id))), Effect.forkDetach)
+        yield* refillReserves
+        return toJob(claimed) ?? { ...state, workspaceID: claimed.id, directory: input.directory }
+      }
       // Keep the reserve's sync stream (it is keyed by workspace id only, not
       // the folder). A request that finds the VM unsynced takes the wake path:
       // it resumes and rescales a VM that is already running (which can make
@@ -378,41 +414,77 @@ export const layer = Layer.effect(
       yield* Effect.gen(function* () {
         while (!(yield* workspace.isSynced(claimed.id))) yield* Effect.sleep(HEALTH_POLL_MS)
       }).pipe(Effect.timeoutOrElse({ duration: "15 seconds", orElse: () => Effect.void }))
+      // A reserve that just became ready may still be unwinding its runner,
+      // which would otherwise make the setup fork a no-op.
+      yield* settled(claimed.id)
       if (step === "setup") yield* fork(claimed.id, run(claimed.id))
-      yield* fork(RESERVE_REFILL, ensureReserve)
+      yield* refillReserves
       return toJob(claimed) ?? { ...state, workspaceID: claimed.id, directory: input.directory }
     })
 
-    // Keeps exactly one reserve while the deployment is in use; removes it
-    // once nobody has used the deployment for OPENCODE_RESERVE_IDLE_MS.
+    // Keeps one reserve per active user (up to OPENCODE_RESERVE_MAX) and
+    // removes a reserve once its user has been idle for OPENCODE_RESERVE_IDLE_MS.
     const ensureReserve: Effect.Effect<void> = Effect.gen(function* () {
       if (!Flag.OPENCODE_WORKSPACE_ADAPTER) return
+      const now = Date.now()
+      const active = (user: string) => now - lastSeen(user) < reserveIdleMs()
       const reserves = (yield* workspace.all()).filter((row) => {
         const state = ProvisionState.read(row.extra)
         return state?.kind === "reserve" && state.status !== "failed"
       })
-      if (Date.now() - demand.last >= reserveIdleMs()) {
-        yield* Effect.forEach(
-          reserves.filter((row) => !runners.has(row.id)),
-          (row) =>
-            Effect.logInfo("removing idle reserve VM", { workspaceID: row.id }).pipe(
-              Effect.andThen(workspace.remove(row.id)),
-            ),
-          { discard: true },
-        )
-        return
-      }
-      if (reserves.length > 0) return
+      yield* Effect.forEach(
+        reserves.filter((row) => !runners.has(row.id) && !active(reserveUser(row))),
+        (row) =>
+          Effect.logInfo("removing idle reserve VM", { workspaceID: row.id, userID: reserveUser(row) }).pipe(
+            Effect.andThen(workspace.remove(row.id)),
+          ),
+        { discard: true },
+      )
+      const kept = reserves.filter((row) => active(reserveUser(row)))
+      const held = new Set(kept.map(reserveUser))
+      const missing = [...demand.entries()].filter(([user]) => active(user) && !held.has(user))
       const root = vmProjectsRoot() ?? "/home/runner"
-      // A placeholder directory only the reserve uses; claiming replaces it.
-      const directory = `${root}/workspace/.reserve-${crypto.randomUUID().slice(0, 8)}`
-      yield* Effect.logInfo("warming reserve VM", { directory })
-      yield* create({ directory, mode: "empty" }, "reserve").pipe(Effect.asVoid)
+      yield* Effect.forEach(
+        missing.slice(0, Math.max(0, reserveMax() - kept.length)),
+        ([user, entry]) => {
+          // A placeholder directory only the reserve uses; claiming replaces it.
+          const directory = `${root}/workspace/.reserve-${crypto.randomUUID().slice(0, 8)}`
+          return Effect.logInfo("warming reserve VM", { directory, userID: user }).pipe(
+            Effect.andThen(create({ directory, mode: "empty", owner: entry.owner }, "reserve")),
+            Effect.asVoid,
+            Effect.catchCause((cause) =>
+              Effect.logWarning("reserve VM refill failed", { userID: user, error: message(cause) }),
+            ),
+          )
+        },
+        { discard: true },
+      )
     }).pipe(Effect.catchCause((cause) => Effect.logWarning("reserve VM refill failed", { error: message(cause) })))
+
+    const refillReserves = Effect.suspend(() => {
+      refill.again = true
+      return fork(
+        RESERVE_REFILL,
+        Effect.gen(function* () {
+          while (refill.again) {
+            refill.again = false
+            yield* ensureReserve
+          }
+        }),
+      )
+    })
+
+    const touch = Effect.fn("Provisioner.touch")(function* (owner?: Owner) {
+      // A MicroVM shares this code but never provisions VMs.
+      if (!Flag.OPENCODE_WORKSPACE_ADAPTER || Flag.OPENCODE_WORKSPACE_ID) return
+      // Only a user becoming active needs a reserve; later requests just
+      // extend their session.
+      if (seen(owner)) yield* refillReserves
+    })
 
     // Concurrent starts for one directory share a single attempt.
     const start = Effect.fn("Provisioner.start")(function* (input: StartInput) {
-      touchDemand()
+      seen(input.owner)
       const entry = yield* Effect.sync(() => {
         const pending = starting.get(input.directory)
         if (pending) return { deferred: pending, owner: false }
@@ -495,7 +567,7 @@ export const layer = Layer.effect(
           }),
         { discard: true },
       )
-      yield* fork(RESERVE_REFILL, ensureReserve)
+      yield* refillReserves
       yield* settled(RESERVE_REFILL)
     }).pipe(Effect.withSpan("Provisioner.reconcile"))
 
@@ -520,7 +592,7 @@ export const layer = Layer.effect(
       )
     }
 
-    return Service.of({ start, status, recover, await: awaitJob, uploaded, reconcile })
+    return Service.of({ start, status, recover, await: awaitJob, uploaded, reconcile, touch })
   }),
 )
 

@@ -18,13 +18,27 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionStatus") {}
 
+// Every project instance in this process, so a MicroVM can tell the control
+// plane's idle sweep that an agent is still mid-turn in any of them.
+const busy = new Set<SessionID>()
+
+/** Sessions currently running in any instance of this process. */
+export function busySessions(): ReadonlySet<SessionID> {
+  return busy
+}
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const events = yield* EventV2Bridge.Service
 
     const state = yield* InstanceState.make(
-      Effect.fn("SessionStatus.state")(() => Effect.succeed(new Map<SessionID, Info>())),
+      Effect.fn("SessionStatus.state")(function* () {
+        const data = new Map<SessionID, Info>()
+        // A disposed instance must not leave its sessions reported as running.
+        yield* Effect.addFinalizer(() => Effect.sync(() => data.forEach((_, id) => busy.delete(id))))
+        return data
+      }),
     )
 
     const get = Effect.fn("SessionStatus.get")(function* (sessionID: SessionID) {
@@ -42,9 +56,11 @@ const layer = Layer.effect(
       if (status.type === "idle") {
         yield* events.publish(Event.Idle, { sessionID })
         data.delete(sessionID)
+        busy.delete(sessionID)
         return
       }
       data.set(sessionID, status)
+      busy.add(sessionID)
     })
 
     return Service.of({ get, list, set })

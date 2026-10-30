@@ -153,6 +153,34 @@ describe("control-plane lifecycle", () => {
     ),
   )
 
+  it.live("sweep leaves a just-created project running until its first request arrives", () =>
+    withEnv(
+      { OPENCODE_WORKSPACE_IDLE_MS: "300", OPENCODE_WORKSPACE_SWEEP_MS: "100000", OPENCODE_PROVISION_RECONCILE: "true" },
+      Effect.gen(function* () {
+        const stops = yield* Ref.make(0)
+        registerAdapter(projectID, "sweep-fresh-test", {
+          ...adapter,
+          stop: async () => Effect.runSync(Ref.update(stops, (count) => count + 1)),
+        })
+        const rows: Workspace.Info[] = []
+        const lifecycle = yield* lifecycleWith(fakeWorkspace({ all: () => Effect.succeed(rows) }))
+        // The control plane has been up longer than the idle window.
+        yield* Effect.sleep("400 millis")
+        const begun = ProvisionState.begin({ kind: "new", mode: "empty", now: Date.now(), bootDeadlineMs: 60_000 })
+        rows.push({
+          ...space,
+          id: WorkspaceV2.ID.ascending(),
+          type: "sweep-fresh-test",
+          extra: ProvisionState.write(null, ProvisionState.advance(begun, "done", Date.now(), 60_000)),
+        })
+
+        yield* lifecycle.sweep
+
+        expect(yield* Ref.get(stops)).toBe(0)
+      }),
+    ),
+  )
+
   it.live("sweep never stops the warm reserve VM", () =>
     withEnv(
       { OPENCODE_WORKSPACE_IDLE_MS: "0", OPENCODE_WORKSPACE_SWEEP_MS: "100000", OPENCODE_PROVISION_RECONCILE: "true" },
@@ -175,6 +203,33 @@ describe("control-plane lifecycle", () => {
         yield* lifecycle.sweep
 
         expect(yield* Ref.get(stops)).toBe(0)
+      }),
+    ),
+  )
+
+  it.live("sweep keeps a VM running while its busy probe goes unanswered, until three idle windows pass", () =>
+    withEnv(
+      { OPENCODE_WORKSPACE_IDLE_MS: "0", OPENCODE_WORKSPACE_SWEEP_MS: "100000", OPENCODE_PROVISION_RECONCILE: "true" },
+      Effect.gen(function* () {
+        const stops = yield* Ref.make(0)
+        registerAdapter(projectID, "sweep-unanswered-test", {
+          ...adapter,
+          busy: async () => {
+            throw new Error("The operation timed out.")
+          },
+          stop: async () => Effect.runSync(Ref.update(stops, (count) => count + 1)),
+        })
+        const loaded: Workspace.Info = { ...space, id: WorkspaceV2.ID.ascending(), type: "sweep-unanswered-test" }
+        const lifecycle = yield* lifecycleWith(fakeWorkspace({ all: () => Effect.succeed([loaded]) }))
+
+        yield* lifecycle.sweep
+        yield* lifecycle.sweep
+        // A VM slow to answer may be mid-turn: two misses must not pause it.
+        expect(yield* Ref.get(stops)).toBe(0)
+
+        yield* lifecycle.sweep
+        // One that never answers is suspended rather than kept up forever.
+        expect(yield* Ref.get(stops)).toBe(1)
       }),
     ),
   )

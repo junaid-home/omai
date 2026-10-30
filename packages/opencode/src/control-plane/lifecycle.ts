@@ -14,6 +14,9 @@ function env(key: string, fallback: number) {
 const idleMs = () => env("OPENCODE_WORKSPACE_IDLE_MS", 600_000)
 const wakeTimeoutMs = () => env("NORTHFLANK_WAKE_TIMEOUT_MS", 180_000)
 const wakeRetryMs = () => env("OPENCODE_WORKSPACE_WAKE_RETRY_MS", 1_000)
+// A VM that cannot answer the busy probe may be mid-turn under load, so it
+// keeps running; only this many unanswered idle windows in a row suspend it.
+const UNANSWERED_PROBES = 3
 
 type Phase = "STOPPED" | "STARTING" | "RUNNING" | "STOPPING"
 
@@ -32,6 +35,7 @@ export const layer = Layer.effect(
     const bootedAt = Date.now()
     const phases = new Map<WorkspaceV2.ID, Phase>()
     const activity = new Map<WorkspaceV2.ID, number>()
+    const unanswered = new Map<WorkspaceV2.ID, number>()
     const locks = new Map<WorkspaceV2.ID, Semaphore.Semaphore>()
     const waking = new Map<WorkspaceV2.ID, Deferred.Deferred<void, never>>()
 
@@ -135,7 +139,12 @@ export const layer = Layer.effect(
           if (provision?.kind === "reserve") return
           const id = space.id
           if (phases.get(id) === "STARTING") return
-          const fresh = () => Date.now() - (activity.get(id) ?? bootedAt) < idle
+          // A project that just became ready (a claimed reserve takes 0.2s) has
+          // no request yet; counting only this process's requests, the sweep
+          // paused it before the app's first one, which then waited 20-40s
+          // for a resume. The ready time is in the row, so every process sees it.
+          const readyAt = provision?.updatedAt ?? 0
+          const fresh = () => Date.now() - Math.max(activity.get(id) ?? bootedAt, readyAt) < idle
           if (fresh()) return
           if (!(yield* workspace.isSyncing(id))) {
             phases.set(id, "STOPPED")
@@ -149,7 +158,16 @@ export const layer = Layer.effect(
                 return
               }
               const report = yield* WorkspaceAdapterRuntime.busy(space).pipe(
-                Effect.catchCause(() => Effect.succeed(undefined)),
+                Effect.tap(() => Effect.sync(() => unanswered.delete(id))),
+                Effect.catchCause((cause) => {
+                  const misses = (unanswered.get(id) ?? 0) + 1
+                  unanswered.set(id, misses)
+                  return Effect.logWarning("workspace busy probe failed", {
+                    workspaceID: id,
+                    misses,
+                    error: String(cause),
+                  }).pipe(Effect.as(misses < UNANSWERED_PROBES ? { busy: true, reasons: ["unanswered"] } : undefined))
+                }),
               )
               if (report?.busy) {
                 activity.set(id, Date.now())
@@ -167,6 +185,7 @@ export const layer = Layer.effect(
               )
               phases.set(id, "STOPPED")
               activity.set(id, Date.now())
+              unanswered.delete(id)
               if (stopped) {
                 yield* Effect.logInfo("workspace suspended", { workspaceID: id, reasons: report?.reasons ?? [] })
               }

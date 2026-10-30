@@ -224,18 +224,16 @@ export function northflankAdapter(config: NorthflankConfig): WorkspaceAdapter {
       return { state: "pending" }
     },
 
+    // Rejects when the VM cannot answer: a loaded VM that is slow to reply
+    // may be mid-turn, so the caller must not read a failed probe as idle.
     async busy(info): Promise<BusyReport> {
-      try {
-        const response = await fetch(`${await vmURL(info.id)}/experimental/workspace/busy`, {
-          headers: authHeaders(),
-          signal: AbortSignal.timeout(3000),
-        })
-        if (!response.ok) return { busy: false, reasons: [] }
-        const report = (await response.json()) as Partial<BusyReport>
-        return { busy: report.busy === true, reasons: report.reasons ?? [] }
-      } catch {
-        return { busy: false, reasons: ["unreachable"] }
-      }
+      const response = await fetch(`${await vmURL(info.id)}/experimental/workspace/busy`, {
+        headers: authHeaders(),
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (!response.ok) throw new Error(`Busy probe failed with HTTP ${response.status}`)
+      const report = (await response.json()) as Partial<BusyReport>
+      return { busy: report.busy === true, reasons: report.reasons ?? [] }
     },
   }
 }

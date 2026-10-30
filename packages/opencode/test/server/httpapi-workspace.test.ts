@@ -12,6 +12,8 @@ import { Workspace } from "../../src/control-plane/workspace"
 import { WorkspacePaths } from "../../src/server/routes/instance/httpapi/groups/workspace"
 import { EventPaths } from "../../src/server/routes/instance/httpapi/groups/event"
 import { Session } from "@/session/session"
+import { SessionID } from "@/session/schema"
+import { SessionStatus } from "@/session/status"
 import { Database } from "@opencode-ai/core/database/database"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { Server } from "../../src/server/server"
@@ -26,7 +28,15 @@ import { httpApiLayer, requestInDirectory } from "./httpapi-layer"
 
 const originalWorkspaces = Flag.OPENCODE_EXPERIMENTAL_WORKSPACES
 const appLayer = AppNodeBuilder.build(
-  LayerNode.group([Project.node, Session.node, Workspace.node, InstanceStore.node, Database.node, Ripgrep.node]),
+  LayerNode.group([
+    Project.node,
+    Session.node,
+    SessionStatus.node,
+    Workspace.node,
+    InstanceStore.node,
+    Database.node,
+    Ripgrep.node,
+  ]),
   [[InstanceStore.bootstrapNode, InstanceBootstrap.node]],
 )
 const it = testEffect(Layer.mergeAll(appLayer, httpApiLayer))
@@ -197,6 +207,25 @@ describe("workspace HttpApi", () => {
 
       expect(status.status).toBe(200)
       expect(yield* status.json).toEqual([])
+    }),
+  )
+
+  it.live("reports the VM busy while an agent turn runs in any of its projects", () =>
+    Effect.gen(function* () {
+      const project = yield* tmpdirScoped({ git: true })
+      const other = yield* tmpdirScoped({ git: true })
+      const status = yield* SessionStatus.Service
+      const sessionID = SessionID.descending()
+
+      yield* status.set(sessionID, { type: "busy" }).pipe(provideInstance(project))
+      // The idle sweep probes without a project, so the turn must count VM-wide.
+      const running = (yield* (yield* request(WorkspacePaths.busy, other)).json) as { busy: boolean; reasons: string[] }
+      expect(running.busy).toBe(true)
+      expect(running.reasons).toContain("sessions:1")
+
+      yield* status.set(sessionID, { type: "idle" }).pipe(provideInstance(project))
+      const idle = (yield* (yield* request(WorkspacePaths.busy, other)).json) as { reasons: string[] }
+      expect(idle.reasons.some((reason) => reason.startsWith("sessions:"))).toBe(false)
     }),
   )
 

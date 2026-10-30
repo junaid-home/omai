@@ -317,7 +317,7 @@ describe("northflank.adapter", () => {
     await expect(adapter.start?.(configured)).resolves.toBeUndefined()
   })
 
-  test("busy reports VM job state and treats unreachable VMs as idle", async () => {
+  test("busy reports VM job state and fails for an unreachable VM instead of calling it idle", async () => {
     const { vm, adapter, info, directory } = setup()
     const configured = await adapter.configure(info, { instance: { directory } })
     await adapter.create(configured, {})
@@ -328,7 +328,7 @@ describe("northflank.adapter", () => {
     expect(await adapter.busy?.(configured)).toEqual({ busy: true, reasons: ["build"] })
 
     vm.crash()
-    expect(await adapter.busy?.(configured)).toEqual({ busy: false, reasons: ["unreachable"] })
+    await expect(adapter.busy?.(configured)).rejects.toThrow()
   })
 
   test("remove deletes the service and volume, and tolerates repeats", async () => {

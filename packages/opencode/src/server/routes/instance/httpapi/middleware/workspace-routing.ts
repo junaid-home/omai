@@ -9,6 +9,7 @@ import { Workspace } from "@/control-plane/workspace"
 import { WorkspaceAdapterRuntime } from "@/control-plane/workspace-adapter-runtime"
 import { vmProjectsRoot } from "@/control-plane/vm-projects"
 import { setVmPreviewTarget } from "@/control-plane/vm-preview-map"
+import { WorkspaceViewers } from "@/control-plane/workspace-viewers"
 import { Session } from "@/session/session"
 import { HttpApiProxy } from "./proxy"
 import * as Fence from "@/server/shared/fence"
@@ -172,6 +173,8 @@ function proxyRemote(
     // Touch first so a sweep already waiting on the lock sees the request and
     // aborts; then wake a suspended VM and hold until its sync stream is up.
     yield* lifecycle.touch(workspace.id)
+    const principal = yield* Authentication.Current
+    if (principal) WorkspaceViewers.view(principal.sessionID, workspace.id)
     yield* Workspace.Service.use((svc) => svc.startSync(workspace)).pipe(Effect.ignore)
     yield* lifecycle.ensureRunning(workspace)
     const ready = yield* Workspace.Service.use((svc) => svc.isSynced(workspace.id))
@@ -495,7 +498,14 @@ export const workspaceRoutingLayer = Layer.effect(
     const lifecycle = yield* Lifecycle.Service
     const provisioner = yield* Provisioner.Service
     return WorkspaceRoutingMiddleware.of((effect) =>
-      Effect.sync(Provisioner.touchDemand).pipe(
+      Effect.gen(function* () {
+        // Unauthenticated traffic (health probes, login pages) is nobody's
+        // session, so it must not keep a reserve VM booted.
+        const principal = yield* Authentication.Current
+        if (principal)
+          yield* provisioner.touch({ userID: principal.userID, username: principal.username, email: principal.email })
+        else if (!Authentication.central()) yield* provisioner.touch()
+      }).pipe(
         Effect.andThen(routeHttpApiWorkspace(client, lifecycle, provisioner, effect)),
       ).pipe(
         Effect.provideService(Socket.WebSocketConstructor, makeWebSocket),

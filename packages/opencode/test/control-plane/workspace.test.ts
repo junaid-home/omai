@@ -1847,6 +1847,82 @@ describe("workspace sync state", () => {
     { git: true },
   )
 
+  it.instance(
+    "a sync event the VM already committed to the shared database is forwarded without a replay",
+    () =>
+      Effect.gen(function* () {
+        const instance = yield* requireInstance
+        const workspace = yield* Workspace.Service
+        const sessionSvc = yield* SessionNs.Service
+        const { db } = yield* Database.Service
+        const type = unique("shared-db")
+        const info = workspaceInfo(instance.project.id, type)
+        yield* insertWorkspace(info)
+        const created = yield* sessionSvc.create({ title: "committed by the VM" })
+        yield* attachSessionToWorkspace(created.id, info.id)
+        yield* db
+          .update(EventSequenceTable)
+          .set({ owner_id: info.id })
+          .where(eq(EventSequenceTable.aggregate_id, created.id))
+          .pipe(Effect.orDie)
+        const seq = (yield* sessionSequence(created.id)) ?? 0
+        // A copy differing from the stored row: a replay rejects it as
+        // diverged and drops it, so only a skipped replay forwards it.
+        const live = JSON.stringify({
+          directory: "remote-dir",
+          payload: {
+            type: "sync",
+            syncEvent: {
+              id: `evt_shared_${created.id}`,
+              aggregateID: created.id,
+              seq,
+              type: "session.updated.1",
+              data: { sessionID: created.id, info: { ...created, workspaceID: info.id, title: "relayed copy" } },
+            },
+          },
+        })
+        const encoder = new TextEncoder()
+        const vm = Bun.serve({
+          port: 0,
+          idleTimeout: 0,
+          fetch(request) {
+            if (new URL(request.url).pathname === "/sync/history") return Response.json([])
+            return new Response(
+              new ReadableStream({
+                start(controller) {
+                  controller.enqueue(encoder.encode(`:\n\ndata: ${live}\n\n`))
+                },
+              }),
+              { headers: { "content-type": "text/event-stream" } },
+            )
+          },
+        })
+        yield* Effect.addFinalizer(() => Effect.sync(() => vm.stop(true)))
+        registerAdapter(instance.project.id, type, remoteAdapter(`http://127.0.0.1:${vm.port}`).adapter)
+        yield* Effect.addFinalizer(() => workspace.remove(info.id).pipe(Effect.ignore))
+        const captured = captureGlobalEvents()
+        yield* Effect.addFinalizer(() => Effect.sync(() => captured.dispose()))
+
+        yield* workspace.startSync(info)
+
+        yield* eventuallyEffect(
+          Effect.sync(() =>
+            expect(
+              captured.events.some(
+                (event) =>
+                  event.workspace === info.id &&
+                  event.payload.type === "sync" &&
+                  event.payload.syncEvent.seq === seq,
+              ),
+            ).toBe(true),
+          ),
+          3_000,
+        )
+        expect((yield* sessionSvc.get(created.id).pipe(Effect.orDie)).title).toBe("committed by the VM")
+      }),
+    { git: true },
+  )
+
   it.live("SSE sync events are replayed and forwarded", () => {
     let sseSessionID: SessionID | undefined
     let sseSession: SessionNs.Info | undefined

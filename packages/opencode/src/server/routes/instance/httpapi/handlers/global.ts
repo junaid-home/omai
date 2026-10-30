@@ -21,6 +21,7 @@ import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { gitInitRepo } from "@/project/project"
 import { ShareData } from "@/share/share-data"
 import { vmProjectsRoot } from "@/control-plane/vm-projects"
+import { WorkspaceViewers } from "@/control-plane/workspace-viewers"
 import { Effect, Layer, Queue, Schema } from "effect"
 import * as Stream from "effect/Stream"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
@@ -45,13 +46,15 @@ function asError(err: unknown): Error {
   return new Error(String(err))
 }
 
-function eventData(data: unknown): Sse.Event {
-  return {
-    _tag: "Event",
-    event: "message",
-    id: undefined,
-    data: JSON.stringify(data),
-  }
+// Every connected tab receives the same bus event object; encode it once.
+const encoded = new WeakMap<object, Sse.Event>()
+
+function eventData(data: object): Sse.Event {
+  const cached = encoded.get(data)
+  if (cached) return cached
+  const event: Sse.Event = { _tag: "Event", event: "message", id: undefined, data: JSON.stringify(data) }
+  encoded.set(data, event)
+  return event
 }
 
 function parseBody(body: string) {
@@ -65,8 +68,11 @@ function parseBody(body: string) {
 function eventResponse() {
   return Effect.gen(function* () {
     yield* Effect.logInfo("global event connected")
+    const principal = yield* Authentication.Current
     const events = Stream.callback<GlobalBusEvent>((queue) => {
-      const handler = (event: GlobalBusEvent) => Queue.offerUnsafe(queue, event)
+      const handler = (event: GlobalBusEvent) => {
+        if (WorkspaceViewers.relays(principal?.sessionID, event)) Queue.offerUnsafe(queue, event)
+      }
       return Effect.acquireRelease(
         Effect.sync(() => GlobalBus.on("event", handler)),
         () => Effect.sync(() => GlobalBus.off("event", handler)),

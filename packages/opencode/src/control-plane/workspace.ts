@@ -464,15 +464,28 @@ const layer = Layer.effect(
               if (payload.type === "server.heartbeat") return
 
               if (payload.type === "sync" && payload.syncEvent) {
-                const failed = yield* events.replay(payload.syncEvent, { publish: true, ownerID: space.id }).pipe(
-                  Effect.as(false),
-                  Effect.catchCause((error) =>
-                    Effect.logWarning("failed to replay global event", error).pipe(
-                      Effect.annotateLogs({ workspaceID: space.id }),
-                      Effect.as(true),
-                    ),
-                  ),
-                )
+                const sync = payload.syncEvent
+                // A MicroVM shares this database, so its events arrive already
+                // committed. Replaying one would only lock the session row the
+                // VM is writing and re-encode a payload of up to megabytes to
+                // find it unchanged; the first replay still claims the owner.
+                const stored = yield* db
+                  .select({ seq: EventSequenceTable.seq, ownerID: EventSequenceTable.owner_id })
+                  .from(EventSequenceTable)
+                  .where(eq(EventSequenceTable.aggregate_id, sync.aggregateID))
+                  .pipe(Database.first, Effect.orDie)
+                const failed =
+                  stored?.ownerID === space.id && stored.seq >= sync.seq
+                    ? false
+                    : yield* events.replay(sync, { publish: true, ownerID: space.id }).pipe(
+                        Effect.as(false),
+                        Effect.catchCause((error) =>
+                          Effect.logWarning("failed to replay global event", error).pipe(
+                            Effect.annotateLogs({ workspaceID: space.id }),
+                            Effect.as(true),
+                          ),
+                        ),
+                      )
                 if (failed) return
               }
 
