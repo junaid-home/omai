@@ -296,6 +296,21 @@ describe("northflank.adapter", () => {
     ])
   })
 
+  test("private networking targets the project-internal address without a ports lookup", async () => {
+    const { stub, info, directory, config } = setup({ NORTHFLANK_PRIVATE_NETWORK: "true" })
+    const adapter = northflankAdapter(config)
+    const configured = await adapter.configure(info, { instance: { directory } })
+    await adapter.create(configured, {})
+    const before = stub.requests.length
+
+    const target = await adapter.target(configured)
+
+    expect(String(target.type === "remote" ? target.url : "")).toBe("http://vm-w-01jxample0000000000000000ab:4096")
+    expect(stub.requests.slice(before).map((request) => request.path)).not.toContain(
+      "/v1/projects/omai/services/vm-w-01jxample0000000000000000ab/ports",
+    )
+  })
+
   test("start reports a service deleted out-of-band as gone", async () => {
     const { stub, adapter, info, directory } = setup()
     const configured = await adapter.configure(info, { instance: { directory } })

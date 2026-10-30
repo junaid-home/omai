@@ -11,6 +11,12 @@ export type NorthflankConfig = {
   port: number
   /** Scheme used to reach a service's public DNS (http for local stubs). */
   scheme: "http" | "https"
+  /**
+   * Reach VMs at their project-internal address (`http://<service>:<port>`)
+   * instead of their public DNS. Only a control plane running inside the same
+   * Northflank project can resolve it, so a laptop keeps the default.
+   */
+  privateNetwork: boolean
   /** Basic-auth credentials the control plane uses when proxying to the VM. */
   vmUsername: string
   vmPassword?: string
@@ -32,6 +38,7 @@ export function configFromEnv(env: Record<string, string | undefined>): Northfla
     volumeSizeMB: Math.max(Number(env.NORTHFLANK_VOLUME_SIZE_GB ?? MIN_VOLUME_GB), MIN_VOLUME_GB) * 1024,
     port: Number(env.NORTHFLANK_SERVICE_PORT ?? 4096),
     scheme: env.NORTHFLANK_SERVICE_SCHEME === "http" ? "http" : "https",
+    privateNetwork: env.NORTHFLANK_PRIVATE_NETWORK === "true",
     vmUsername: env.NORTHFLANK_VM_USERNAME ?? env.OPENCODE_SERVER_USERNAME ?? "omai",
     vmPassword: env.NORTHFLANK_VM_PASSWORD ?? env.OPENCODE_SERVER_PASSWORD,
     vmGlobalConfig: env.NORTHFLANK_VM_GLOBAL_CONFIG,

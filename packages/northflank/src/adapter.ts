@@ -59,6 +59,13 @@ export function northflankAdapter(config: NorthflankConfig): WorkspaceAdapter {
     const cached = urls.get(workspaceID)
     if (cached) return cached
     const { id } = await requireService(workspaceID)
+    // Inside the project, services answer at `<service>:<port>` over plain
+    // HTTP: no TLS, no round trip through the public ingress.
+    if (config.privateNetwork) {
+      const url = `http://${id}:${config.port}`
+      urls.set(workspaceID, url)
+      return url
+    }
     const dns = (await client().getPorts(id)).find((port) => port.public && port.dns)?.dns
     if (!dns) throw new Error(`Northflank service has no public port: ${id}`)
     const url = `${config.scheme}://${dns}`

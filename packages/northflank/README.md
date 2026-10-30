@@ -42,6 +42,7 @@ All optional except the token:
 | `NORTHFLANK_VOLUME_SIZE_GB` | `6` (Northflank minimum) |
 | `NORTHFLANK_SERVICE_PORT` | `4096` |
 | `NORTHFLANK_SERVICE_SCHEME` | `https` (`http` for local stubs) |
+| `NORTHFLANK_PRIVATE_NETWORK` | unset; `true` reaches VMs at `http://<service>:<port>` inside the project (control plane deployed on Northflank only) |
 | `NORTHFLANK_VM_USERNAME` / `NORTHFLANK_VM_PASSWORD` | `OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD` |
 | `NORTHFLANK_API_BASE` | `https://api.northflank.com/v1` |
 | `NORTHFLANK_VM_GLOBAL_CONFIG` | unset; JSON/JSONC passed to every VM as `OPENCODE_GLOBAL_CONFIG` |
