@@ -11,7 +11,7 @@ function env(key: string, fallback: number) {
 
 // Resuming a paused Northflank VM costs ~15-20s before it serves again, so
 // only suspend after a real absence. Open tabs heartbeat every 30s.
-const idleMs = () => env("OPENCODE_WORKSPACE_IDLE_MS", 600_000)
+const idleMs = () => env("OPENCODE_WORKSPACE_IDLE_MS", 300_000)
 const wakeTimeoutMs = () => env("NORTHFLANK_WAKE_TIMEOUT_MS", 180_000)
 const wakeRetryMs = () => env("OPENCODE_WORKSPACE_WAKE_RETRY_MS", 1_000)
 // A VM that cannot answer the busy probe may be mid-turn under load, so it
