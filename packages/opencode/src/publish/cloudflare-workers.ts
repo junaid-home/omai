@@ -70,7 +70,7 @@ export async function installDependencies(directory: string, env: NodeJS.Process
     })
     child.on("close", (code) => {
       if (code !== 0) {
-        reject(new Error(`Failed to install dependencies (exit ${code}): ${stderr.slice(-500)}`))
+        reject(new Error(`Failed to install dependencies (exit ${code}): ${stderr.slice(-2000)}`))
       } else {
         resolve()
       }
@@ -106,7 +106,7 @@ export async function migrateConfig(directory: string, env: NodeJS.ProcessEnv = 
     })
     child.on("close", (code) => {
       if (code !== 0) {
-        reject(new Error(`OpenNext migrate failed (exit ${code}): ${stderr.slice(-500)}`))
+        reject(new Error(`OpenNext migrate failed (exit ${code}): ${stderr.slice(-2000)}`))
       } else {
         resolve()
       }
@@ -147,7 +147,7 @@ export async function buildForWorkers(directory: string, env: NodeJS.ProcessEnv 
     })
     child.on("close", (code) => {
       if (code !== 0) {
-        reject(new Error(`Workers build failed (exit ${code}): ${stderr.slice(-500)}`))
+        reject(new Error(`Workers build failed (exit ${code}): ${stderr.slice(-2000)}`))
       } else {
         resolve()
       }
@@ -195,7 +195,7 @@ async function deployWithWrangler(
     })
     child.on("close", (code) => {
       if (code !== 0) {
-        reject(new Error(`Wrangler deploy failed (exit ${code}): ${stderr.slice(-500)}`))
+        reject(new Error(`Wrangler deploy failed (exit ${code}): ${stderr.slice(-2000)}`))
       } else {
         resolve({
           id: `wrangler-${Date.now()}`,

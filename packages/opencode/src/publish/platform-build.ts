@@ -195,7 +195,7 @@ function run(command: string, cwd: string, env: NodeJS.ProcessEnv, failure: stri
       stderr += data
     })
     child.on("close", (code) => {
-      if (code !== 0) return reject(new Error(`${failure} (exit ${code}): ${stderr.slice(-500)}`))
+      if (code !== 0) return reject(new Error(`${failure} (exit ${code}): ${stderr.slice(-2000)}`))
       resolve()
     })
     child.on("error", reject)

@@ -48,7 +48,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g pnpm bun lighthouse \
+    && npm install -g pnpm bun lighthouse wrangler@4 \
     && npm cache clean --force \
     && rm -rf /var/lib/apt/lists/* /root/.npm /root/.cache /tmp/*
 
