@@ -69,7 +69,7 @@ describe("northflank.adapter", () => {
     expect(volume.payload).toMatchObject({
       // Mounted at the shared workspace folder so a reserve VM fits any project.
       mounts: [{ containerMountPath: "/workspace" }],
-      spec: { accessMode: "ReadWriteOnce", storageSize: 10 * 1024 },
+      spec: { accessMode: "ReadWriteOnce", storageSize: 3 * 1024 },
     })
     const paths = stub.requests.map((request) => request.path)
     const attach = paths.findIndex((path) => path.endsWith("/attach"))

@@ -39,7 +39,7 @@ All optional except the token:
 | `NORTHFLANK_PROJECT_ID` / `NORTHFLANK_PROJECT` | `omai` |
 | `NORTHFLANK_IMAGE` | `jj123dev/microvm` (built from `Dockerfile.microvm` by the deploy workflow) |
 | `NORTHFLANK_DEPLOYMENT_PLAN` | `nf-compute-100-4` |
-| `NORTHFLANK_VOLUME_SIZE_GB` | `10` |
+| `NORTHFLANK_VOLUME_SIZE_GB` | `3` |
 | `NORTHFLANK_SERVICE_PORT` | `4096` |
 | `NORTHFLANK_SERVICE_SCHEME` | `https` (`http` for local stubs) |
 | `NORTHFLANK_VM_USERNAME` / `NORTHFLANK_VM_PASSWORD` | `OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD` |
