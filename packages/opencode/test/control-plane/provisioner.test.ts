@@ -563,10 +563,16 @@ describe("control-plane provisioner", () => {
         return { ...ctx, directory: path.join(ctx.instance.directory, "workspace", "user", "projects", "app") }
       })
 
+    // Most cases follow a single reserve; the per-user count has its own cases.
+    beforeEach(() => {
+      process.env.OPENCODE_RESERVE_PER_USER = "1"
+    })
+
     afterEach(() => {
       delete process.env.OPENCODE_VM_PROJECTS_ROOT
       delete process.env.OPENCODE_RESERVE_IDLE_MS
       delete process.env.OPENCODE_RESERVE_MAX
+      delete process.env.OPENCODE_RESERVE_PER_USER
     })
 
     const user = (name: string): Provisioner.Owner => ({
@@ -814,6 +820,71 @@ describe("control-plane provisioner", () => {
           yield* provisioner.reconcile
 
           expect(ctx.calls.create).toBe(1)
+        }),
+      { git: true },
+    )
+
+    it.instance(
+      "each active user keeps two reserves, so a second project also opens at once",
+      () =>
+        Effect.gen(function* () {
+          process.env.OPENCODE_RESERVE_PER_USER = "2"
+          const ctx = yield* setupReserve()
+          const provisioner = yield* Provisioner.Service
+          const workspace = yield* Workspace.Service
+          const alice = user("alice")
+
+          yield* provisioner.touch(alice)
+          const reserves = yield* awaitReserves(workspace, 2)
+          expect(reserves.map(ownerOf)).toEqual([alice.userID, alice.userID])
+
+          const first = yield* provisioner.start({ directory: ctx.directory, mode: "empty", owner: alice })
+          const second = yield* provisioner.start({
+            directory: path.join(path.dirname(ctx.directory), "second"),
+            mode: "empty",
+            owner: alice,
+          })
+
+          // Both projects took a booted reserve instead of creating a VM.
+          expect(new Set([first.workspaceID, second.workspaceID])).toEqual(new Set(reserves.map((row) => row.id)))
+          // And both are replaced, so the next two projects are instant too.
+          const refilled = yield* awaitReserves(workspace, 2)
+          expect(refilled.map((row) => row.id).some((id) => reserves.some((row) => row.id === id))).toBe(false)
+          expect(ctx.calls.create).toBe(4)
+        }),
+      { git: true },
+    )
+
+    it.instance(
+      "under OPENCODE_RESERVE_MAX every active user gets a first reserve before anyone gets a second",
+      () =>
+        Effect.gen(function* () {
+          process.env.OPENCODE_RESERVE_PER_USER = "2"
+          process.env.OPENCODE_RESERVE_MAX = "3"
+          const ctx = yield* setupReserve()
+          const provisioner = yield* Provisioner.Service
+          const workspace = yield* Workspace.Service
+          const alice = user("alice")
+          const bob = user("bob")
+          const carol = user("carol")
+
+          yield* provisioner.touch(alice)
+          yield* awaitReserves(workspace, 2)
+          yield* provisioner.touch(bob)
+          yield* awaitReserves(workspace, 3)
+          yield* provisioner.touch(carol)
+          yield* provisioner.reconcile
+
+          // The cap is full, so Carol waits for a slot, and nobody exceeds it.
+          const reserves = yield* awaitReserves(workspace, 3)
+          expect(reserves.map(ownerOf).filter((owner) => owner === carol.userID)).toHaveLength(0)
+          expect(ctx.calls.create).toBe(3)
+
+          // Alice frees a slot by using one; Carol, who has none, gets it
+          // ahead of Alice's own refill.
+          yield* provisioner.start({ directory: ctx.directory, mode: "empty", owner: alice })
+          const after = yield* awaitReserves(workspace, 3)
+          expect(after.map(ownerOf).sort()).toEqual([alice.userID, bob.userID, carol.userID].sort())
         }),
       { git: true },
     )

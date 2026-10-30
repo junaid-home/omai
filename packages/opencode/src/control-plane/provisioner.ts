@@ -52,9 +52,11 @@ const bootDeadlineMs = () => env("OPENCODE_PROVISION_BOOT_DEADLINE_MS", 120_000)
 const uploadDeadlineMs = () => env("OPENCODE_PROVISION_UPLOAD_DEADLINE_MS", 1_800_000)
 const reconcileMs = () => Math.max(env("OPENCODE_PROVISION_RECONCILE_MS", 15_000), 100)
 const failedTtlMs = () => env("OPENCODE_PROVISION_FAILED_TTL_MS", 3_600_000)
-// Each active user keeps one reserve VM; it is deleted once its user has made
-// no request for this long, and warmed again on their next one.
+// Each active user keeps OPENCODE_RESERVE_PER_USER reserve VMs, so a second
+// project opens as fast as the first; they are deleted once their user has
+// made no request for this long, and warmed again on their next one.
 const reserveIdleMs = () => env("OPENCODE_RESERVE_IDLE_MS", 600_000)
+const reservePerUser = () => env("OPENCODE_RESERVE_PER_USER", 2)
 // Caps the booted reserves across all users, so a crowd of visitors cannot
 // boot an unbounded number of idle VMs.
 const reserveMax = () => env("OPENCODE_RESERVE_MAX", 20)
@@ -434,8 +436,9 @@ export const layer = Layer.effect(
       return toJob(claimed) ?? { ...state, workspaceID: claimed.id, directory: input.directory }
     })
 
-    // Keeps one reserve per active user (up to OPENCODE_RESERVE_MAX) and
-    // removes a reserve once its user has been idle for OPENCODE_RESERVE_IDLE_MS.
+    // Keeps OPENCODE_RESERVE_PER_USER reserves per active user (up to
+    // OPENCODE_RESERVE_MAX in all) and removes a user's reserves once they have
+    // been idle for OPENCODE_RESERVE_IDLE_MS.
     const ensureReserve: Effect.Effect<void> = Effect.gen(function* () {
       if (!Flag.OPENCODE_WORKSPACE_ADAPTER) return
       const now = Date.now()
@@ -462,12 +465,25 @@ export const layer = Layer.effect(
         { discard: true },
       )
       const kept = reserves.filter((row) => active(reserveUser(row)))
-      const held = new Set(kept.map(reserveUser))
-      const missing = [...demand.entries()].filter(([user]) => active(user) && !held.has(user) && !backingOff.has(user))
+      const held = Map.groupBy(kept, reserveUser)
+      const perUser = reservePerUser()
+      // One slot per reserve a user is short of, numbered by how many they
+      // already hold: under the cap, every user gets a first reserve before
+      // anyone gets a second.
+      const missing = [...demand.entries()]
+        .filter(([user]) => active(user) && !backingOff.has(user))
+        .flatMap(([user, entry]) =>
+          Array.from({ length: Math.max(0, perUser - (held.get(user)?.length ?? 0)) }, (_, index) => ({
+            user,
+            entry,
+            rank: (held.get(user)?.length ?? 0) + index,
+          })),
+        )
+        .sort((a, b) => a.rank - b.rank)
       const root = vmProjectsRoot() ?? "/home/runner"
       yield* Effect.forEach(
         missing.slice(0, Math.max(0, reserveMax() - kept.length)),
-        ([user, entry]) => {
+        ({ user, entry }) => {
           // A placeholder directory only the reserve uses; claiming replaces it.
           const directory = `${root}/workspace/.reserve-${crypto.randomUUID().slice(0, 8)}`
           return Effect.logInfo("warming reserve VM", { directory, userID: user }).pipe(
