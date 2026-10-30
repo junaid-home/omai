@@ -23,17 +23,24 @@ export function viewing(loginSessionID: string, workspaceID: string) {
   return at !== undefined && Date.now() - at < TTL_MS
 }
 
+// Message content only an open session renders. Streamed tokens are the bulk
+// of all traffic, and part updates carry whole tool outputs; a tab that never
+// used the VM loads the finished messages from it instead.
+const CONTENT = new Set(["message.part.delta", "message.part.updated", "message.part.removed"])
+
 /**
  * Whether a tab signed in as `loginSessionID` (none for machine or local
- * clients) receives a bus event. Streamed tokens are the bulk of all traffic
- * and only an open session renders them; a tab that never used the VM loads
- * the finished message from it instead.
+ * clients) receives a bus event.
  */
 export function relays(
   loginSessionID: string | undefined,
   event: { readonly workspace?: string; readonly payload: { readonly type?: string } },
 ) {
-  if (!loginSessionID || !event.workspace || event.payload.type !== "message.part.delta") return true
+  if (!loginSessionID) return true
+  // Durable sync events feed the control plane's machine-authenticated sync
+  // loop; every app, TUI and CLI client discards them.
+  if (event.payload.type === "sync") return false
+  if (!event.workspace || !CONTENT.has(event.payload.type ?? "")) return true
   return viewing(loginSessionID, event.workspace)
 }
 
