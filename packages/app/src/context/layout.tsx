@@ -19,6 +19,7 @@ import { migrateLegacySessionStateKeys, ServerScope, SessionStateKey } from "@/u
 import { createSessionKeyReader, ensureSessionKey, pruneSessionKeys } from "./layout-helpers"
 import { readTabPanels, type TabPanels, writeTabPanels } from "./layout-panels"
 import { requireServerKey } from "@/utils/session-route"
+import { engaged } from "@/utils/presence"
 import { type DraftTab, useTabs } from "./tabs"
 import { closeSessionTab, openSessionTab, previewSessionTab, type SessionTabs } from "./layout-tabs"
 
@@ -626,7 +627,10 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           if (!heartbeats.has(root)) {
             const sdk = serverSdk()
             if (sdk) {
+              // Keeps the project's VM from being paused, but only while someone
+              // is at the tab: a forgotten tab must not keep it running.
               const handle = setInterval(() => {
+                if (!engaged()) return
                 void sdk.client.path.get({ directory: root }).catch(() => {})
               }, 30_000)
               heartbeats.set(root, handle)

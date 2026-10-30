@@ -3,6 +3,7 @@ import { previewUrl } from "@/utils/preview-url"
 import { onCleanup, onMount } from "solid-js"
 import { useServerSDK } from "./server-sdk"
 import { useServerSync } from "./server-sync"
+import { visible } from "@/utils/presence"
 import { createMemo } from "solid-js"
 
 const activeSessions = new Map<string, number>()
@@ -63,6 +64,9 @@ export function usePreviewLifecycle(directory: () => string) {
     const dir = directory()
     if (!dir) return
     const heartbeat = setInterval(() => {
+      // Only while the preview is on screen. Clicks inside the preview frame
+      // never reach this page, so recent input cannot be required here.
+      if (!visible()) return
       serverSDK()
         .createClient({ directory: dir, throwOnError: true })
         .global.preview.heartbeat({ body_directory: dir })
