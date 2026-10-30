@@ -14,9 +14,13 @@ function accepted(autoAccept: Record<string, boolean>, sessionID: string, direct
   return autoAccept[key] ?? autoAccept[sessionID]
 }
 
+// Agents run unattended: permissions are auto-accepted unless the user turned
+// it off for the session, a parent session, or the whole project.
+const AUTO_ACCEPT_BY_DEFAULT = true
+
 export function isDirectoryAutoAccepting(autoAccept: Record<string, boolean>, directory: string) {
   const key = directoryAcceptKey(directory)
-  return autoAccept[key] ?? false
+  return autoAccept[key] ?? AUTO_ACCEPT_BY_DEFAULT
 }
 
 function sessionLineage(session: { id: string; parentID?: string }[], sessionID: string) {
@@ -45,7 +49,7 @@ export function autoRespondsPermission(
 ) {
   const value = sessionAutoAccept(autoAccept, session, permission, directory)
   if (value !== undefined) return value
-  return directory ? isDirectoryAutoAccepting(autoAccept, directory) : false
+  return directory ? isDirectoryAutoAccepting(autoAccept, directory) : AUTO_ACCEPT_BY_DEFAULT
 }
 
 export function sessionAutoAccept(

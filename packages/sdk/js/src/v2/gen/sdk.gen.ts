@@ -3257,6 +3257,10 @@ export class File2 extends HeyApiClient {
         inlineStyle?: string
         sourcePath?: string
       }>
+      model?: {
+        providerID: string
+        modelID: string
+      }
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3269,6 +3273,7 @@ export class File2 extends HeyApiClient {
             { in: "query", key: "workspace" },
             { in: "body", key: "modifiedHtml" },
             { in: "body", key: "changes" },
+            { in: "body", key: "model" },
           ],
         },
       ],

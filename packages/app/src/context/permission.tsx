@@ -139,6 +139,7 @@ export const { use: usePermission, provider: PermissionProvider } = createSimple
       const directory = activeDirectory()
       if (!directory) return
       selected().enableConfiguredDirectory(directory)
+      selected().answerWaiting(directory)
     })
 
     const permissionsEnabled = createMemo(() => {
@@ -356,6 +357,21 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
       .catch(() => undefined)
   }
 
+  // Events only cover permissions asked while this page is open; one asked
+  // while no tab was open is still waiting when the user comes back.
+  function answerWaiting(directory: string) {
+    const run = () =>
+      input.sdk.client.permission
+        .list({ directory })
+        .then((x) => {
+          if (meta.disposed) return
+          for (const perm of x.data ?? []) if (perm?.id) void respondPending(perm, directory)
+        })
+        .catch(() => undefined)
+    if (ready()) return void run()
+    void ready.promise?.then(() => (meta.disposed ? undefined : run()))
+  }
+
   function disableDirectory(directory: string) {
     if (meta.disposed) return
     const key = directoryAcceptKey(directory)
@@ -461,6 +477,7 @@ function createServerPermissionState(input: { sdk: ServerSDK; sync: ServerSync }
     api,
     sync: input.sync,
     enableConfiguredDirectory,
+    answerWaiting,
     permissionsEnabled(directory: string) {
       if (meta.disposed) return false
       const [childStore] = input.sync.child(directory)

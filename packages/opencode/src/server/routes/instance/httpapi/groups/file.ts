@@ -126,6 +126,8 @@ export const VisualEditChange = Schema.Struct({
 export const FileVisualEditBody = Schema.Struct({
   modifiedHtml: Schema.String,
   changes: Schema.Array(VisualEditChange),
+  /** The model selected in the chat; tried before any configured fallback. */
+  model: Schema.optional(Schema.Struct({ providerID: Schema.String, modelID: Schema.String })),
 })
 
 export const FileUploadBody = Schema.Struct({
@@ -261,7 +263,12 @@ export const FileApi = HttpApi.make("file")
           query: WorkspaceRoutingQuery,
           payload: FileVisualEditBody,
           success: described(
-            Schema.Struct({ success: Schema.Boolean, filesWritten: Schema.Array(Schema.String) }),
+            Schema.Struct({
+              success: Schema.Boolean,
+              filesWritten: Schema.Array(Schema.String),
+              /** Why nothing was written, when it failed. */
+              error: Schema.optional(Schema.String),
+            }),
             "Success",
           ),
         }).annotateMerge(

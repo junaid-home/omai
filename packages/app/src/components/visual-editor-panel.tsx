@@ -2,6 +2,7 @@ import { Show, createEffect, createSignal, For, on, batch, onMount, onCleanup } 
 import { useVisualEditor } from "@/context/visual-editor"
 import type { ComputedStyles } from "@/context/visual-editor"
 import { useSDK } from "@/context/sdk"
+import { useLocal } from "@/context/local"
 
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = ""
@@ -237,6 +238,7 @@ function SpacingInput(props: {
 export function VisualEditorPanel() {
   const editor = useVisualEditor()
   const sdk = useSDK()
+  const local = useLocal()
   const [textValue, setTextValue] = createSignal("")
   const [tagDisplay, setTagDisplay] = createSignal("")
   const [attrList, setAttrList] = createSignal<[string, string][]>([])
@@ -353,17 +355,19 @@ export function VisualEditorPanel() {
     try {
       const html = await editor.collectModifiedHtml()
       if (!html) return
+      // Apply with the model the chat uses (an admin-assigned one included).
+      const model = local.model.current()
       const result = await sdk().client.file.visualEdit({
         modifiedHtml: html,
         changes: editor.pendingChanges(),
+        model: model ? { providerID: model.provider.id, modelID: model.id } : undefined,
       })
-      const data = result.data as any
-      const filesWritten = data?.filesWritten ?? []
+      const filesWritten = result.data?.filesWritten ?? []
       if (filesWritten.length > 0) {
         editor.clearChanges()
         setSaveMessage(`Saved to ${filesWritten.length} file${filesWritten.length > 1 ? "s" : ""}`)
       } else {
-        setSaveMessage("Failed to write files — model rate-limited or unavailable")
+        setSaveMessage(`Failed to write files — ${result.data?.error ?? "the model did not respond"}`)
       }
       setTimeout(() => setSaveMessage(null), 4000)
     } catch (err) {

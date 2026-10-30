@@ -16,7 +16,7 @@ import { createScrollPersistence, type SessionScroll } from "./layout-scroll"
 import { createPathHelpers } from "./file/path"
 import type { ProjectAvatarVariant } from "@opencode-ai/ui/v2/project-avatar-v2"
 import { migrateLegacySessionStateKeys, ServerScope, SessionStateKey } from "@/utils/server-scope"
-import { createSessionKeyReader, ensureSessionKey, pruneSessionKeys } from "./layout-helpers"
+import { createSessionKeyReader, ensureSessionKey, pruneSessionKeys, sessionProject } from "./layout-helpers"
 import { requireServerKey } from "@/utils/session-route"
 import { type DraftTab, useTabs } from "./tabs"
 import { closeSessionTab, openSessionTab, previewSessionTab, type SessionTabs } from "./layout-tabs"
@@ -298,6 +298,10 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           opened: false,
         },
         sessionTabs: {} as Record<string, SessionTabs>,
+        // Which panels are open, per project (its encoded directory). This
+        // layout is shared by every browser tab, so one global flag made a
+        // panel toggled in one project open or close in every other project.
+        panels: {} as Record<string, { terminal?: boolean; review?: boolean; fileTree?: boolean }>,
         sessionView: {} as Record<string, SessionView>,
         handoff: {
           tabs: undefined as TabHandoff | undefined,
@@ -409,6 +413,19 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
     })
 
     const ensureKey = (key: string) => ensureSessionKey(key, touch, (sessionKey) => scroll.seed(sessionKey))
+
+    const panel = (project: string, name: "terminal" | "review" | "fileTree") => store.panels?.[project]?.[name]
+    const setPanel = (project: string, name: "terminal" | "review" | "fileTree", value: boolean) => {
+      if (!store.panels) return setStore("panels", { [project]: { [name]: value } })
+      if (!store.panels[project]) return setStore("panels", project, { [name]: value })
+      setStore("panels", project, name, value)
+    }
+    // The file tree is toggled outside any session view, so it follows the
+    // project in this browser tab's address.
+    const routeProject = createMemo(() => {
+      const parts = location.pathname.split("/").filter(Boolean)
+      return parts[1] === "session" && decode64(parts[0]) ? parts[0] : ""
+    })
 
     createEffect(() => {
       if (!ready()) return
@@ -687,30 +704,18 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         },
       },
       fileTree: {
-        opened: createMemo(() => store.fileTree?.opened ?? true),
+        opened: createMemo(() => panel(routeProject(), "fileTree") ?? store.fileTree?.opened ?? true),
         width: createMemo(() => store.fileTree?.width ?? DEFAULT_FILE_TREE_WIDTH),
         tab: createMemo(() => "all" as const),
         setTab(_tab: "changes" | "all") {},
         open() {
-          if (!store.fileTree) {
-            setStore("fileTree", { opened: true, width: DEFAULT_FILE_TREE_WIDTH, tab: "all" })
-            return
-          }
-          setStore("fileTree", "opened", true)
+          setPanel(routeProject(), "fileTree", true)
         },
         close() {
-          if (!store.fileTree) {
-            setStore("fileTree", { opened: false, width: DEFAULT_FILE_TREE_WIDTH, tab: "all" })
-            return
-          }
-          setStore("fileTree", "opened", false)
+          setPanel(routeProject(), "fileTree", false)
         },
         toggle() {
-          if (!store.fileTree) {
-            setStore("fileTree", { opened: true, width: DEFAULT_FILE_TREE_WIDTH, tab: "all" })
-            return
-          }
-          setStore("fileTree", "opened", (x) => !x)
+          setPanel(routeProject(), "fileTree", !(panel(routeProject(), "fileTree") ?? store.fileTree?.opened ?? true))
         },
         resize(width: number) {
           if (!store.fileTree) {
@@ -805,40 +810,24 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           const file = s().reviewFile
           if (typeof file === "string") return file
         })
-        const terminalOpened = createMemo(() => store.terminal?.opened ?? false)
-        const reviewPanelOpened = createMemo(() => store.review?.panelOpened ?? DEFAULT_REVIEW_PANEL_OPENED)
+        const project = createMemo(() => sessionProject(key()))
+        const terminalOpened = createMemo(() => panel(project(), "terminal") ?? false)
+        const reviewPanelOpened = createMemo(() => panel(project(), "review") ?? DEFAULT_REVIEW_PANEL_OPENED)
         const reviewPanelSource = createMemo(() => (reviewPanelOpened() ? ephemeral.reviewPanelSource : "other"))
 
         function setTerminalOpened(next: boolean) {
-          const current = store.terminal
-          if (!current) {
-            setStore("terminal", { height: DEFAULT_TERMINAL_HEIGHT, opened: next })
-            return
-          }
-
-          const value = current.opened ?? false
-          if (value === next) return
-          setStore("terminal", "opened", next)
+          if (terminalOpened() === next) return
+          setPanel(project(), "terminal", next)
         }
 
         function setReviewPanelOpened(next: boolean, source: ReviewPanelSource) {
           const nextSource = next ? source : "other"
-          const current = store.review
-          if (!current) {
-            batch(() => {
-              setStore("review", { diffStyle: "split" as ReviewDiffStyle, panelOpened: next })
-              setEphemeral("reviewPanelSource", nextSource)
-            })
-            return
-          }
-
-          const value = current.panelOpened ?? DEFAULT_REVIEW_PANEL_OPENED
-          if (value === next) {
+          if (reviewPanelOpened() === next) {
             if (ephemeral.reviewPanelSource !== nextSource) setEphemeral("reviewPanelSource", nextSource)
             return
           }
           batch(() => {
-            setStore("review", "panelOpened", next)
+            setPanel(project(), "review", next)
             setEphemeral("reviewPanelSource", nextSource)
           })
         }

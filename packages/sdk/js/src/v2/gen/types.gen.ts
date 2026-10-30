@@ -2735,7 +2735,7 @@ export type WorkspaceCreateError = {
 export type WorkspaceProvisionJob = {
   status: "running" | "ready" | "failed"
   step: "creating" | "booting" | "setup" | "upload" | "done"
-  kind: "new" | "recover"
+  kind: "new" | "recover" | "reserve"
   mode: "empty" | "upload"
   error?: string
   cleaned: boolean
@@ -9488,6 +9488,10 @@ export type FileVisualEditData = {
       inlineStyle?: string
       sourcePath?: string
     }>
+    model?: {
+      providerID: string
+      modelID: string
+    }
   }
   path?: never
   query?: {
@@ -9513,6 +9517,7 @@ export type FileVisualEditResponses = {
   200: {
     success: boolean
     filesWritten: Array<string>
+    error?: string
   }
 }
 
@@ -11005,9 +11010,9 @@ export type PublishDeleteData = {
 
 export type PublishDeleteErrors = {
   /**
-   * Bad request
+   * InvalidRequestError
    */
-  400: BadRequestError
+  400: InvalidRequestError
   /**
    * NotFoundError
    */

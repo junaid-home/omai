@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { createRoot, createSignal } from "solid-js"
-import { createSessionKeyReader, ensureSessionKey, pruneSessionKeys } from "./layout-helpers"
+import { createSessionKeyReader, ensureSessionKey, pruneSessionKeys, sessionProject } from "./layout-helpers"
+import { ServerScope, SessionRouteKey, SessionStateKey } from "@/utils/server-scope"
 
 describe("layout session-key helpers", () => {
   test("couples touch and scroll seed in order", () => {
@@ -65,5 +66,20 @@ describe("pruneSessionKeys", () => {
     })
 
     expect(drop).toEqual([])
+  })
+})
+
+describe("sessionProject", () => {
+  // Panels are stored per project: each session of one project shares them,
+  // and another project's sessions never see them.
+  test("every session view of a project resolves to that project, in both key forms", () => {
+    const scoped = (dir: string, id?: string) =>
+      sessionProject(SessionStateKey.from(ServerScope.local, SessionRouteKey.fromRoute(dir, id)))
+
+    expect(scoped("L2hvbWUvYQ", "ses_1")).toBe("L2hvbWUvYQ")
+    expect(scoped("L2hvbWUvYQ", "ses_2")).toBe("L2hvbWUvYQ")
+    expect(scoped("L2hvbWUvYQ")).toBe("L2hvbWUvYQ")
+    expect(sessionProject("L2hvbWUvYQ/ses_1")).toBe("L2hvbWUvYQ")
+    expect(scoped("L2hvbWUvYg", "ses_1")).not.toBe(scoped("L2hvbWUvYQ", "ses_1"))
   })
 })

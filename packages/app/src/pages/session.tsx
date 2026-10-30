@@ -855,6 +855,22 @@ export default function Page() {
         : skipToken,
     }
   })
+  // A checkpoint is written as an agent turn ends, but the history was fetched
+  // when the page opened: refresh every cached list for this project (this
+  // page's and the checkpoints tab's) whenever one of its sessions goes idle.
+  // The second pass covers a checkpoint still being written at that moment.
+  onCleanup(
+    sdk().event.on("session.status", (evt) => {
+      if (evt.properties.status.type !== "idle") return
+      const directory = sdk().directory
+      const refresh = () =>
+        queryClient.invalidateQueries({
+          predicate: (query) => query.queryKey[1] === directory && query.queryKey[2] === "checkpoints",
+        })
+      void refresh()
+      setTimeout(() => void refresh(), 2_000)
+    }),
+  )
   const checkpointDiffKey = createMemo(
     () =>
       [

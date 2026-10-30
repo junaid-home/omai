@@ -152,15 +152,20 @@ export function SessionSeoTab() {
     if (state.fix.sawBusy) void finalizeFix()
   })
 
+  // The preview and the audit run on the project's own server (its MicroVM):
+  // a client without the project directory is answered by the control plane,
+  // which holds no copy of the project and refuses the path.
+  const projectClient = () => serverSDK().createClient({ directory: sdk().directory })
+
   const ensurePreview = async () => {
     if (getPreviewUrl(sdk().directory)) return
-    const started = await serverSDK().client.global.preview.start({ body_directory: sdk().directory })
+    const started = await projectClient().global.preview.start({ body_directory: sdk().directory })
     if (!started.data?.success) throw new Error("No preview server is running for this project.")
   }
 
   const audit = async (factor: LighthouseFormFactor): Promise<LighthouseResult | null> => {
     await ensurePreview()
-    const response = await serverSDK().client.global.preview.audit({ body_directory: sdk().directory, formFactor: factor })
+    const response = await projectClient().global.preview.audit({ body_directory: sdk().directory, formFactor: factor })
     const data = response.data
     if (!data?.success || !data.result) throw new Error(data?.error || "The audit could not be run.")
     return normalizeResult(data.result)

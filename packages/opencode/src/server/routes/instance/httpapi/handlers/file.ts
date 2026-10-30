@@ -223,6 +223,7 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
           inlineStyle?: string
           sourcePath?: string
         }>
+        model?: { providerID: string; modelID: string }
       }
     }) {
       const provider = yield* Provider.Service
@@ -259,6 +260,10 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
           if (language && !candidates.some((c) => c.id === id)) candidates.push({ id, language })
         }
 
+        // The model the user is chatting with comes first: it is the one they
+        // chose (or were assigned), and it is known to be reachable.
+        if (ctx.payload.model)
+          yield* push(ProviderV2.ID.make(ctx.payload.model.providerID), ModelV2.ID.make(ctx.payload.model.modelID))
         if (cfg.visual_editor_model) {
           const parsed = Provider.parseModel(cfg.visual_editor_model)
           yield* push(parsed.providerID, parsed.modelID)
@@ -276,7 +281,8 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
 
       const candidates = yield* resolveCandidates()
       yield* Effect.logInfo("visualEdit: resolved model", { models: candidates.map((c) => c.id) })
-      if (candidates.length === 0) return { success: false, filesWritten: [] }
+      if (candidates.length === 0)
+        return { success: false, filesWritten: [], error: "No usable model: select a model in the chat first" }
 
       yield* Effect.logInfo("visualEdit: resolved language model", { count: candidates.length })
 
@@ -355,27 +361,35 @@ Constraints:
 
       const userPrompt = `Visual changes made:\n${changesDescription}\n\nSource files:\n${sourceFilesDescription}\n${packageJson ? `\npackage.json:\n${packageJson}` : ""}`
 
+      const failures: string[] = []
       const callLLM = (system: string, user: string) =>
         Effect.gen(function* () {
           for (const candidate of candidates) {
-            const output = yield* Effect.promise(() =>
-              generateText({
-                model: wrapLanguageModel({ model: candidate.language, middleware: [] }),
-                messages: [
-                  { role: "system", content: system },
-                  { role: "user", content: user },
-                ],
-                temperature: 0.1,
-                headers: attributionHeaders(candidate.id),
-                maxRetries: 0,
-                maxOutputTokens: 4096,
-              }),
-            ).pipe(
+            // tryPromise, not promise: a rejected call (rate limit, outage)
+            // must fall through to the next model instead of aborting the save.
+            const output = yield* Effect.tryPromise({
+              try: () =>
+                generateText({
+                  model: wrapLanguageModel({ model: candidate.language, middleware: [] }),
+                  messages: [
+                    { role: "system", content: system },
+                    { role: "user", content: user },
+                  ],
+                  temperature: 0.1,
+                  headers: attributionHeaders(candidate.id),
+                  maxRetries: 0,
+                  maxOutputTokens: 4096,
+                }),
+              catch: (error) => error,
+            }).pipe(
               Effect.catch((error) =>
                 Effect.logWarning("visualEdit: LLM generation failed", {
                   model: candidate.id,
                   error: String(error),
-                }).pipe(Effect.as(undefined)),
+                }).pipe(
+                  Effect.andThen(Effect.sync(() => failures.push(`${candidate.id}: ${errorText(error)}`))),
+                  Effect.as(undefined),
+                ),
               ),
             )
             if (output) return { model: candidate.id, output }
@@ -385,7 +399,7 @@ Constraints:
 
       yield* Effect.logInfo("visualEdit: calling LLM")
       const generation = yield* callLLM(systemPrompt, userPrompt)
-      if (!generation) return { success: false, filesWritten: [] }
+      if (!generation) return { success: false, filesWritten: [], error: failures[0] ?? "The model did not respond" }
 
       yield* Effect.logInfo("visualEdit: LLM responded", {
         model: generation.model,
@@ -403,7 +417,8 @@ Constraints:
       }
 
       const rawEdits = parseEdits(generation.output.text)
-      if (!rawEdits) return { success: false, filesWritten: [] }
+      if (!rawEdits)
+        return { success: false, filesWritten: [], error: `${generation.model} did not return usable edits` }
 
       const writtenFiles: string[] = []
       const fragmented: Array<{ path: string; reason: string }> = []
@@ -488,6 +503,12 @@ Return ONLY the JSON array, no other text.`
         unresolved: failedPaths.filter((p) => !writtenFiles.includes(p)),
       })
 
+      if (writtenFiles.length === 0)
+        return {
+          success: false,
+          filesWritten: [],
+          error: `${generation.model} could not match the change to the source files`,
+        }
       return { success: true, filesWritten: writtenFiles }
     })
 
@@ -495,7 +516,11 @@ Return ONLY the JSON array, no other text.`
       visualEdit(ctx).pipe(
         Effect.catchDefect((defect) => {
           console.error("[visualEdit] Defect caught:", defect)
-          return Effect.succeed({ success: false, filesWritten: [] } as { success: boolean; filesWritten: string[] })
+          return Effect.succeed({
+            success: false,
+            filesWritten: [],
+            error: defect instanceof Error ? defect.message : "Saving the visual edit failed",
+          })
         }),
       )
 
@@ -553,3 +578,8 @@ Return ONLY the JSON array, no other text.`
       .handle("upload", upload)
   }),
 ).pipe(Layer.provide(locationServiceMapLayer))
+
+function errorText(error: unknown) {
+  const text = error instanceof Error ? error.message : String(error)
+  return text.length > 200 ? `${text.slice(0, 200)}…` : text
+}

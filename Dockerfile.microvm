@@ -85,6 +85,14 @@ COPY <<'ENTRYPOINT' /usr/local/bin/entrypoint.sh
 #!/bin/sh
 set -e
 mkdir -p /home/runner/.local/share/opencode /home/runner/.local/state /home/runner/.cache/opencode /home/runner/.config/opencode /home/runner/workspace 2>/dev/null || true
+# Checkpoint rollback reads the snapshot repository and the database copies
+# taken at each checkpoint. Pausing and resuming the VM starts a new container,
+# so keep both on the project volume or every older checkpoint breaks.
+for dir in snapshot checkpoint; do
+  mkdir -p "/home/runner/workspace/.omai/$dir"
+  rm -rf "/home/runner/.local/share/opencode/$dir"
+  ln -s "/home/runner/workspace/.omai/$dir" "/home/runner/.local/share/opencode/$dir"
+done
 chown -R runner:runner /home/runner/.local /home/runner/.cache /home/runner/.config /home/runner/workspace /root 2>/dev/null || true
 find /home/runner/workspace -mindepth 1 -maxdepth 1 -name lost+found -type d -exec rm -rf {} + 2>/dev/null || true
 # Global config (share, permission, MCP servers) is handed in at runtime rather

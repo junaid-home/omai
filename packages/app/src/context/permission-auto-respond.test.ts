@@ -31,13 +31,23 @@ describe("autoRespondsPermission", () => {
     expect(autoRespondsPermission({ root: true }, sessions, permission("child"), "/tmp/project")).toBe(true)
   })
 
-  test("defaults to requiring approval when no lineage override exists", () => {
+  test("auto-accepts by default when nobody turned it off", () => {
     const sessions = [session({ id: "root" }), session({ id: "child", parentID: "root" }), session({ id: "other" })]
     const autoAccept = {
-      other: true,
+      other: false,
     }
 
-    expect(autoRespondsPermission(autoAccept, sessions, permission("child"), "/tmp/project")).toBe(false)
+    expect(autoRespondsPermission(autoAccept, sessions, permission("child"), "/tmp/project")).toBe(true)
+    expect(autoRespondsPermission({}, sessions, permission("root"))).toBe(true)
+  })
+
+  test("a project the user turned it off for still asks", () => {
+    const directory = "/tmp/project"
+    const sessions = [session({ id: "root" })]
+
+    expect(
+      autoRespondsPermission({ [`${base64Encode(directory)}/*`]: false }, sessions, permission("root"), directory),
+    ).toBe(false)
   })
 
   test("inherits a parent session's false override", () => {
@@ -113,8 +123,8 @@ describe("isDirectoryAutoAccepting", () => {
     expect(isDirectoryAutoAccepting(autoAccept, directory)).toBe(true)
   })
 
-  test("returns false when directory key is not set", () => {
-    expect(isDirectoryAutoAccepting({}, "/tmp/project")).toBe(false)
+  test("is on by default when the directory key is not set", () => {
+    expect(isDirectoryAutoAccepting({}, "/tmp/project")).toBe(true)
   })
 
   test("returns false when directory key is explicitly false", () => {
