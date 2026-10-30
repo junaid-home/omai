@@ -26,8 +26,9 @@ const volumeName = (workspaceID: string) => `vol-${slug(workspaceID, 35)}`
 // Northflank's API is eventually consistent: a service it has just created can
 // answer "Could not find service" (404) to the next calls naming it. Treating
 // that as fatal failed one of every two reserves warmed at once, so those
-// calls are retried for a while instead.
-const SETTLE_MS = 30_000
+// calls are retried for a while instead. Production has hidden a new service
+// for over 26 seconds, so the window is generous.
+const SETTLE_MS = 90_000
 const SETTLE_RETRY_MS = 500
 
 const settle = <A>(call: () => Promise<A>, until = Date.now() + SETTLE_MS): Promise<A> =>
