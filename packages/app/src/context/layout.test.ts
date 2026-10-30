@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { createRoot, createSignal } from "solid-js"
-import { createSessionKeyReader, ensureSessionKey, pruneSessionKeys, sessionProject } from "./layout-helpers"
-import { ServerScope, SessionRouteKey, SessionStateKey } from "@/utils/server-scope"
+import { createSessionKeyReader, ensureSessionKey, pruneSessionKeys } from "./layout-helpers"
+import { readTabPanels } from "./layout-panels"
 
 describe("layout session-key helpers", () => {
   test("couples touch and scroll seed in order", () => {
@@ -69,17 +69,20 @@ describe("pruneSessionKeys", () => {
   })
 })
 
-describe("sessionProject", () => {
-  // Panels are stored per project: each session of one project shares them,
-  // and another project's sessions never see them.
-  test("every session view of a project resolves to that project, in both key forms", () => {
-    const scoped = (dir: string, id?: string) =>
-      sessionProject(SessionStateKey.from(ServerScope.local, SessionRouteKey.fromRoute(dir, id)))
+describe("readTabPanels", () => {
+  const storage = (value: string | null) => ({ getItem: () => value })
 
-    expect(scoped("L2hvbWUvYQ", "ses_1")).toBe("L2hvbWUvYQ")
-    expect(scoped("L2hvbWUvYQ", "ses_2")).toBe("L2hvbWUvYQ")
-    expect(scoped("L2hvbWUvYQ")).toBe("L2hvbWUvYQ")
-    expect(sessionProject("L2hvbWUvYQ/ses_1")).toBe("L2hvbWUvYQ")
-    expect(scoped("L2hvbWUvYg", "ses_1")).not.toBe(scoped("L2hvbWUvYQ", "ses_1"))
+  test("restores this tab's own panel state", () => {
+    expect(readTabPanels(storage(JSON.stringify({ terminal: true, sidebar: false })))).toEqual({
+      terminal: true,
+      sidebar: false,
+    })
+  })
+
+  test("starts empty for a new tab, a corrupted value, or no storage", () => {
+    expect(readTabPanels(storage(null))).toEqual({})
+    expect(readTabPanels(storage("{not json"))).toEqual({})
+    expect(readTabPanels(storage(JSON.stringify({ terminal: "yes" })))).toEqual({})
+    expect(readTabPanels(undefined)).toEqual({})
   })
 })

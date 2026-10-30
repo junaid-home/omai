@@ -16,7 +16,8 @@ import { createScrollPersistence, type SessionScroll } from "./layout-scroll"
 import { createPathHelpers } from "./file/path"
 import type { ProjectAvatarVariant } from "@opencode-ai/ui/v2/project-avatar-v2"
 import { migrateLegacySessionStateKeys, ServerScope, SessionStateKey } from "@/utils/server-scope"
-import { createSessionKeyReader, ensureSessionKey, pruneSessionKeys, sessionProject } from "./layout-helpers"
+import { createSessionKeyReader, ensureSessionKey, pruneSessionKeys } from "./layout-helpers"
+import { readTabPanels, type TabPanels, writeTabPanels } from "./layout-panels"
 import { requireServerKey } from "@/utils/session-route"
 import { type DraftTab, useTabs } from "./tabs"
 import { closeSessionTab, openSessionTab, previewSessionTab, type SessionTabs } from "./layout-tabs"
@@ -298,10 +299,6 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           opened: false,
         },
         sessionTabs: {} as Record<string, SessionTabs>,
-        // Which panels are open, per project (its encoded directory). This
-        // layout is shared by every browser tab, so one global flag made a
-        // panel toggled in one project open or close in every other project.
-        panels: {} as Record<string, { terminal?: boolean; review?: boolean; fileTree?: boolean }>,
         sessionView: {} as Record<string, SessionView>,
         handoff: {
           tabs: undefined as TabHandoff | undefined,
@@ -414,18 +411,12 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
 
     const ensureKey = (key: string) => ensureSessionKey(key, touch, (sessionKey) => scroll.seed(sessionKey))
 
-    const panel = (project: string, name: "terminal" | "review" | "fileTree") => store.panels?.[project]?.[name]
-    const setPanel = (project: string, name: "terminal" | "review" | "fileTree", value: boolean) => {
-      if (!store.panels) return setStore("panels", { [project]: { [name]: value } })
-      if (!store.panels[project]) return setStore("panels", project, { [name]: value })
-      setStore("panels", project, name, value)
-    }
-    // The file tree is toggled outside any session view, so it follows the
-    // project in this browser tab's address.
-    const routeProject = createMemo(() => {
-      const parts = location.pathname.split("/").filter(Boolean)
-      return parts[1] === "session" && decode64(parts[0]) ? parts[0] : ""
-    })
+    // Which panels are open belongs to this browser tab alone. The layout
+    // above is saved per account and pushed live to every open tab, so a
+    // panel toggled in one tab opened or closed in all of them. The account's
+    // saved value is only the starting point for a tab that never toggled it.
+    const [panels, setPanels] = createStore<TabPanels>(readTabPanels())
+    createEffect(() => writeTabPanels({ ...panels }))
 
     createEffect(() => {
       if (!ready()) return
@@ -662,15 +653,15 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         },
       },
       sidebar: {
-        opened: createMemo(() => store.sidebar.opened),
+        opened: createMemo(() => panels.sidebar ?? store.sidebar.opened),
         open() {
-          setStore("sidebar", "opened", true)
+          setPanels("sidebar", true)
         },
         close() {
-          setStore("sidebar", "opened", false)
+          setPanels("sidebar", false)
         },
         toggle() {
-          setStore("sidebar", "opened", (x) => !x)
+          setPanels("sidebar", !(panels.sidebar ?? store.sidebar.opened))
         },
         width: createMemo(() => store.sidebar.width),
         resize(width: number) {
@@ -704,18 +695,18 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         },
       },
       fileTree: {
-        opened: createMemo(() => panel(routeProject(), "fileTree") ?? store.fileTree?.opened ?? true),
+        opened: createMemo(() => panels.fileTree ?? store.fileTree?.opened ?? true),
         width: createMemo(() => store.fileTree?.width ?? DEFAULT_FILE_TREE_WIDTH),
         tab: createMemo(() => "all" as const),
         setTab(_tab: "changes" | "all") {},
         open() {
-          setPanel(routeProject(), "fileTree", true)
+          setPanels("fileTree", true)
         },
         close() {
-          setPanel(routeProject(), "fileTree", false)
+          setPanels("fileTree", false)
         },
         toggle() {
-          setPanel(routeProject(), "fileTree", !(panel(routeProject(), "fileTree") ?? store.fileTree?.opened ?? true))
+          setPanels("fileTree", !(panels.fileTree ?? store.fileTree?.opened ?? true))
         },
         resize(width: number) {
           if (!store.fileTree) {
@@ -745,15 +736,15 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
         },
       },
       mobileSidebar: {
-        opened: createMemo(() => store.mobileSidebar?.opened ?? false),
+        opened: createMemo(() => panels.mobileSidebar ?? false),
         show() {
-          setStore("mobileSidebar", "opened", true)
+          setPanels("mobileSidebar", true)
         },
         hide() {
-          setStore("mobileSidebar", "opened", false)
+          setPanels("mobileSidebar", false)
         },
         toggle() {
-          setStore("mobileSidebar", "opened", (x) => !x)
+          setPanels("mobileSidebar", !(panels.mobileSidebar ?? false))
         },
       },
       pendingMessage: {
@@ -810,14 +801,13 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
           const file = s().reviewFile
           if (typeof file === "string") return file
         })
-        const project = createMemo(() => sessionProject(key()))
-        const terminalOpened = createMemo(() => panel(project(), "terminal") ?? false)
-        const reviewPanelOpened = createMemo(() => panel(project(), "review") ?? DEFAULT_REVIEW_PANEL_OPENED)
+        const terminalOpened = createMemo(() => panels.terminal ?? false)
+        const reviewPanelOpened = createMemo(() => panels.review ?? DEFAULT_REVIEW_PANEL_OPENED)
         const reviewPanelSource = createMemo(() => (reviewPanelOpened() ? ephemeral.reviewPanelSource : "other"))
 
         function setTerminalOpened(next: boolean) {
           if (terminalOpened() === next) return
-          setPanel(project(), "terminal", next)
+          setPanels("terminal", next)
         }
 
         function setReviewPanelOpened(next: boolean, source: ReviewPanelSource) {
@@ -827,7 +817,7 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
             return
           }
           batch(() => {
-            setPanel(project(), "review", next)
+            setPanels("review", next)
             setEphemeral("reviewPanelSource", nextSource)
           })
         }

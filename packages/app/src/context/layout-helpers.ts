@@ -1,5 +1,4 @@
 import type { Accessor } from "solid-js"
-import { SessionStateKey } from "@/utils/server-scope"
 
 export function ensureSessionKey(key: string, touch: (key: string) => void, seed: (key: string) => void) {
   touch(key)
@@ -36,9 +35,4 @@ export function pruneSessionKeys(input: {
   return Array.from(keys)
     .sort((a, b) => score(b) - score(a))
     .slice(input.max)
-}
-
-/** The project (encoded directory) a session view key belongs to, scoped or legacy. */
-export function sessionProject(key: string) {
-  return SessionStateKey.route(key).split("/")[0] ?? ""
 }
