@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, Show, Suspense, type ParentProps } from "solid-js"
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, Suspense, type ParentProps } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useLocation, useNavigate, useParams } from "@solidjs/router"
 import { TabsInfoPopup } from "@/components/help-button"
@@ -12,6 +12,7 @@ import { useServer } from "@/context/server"
 import { useServerSync } from "@/context/server-sync"
 import { setNavigate } from "@/utils/notification-click"
 import { showToast } from "@/utils/toast"
+import { IDLE_LOGOUT_MS, idleFor, markActive } from "@/utils/presence"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Tooltip, TooltipKeybind } from "@opencode-ai/ui/tooltip"
 import { Spinner } from "@opencode-ai/ui/spinner"
@@ -55,6 +56,20 @@ export default function Layout(props: ParentProps) {
   const settings = useSettings()
   const permission = useSettingsPermission()
   setNavigate(navigate)
+
+  // Signs the user out after a stretch with neither them nor an agent at work.
+  // A running agent counts as activity, so the clock starts once it finishes.
+  // The idle clock is shared, so other open tabs sign out on their next tick;
+  // clearing the user sends each one to the login page.
+  const idleLogout = setInterval(() => {
+    if (!auth.isAuthenticated()) return
+    const status = serverSync().session.data
+    if (Object.keys(status.session_status).some((id) => status.session_working(id))) return markActive()
+    if (idleFor() < IDLE_LOGOUT_MS) return
+    // A failed logout (server unreachable) is retried on the next tick.
+    void auth.logout().catch(() => {})
+  }, 30_000)
+  onCleanup(() => clearInterval(idleLogout))
 
   const sessionKey = createMemo(() => `${params.dir}${params.id ? "/" + params.id : ""}`)
   const sessionView = createMemo(() => layout.view(sessionKey()))
