@@ -7,6 +7,7 @@ import { Provisioner } from "@/control-plane/provisioner"
 import { ProvisionState } from "@/control-plane/provision-state"
 import { Workspace } from "@/control-plane/workspace"
 import { WorkspaceAdapterRuntime } from "@/control-plane/workspace-adapter-runtime"
+import { WorkspaceOwner } from "@/control-plane/workspace-owner"
 import { vmProjectsRoot } from "@/control-plane/vm-projects"
 import { setVmPreviewTarget } from "@/control-plane/vm-preview-map"
 import { WorkspaceViewers } from "@/control-plane/workspace-viewers"
@@ -39,6 +40,8 @@ type RemoteTarget = Extract<Target, { type: "remote" }>
 type RequestPlan = Data.TaggedEnum<{
   InvalidWorkspace: {}
   MissingWorkspace: { readonly workspaceID: WorkspaceV2.ID }
+  // Another user's workspace: answered exactly like one that does not exist.
+  ForeignWorkspace: {}
   UnavailableWorkspace: {}
   Local: { readonly directory: string; readonly workspaceID?: WorkspaceV2.ID }
   // The workspace row's VM no longer exists (deleted out-of-band, or a create
@@ -369,6 +372,8 @@ function planRequest(
       : selectedWorkspaceID(url, session?.workspaceID)
     if (workspaceID === InvalidWorkspaceID) return RequestPlan.InvalidWorkspace()
     const workspace = yield* resolveWorkspace(workspaceID, envWorkspaceID)
+    const principal = yield* Authentication.Current
+    if (workspace && !WorkspaceOwner.permits(principal?.userID, workspace)) return RequestPlan.ForeignWorkspace()
 
     if (workspaceID && workspace === undefined && !envWorkspaceID) {
       return RequestPlan.MissingWorkspace({ workspaceID })
@@ -385,9 +390,9 @@ function planRequest(
       const resolved = yield* resolveRequestDirectory(request, url, session)
       if (resolved) {
         const owned = yield* Workspace.Service.use((svc) => svc.getByDirectory(resolved))
+        if (owned && !WorkspaceOwner.permits(principal?.userID, owned)) return RequestPlan.ForeignWorkspace()
         if (owned) return yield* planProvisioned(provisioner, request, url, owned)
         if (Flag.OPENCODE_WORKSPACE_ADAPTER) {
-          const principal = yield* Authentication.Current
           const job = yield* provisioner.start({
             directory: resolved,
             mode: "empty",
@@ -429,6 +434,13 @@ function routeWorkspace<E>(
         ),
       ),
     MissingWorkspace: ({ workspaceID }) => Effect.succeed(missingWorkspaceResponse(workspaceID)),
+    ForeignWorkspace: () =>
+      Effect.succeed(
+        HttpServerResponse.jsonUnsafe(
+          { error: "Not found" },
+          { status: 404, headers: { "Cache-Control": "no-store" } },
+        ),
+      ),
     UnavailableWorkspace: () =>
       Effect.succeed(
         HttpServerResponse.jsonUnsafe(
@@ -505,12 +517,12 @@ export const workspaceRoutingLayer = Layer.effect(
         if (principal)
           yield* provisioner.touch({ userID: principal.userID, username: principal.username, email: principal.email })
         else if (!Authentication.central()) yield* provisioner.touch()
-      }).pipe(
-        Effect.andThen(routeHttpApiWorkspace(client, lifecycle, provisioner, effect)),
-      ).pipe(
-        Effect.provideService(Socket.WebSocketConstructor, makeWebSocket),
-        Effect.provideService(Workspace.Service, workspace),
-      ),
+      })
+        .pipe(Effect.andThen(routeHttpApiWorkspace(client, lifecycle, provisioner, effect)))
+        .pipe(
+          Effect.provideService(Socket.WebSocketConstructor, makeWebSocket),
+          Effect.provideService(Workspace.Service, workspace),
+        ),
     )
   }),
 )

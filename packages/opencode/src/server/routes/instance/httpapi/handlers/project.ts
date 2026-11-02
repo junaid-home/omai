@@ -1,6 +1,9 @@
 import * as InstanceState from "@/effect/instance-state"
 import { InstanceStore } from "@/project/instance-store"
 import { Workspace } from "@/control-plane/workspace"
+import { WorkspaceOwner } from "@/control-plane/workspace-owner"
+import { Authentication } from "@opencode-ai/core/authentication"
+import { Flag } from "@opencode-ai/core/flag/flag"
 import { Project } from "@/project/project"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { Effect } from "effect"
@@ -16,8 +19,26 @@ export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", 
     const store = yield* InstanceStore.Service
     const workspaceSvc = yield* Workspace.Service
 
+    // Every user's projects share one database. A signed-in user reaches only
+    // the projects whose VM they own; a VM, which the control plane proxies
+    // to without a user, only the project it serves.
+    const reachable = Effect.fn("ProjectHttpApi.reachable")(function* (target: Project.Info) {
+      if (Flag.OPENCODE_WORKSPACE_ID) return target.id === (yield* InstanceState.context).project.id
+      const principal = yield* Authentication.Current
+      if (!principal) return true
+      const workspace = yield* workspaceSvc.getByDirectory(target.worktree)
+      return workspace !== undefined && WorkspaceOwner.permits(principal.userID, workspace)
+    })
+
+    // Another user's project is answered exactly like a missing one.
+    const requireReachable = Effect.fn("ProjectHttpApi.requireReachable")(function* (projectID: ProjectV2.ID) {
+      const found = yield* svc.get(projectID)
+      if (found && (yield* reachable(found))) return found
+      return yield* new ProjectNotFoundError({ projectID, message: `Project not found: ${projectID}` })
+    })
+
     const list = Effect.fn("ProjectHttpApi.list")(function* () {
-      return yield* svc.list()
+      return yield* Effect.filter(yield* svc.list(), reachable)
     })
 
     const current = Effect.fn("ProjectHttpApi.current")(function* () {
@@ -49,6 +70,7 @@ export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", 
       params: { projectID: ProjectV2.ID }
       payload: Project.UpdatePayload
     }) {
+      yield* requireReachable(ctx.params.projectID)
       return yield* svc.update({ ...ctx.payload, projectID: ctx.params.projectID }).pipe(
         Effect.catchTag("Project.NotFoundError", (error) =>
           Effect.fail(
@@ -63,18 +85,7 @@ export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", 
 
     const remove = Effect.fn("ProjectHttpApi.remove")(function* (ctx: { params: { projectID: ProjectV2.ID } }) {
       const instance = yield* InstanceState.context
-      const target = yield* svc.get(ctx.params.projectID).pipe(
-        Effect.flatMap((found) =>
-          found
-            ? Effect.succeed(found)
-            : Effect.fail(
-                new ProjectNotFoundError({
-                  projectID: ctx.params.projectID,
-                  message: `Project not found: ${ctx.params.projectID}`,
-                }),
-              ),
-        ),
-      )
+      const target = yield* requireReachable(ctx.params.projectID)
 
       const directories = yield* project.directories({ projectID: ctx.params.projectID })
       const projectDirs = new Set<string>([target.worktree, ...directories.map((item) => item.directory)])
@@ -101,9 +112,13 @@ export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", 
       return true
     })
 
-    const directories = Effect.fn("ProjectHttpApi.directories")((ctx: { params: { projectID: ProjectV2.ID } }) =>
-      project.directories({ projectID: ctx.params.projectID }),
-    )
+    const directories = Effect.fn("ProjectHttpApi.directories")(function* (ctx: {
+      params: { projectID: ProjectV2.ID }
+    }) {
+      const found = yield* svc.get(ctx.params.projectID)
+      if (!found || !(yield* reachable(found))) return []
+      return yield* project.directories({ projectID: ctx.params.projectID })
+    })
 
     return handlers
       .handle("list", list)

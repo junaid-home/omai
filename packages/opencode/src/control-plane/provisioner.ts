@@ -12,6 +12,7 @@ import { ProvisionState } from "./provision-state"
 import type { Target } from "./types"
 import { Workspace } from "./workspace"
 import { WorkspaceAdapterRuntime } from "./workspace-adapter-runtime"
+import { WorkspaceOwner } from "./workspace-owner"
 
 // Creating a MicroVM project is a durable job on the control plane rather
 // than one long HTTP request: each step is persisted on the workspace row
@@ -89,10 +90,7 @@ const bootedAt = Date.now()
 // A touch that arrives while a refill pass runs makes it run once more.
 const refill = { again: false }
 const userOf = (owner?: Owner) => owner?.userID ?? ""
-const reserveUser = (row: Workspace.Info) => {
-  const userID = (row.extra as { owner?: { userID?: unknown } } | null)?.owner?.userID
-  return typeof userID === "string" ? userID : ""
-}
+const reserveUser = (row: Workspace.Info) => WorkspaceOwner.of(row) ?? ""
 const lastSeen = (user: string) => demand.get(user)?.at ?? bootedAt
 /** Forgets every user's activity, as after a restart (tests start each case fresh). */
 export function resetDemand() {

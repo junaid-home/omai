@@ -83,7 +83,7 @@ function eventResponse(busy?: Effect.Effect<WorkspaceBusy.Report>) {
     const principal = yield* Authentication.Current
     const events = Stream.callback<GlobalBusEvent>((queue) => {
       const handler = (event: GlobalBusEvent) => {
-        if (WorkspaceViewers.relays(principal?.sessionID, event)) Queue.offerUnsafe(queue, event)
+        if (WorkspaceViewers.relays(principal, event)) Queue.offerUnsafe(queue, event)
       }
       return Effect.acquireRelease(
         Effect.sync(() => GlobalBus.on("event", handler)),

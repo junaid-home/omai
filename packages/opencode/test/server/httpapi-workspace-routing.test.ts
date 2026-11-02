@@ -21,12 +21,17 @@ import type { WorkspaceAdapter } from "../../src/control-plane/types"
 import { Workspace } from "../../src/control-plane/workspace"
 import { Lifecycle } from "../../src/control-plane/lifecycle"
 import { ProvisionState } from "../../src/control-plane/provision-state"
+import { Provisioner } from "../../src/control-plane/provisioner"
 import { WorkspaceGoneError } from "@opencode-ai/northflank"
 import { WorkspaceTable } from "@opencode-ai/core/control-plane/workspace.sql"
+import { Authentication } from "@opencode-ai/core/authentication"
+import { fullSettingsPermissions } from "@opencode-ai/core/user/permissions"
+import { eq } from "drizzle-orm"
 import { Database } from "@opencode-ai/core/database/database"
 import { Project } from "../../src/project/project"
 import { Session } from "../../src/session/session"
 import { WorkspacePaths } from "../../src/server/routes/instance/httpapi/groups/workspace"
+import { Authorization } from "../../src/server/routes/instance/httpapi/middleware/authorization"
 import {
   WorkspaceRoutingMiddleware,
   WorkspaceRoutingQuery,
@@ -292,7 +297,109 @@ const serveProbe = HttpApiBuilder.layer(ProbeApi).pipe(
   Layer.build,
 )
 
+const principals: Record<string, Authentication.Principal> = Object.fromEntries(
+  ["alice", "bob"].map((name): [string, Authentication.Principal] => [
+    name,
+    {
+      userID: crypto.randomUUID(),
+      sessionID: crypto.randomUUID(),
+      username: name,
+      email: `${name}@example.invalid`,
+      instanceID: "test",
+      role: "member",
+      settingsPermissions: fullSettingsPermissions(),
+      model: null,
+    },
+  ]),
+)
+
+// Authentication itself is tested separately: this boundary signs requests in
+// as the principal their x-test-principal header names.
+const identity = Layer.succeed(
+  Authorization,
+  Authorization.of((effect) =>
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest
+      return yield* effect.pipe(
+        Effect.provideService(Authentication.Current, principals[request.headers["x-test-principal"] ?? ""]),
+      )
+    }),
+  ),
+)
+
+const SignedInProbeApi = HttpApi.make("workspace-routing-signed-in-probe").add(
+  HttpApiGroup.make("probe")
+    .add(HttpApiEndpoint.get("get", "/probe", { query: WorkspaceRoutingQuery, success: ProbeResult }))
+    .middleware(WorkspaceRoutingMiddleware)
+    .middleware(Authorization),
+)
+
+const serveSignedInProbe = HttpApiBuilder.layer(SignedInProbeApi).pipe(
+  Layer.provide(
+    HttpApiBuilder.group(SignedInProbeApi, "probe", (handlers) => handlers.handle("get", () => routeContextResponse)),
+  ),
+  Layer.provide(workspaceRoutingTestLayer),
+  Layer.provide(identity),
+  Layer.provide(Layer.mock(Session.Service)({})),
+  HttpRouter.serve,
+  Layer.build,
+)
+
+const asUser = (name: string, url: string) =>
+  HttpClientRequest.get(url).pipe(
+    HttpClientRequest.setHeader("x-test-principal", name),
+    HttpClient.execute,
+    Effect.timeout("5 seconds"),
+  )
+
 describe("HttpApi workspace routing middleware", () => {
+  it.live("a signed-in user reaches only the workspaces provisioned for them", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const project = yield* Project.use.fromDirectory(dir)
+      const forwarded: string[] = []
+      const remoteUrl = yield* startRemoteWorkspaceHttpServer((request) => {
+        forwarded.push(requestURL(request).pathname)
+        return HttpServerResponse.json({ proxied: true })
+      })
+      const workspace = yield* createRemoteWorkspace({
+        dir,
+        projectID: project.project.id,
+        type: "owned-remote-target",
+        url: `${remoteUrl}/base`,
+      })
+      const { db } = yield* Database.Service
+      yield* db
+        .update(WorkspaceTable)
+        .set({ extra: { owner: { userID: principals.bob.userID, username: "bob", email: "bob@example.invalid" } } })
+        .where(eq(WorkspaceTable.id, workspace.id))
+        .pipe(Effect.orDie)
+      // A signed-in request warms reserve VMs for its user; none are wanted
+      // here, nor in later tests once the user is remembered as active.
+      yield* Effect.addFinalizer(() => Effect.sync(() => Provisioner.resetDemand()))
+      yield* scopedEnv({
+        OPENCODE_WORKSPACE_ADAPTER: "owned-remote-target",
+        OPENCODE_VM_PROJECTS_ROOT: dir,
+        OPENCODE_RESERVE_PER_USER: "0",
+      })
+      yield* serveSignedInProbe
+
+      // Another user is told the workspace does not exist, whether they name
+      // it or its directory, and nothing reaches its VM.
+      const byID = yield* asUser("alice", `/probe?workspace=${workspace.id}`)
+      expect(byID.status).toBe(404)
+      expect(yield* byID.json).toEqual({ error: "Not found" })
+      const byDirectory = yield* asUser("alice", `/probe?directory=${encodeURIComponent(workspace.directory!)}`)
+      expect(byDirectory.status).toBe(404)
+      expect(forwarded).toEqual([])
+
+      const owner = yield* asUser("bob", `/probe?directory=${encodeURIComponent(workspace.directory!)}`)
+      expect(owner.status).toBe(200)
+      expect(yield* owner.json).toEqual({ proxied: true })
+      expect(forwarded).toEqual(["/base/probe"])
+    }),
+  )
+
   it.live("proxies remote workspace HTTP requests through the selected workspace target", () =>
     Effect.gen(function* () {
       const dir = yield* tmpdirScoped({ git: true })
@@ -385,8 +492,8 @@ describe("HttpApi workspace routing middleware", () => {
         insert: () => Effect.die("unused"),
         provisionVM: () => Effect.die("unused"),
         setExtra: () => Effect.die("unused"),
-    claim: () => Effect.die("unused"),
-    stopSync: () => Effect.void,
+        claim: () => Effect.die("unused"),
+        stopSync: () => Effect.void,
         sessionWarp: () => Effect.die("unused"),
         list: () => Effect.die("unused"),
         syncList: () => Effect.die("unused"),

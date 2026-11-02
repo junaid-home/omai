@@ -35,6 +35,8 @@ import { Vcs } from "@/project/vcs"
 import { InstanceStore } from "@/project/instance-store"
 import { WorkspaceAdapterRuntime } from "./workspace-adapter-runtime"
 import { WorkspaceBusy } from "./workspace-busy"
+import { WorkspaceOwner } from "./workspace-owner"
+import { WorkspaceViewers } from "./workspace-viewers"
 import { AppNodeBuilderV1 } from "@/effect/app-node-builder-v1"
 import { WorkspaceEvent } from "@opencode-ai/schema/workspace-event"
 
@@ -570,6 +572,7 @@ const layer = Layer.effect(
     })
 
     const startSync = Effect.fn("Workspace.startSync")(function* (space: Info) {
+      WorkspaceViewers.own(space.id, WorkspaceOwner.of(space))
       if (!flags.experimentalWorkspaces && !Flag.OPENCODE_WORKSPACE_ADAPTER) return
 
       const exists = yield* FiberMap.has(syncFibers, space.id)
