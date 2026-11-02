@@ -37,8 +37,23 @@ export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", 
       return yield* new ProjectNotFoundError({ projectID, message: `Project not found: ${projectID}` })
     })
 
+    // The same rule as reachable, with every VM read in one query: a lookup per
+    // project costs a database round trip each, which held the project list
+    // for seconds.
     const list = Effect.fn("ProjectHttpApi.list")(function* () {
-      return yield* Effect.filter(yield* svc.list(), reachable)
+      const projects = yield* svc.list()
+      if (Flag.OPENCODE_WORKSPACE_ID) {
+        const own = (yield* InstanceState.context).project.id
+        return projects.filter((item) => item.id === own)
+      }
+      const principal = yield* Authentication.Current
+      if (!principal) return projects
+      const owned = new Set(
+        (yield* workspaceSvc.all())
+          .filter((workspace) => WorkspaceOwner.permits(principal.userID, workspace))
+          .flatMap((workspace) => (workspace.directory ? [workspace.directory] : [])),
+      )
+      return projects.filter((item) => owned.has(item.worktree))
     })
 
     const current = Effect.fn("ProjectHttpApi.current")(function* () {

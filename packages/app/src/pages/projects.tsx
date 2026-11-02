@@ -1,4 +1,3 @@
-import { centralRuntime } from "@/utils/central-state"
 import { createEffect, createMemo, createSignal, For, Show } from "solid-js"
 import { useLocation, useNavigate } from "@solidjs/router"
 import { Button } from "@opencode-ai/ui/button"
@@ -14,11 +13,11 @@ import { useLayout } from "@/context/layout"
 import { useServer } from "@/context/server"
 import { useServerSync } from "@/context/server-sync"
 import { useServerSDK } from "@/context/server-sdk"
-import { useAuth } from "@/context/auth"
 import { useDirectoryPicker } from "@/components/directory-picker"
 import { DialogOpenPath } from "@/components/dialog-open-path"
 import { openProjectImmediate } from "@/utils/open-project"
 import { sessionHref } from "@/utils/session-route"
+import { useUserProjects } from "./user-projects"
 
 const INITIAL_SHOW = 5
 
@@ -53,7 +52,6 @@ export default function ProjectsPage() {
   const serverSync = useServerSync()
   const serverSDK = useServerSDK()
   const pickDirectory = useDirectoryPicker()
-  const auth = useAuth()
   const layout = useLayout()
 
   const [showAll, setShowAll] = createSignal(false)
@@ -63,20 +61,8 @@ export default function ProjectsPage() {
     if (opening() && !location.pathname.startsWith("/projects")) setOpening(null)
   })
 
-  const userProjects = createMemo(() => {
-    const projects = server.projects.list()
-    if (centralRuntime.get().mode === "central") return projects
-    const projectsRoot = centralRuntime.get().projectsRoot
-    const vmWorkspacePrefix = projectsRoot ? `${projectsRoot}/workspace` : "/home/runner/workspace"
-    const username = auth.user()?.username
-    return projects.filter((p) => {
-      if (p.worktree.startsWith(vmWorkspacePrefix)) return true
-      if (!username) return true
-      return p.worktree.includes(`/${username}/projects/`)
-    })
-  })
-
-  const recentProjects = userProjects
+  const projects = useUserProjects()
+  const recentProjects = projects.list
 
   const visibleProjects = createMemo(() => {
     const projects = recentProjects()
@@ -223,13 +209,22 @@ export default function ProjectsPage() {
         <Show
           when={visibleProjects().length > 0}
           fallback={
-            <div class="mt-30 mx-auto flex flex-col items-center gap-3">
-              <Icon name="folder-add-left" size="large" />
-              <div class="flex flex-col gap-1 items-center justify-center">
-                <div class="text-14-medium text-text-strong">{language.t("projects.empty.title")}</div>
-                <div class="text-12-regular text-text-weak">{language.t("projects.empty.description")}</div>
+            <Show
+              when={!projects.pending()}
+              fallback={
+                <div class="mt-30 mx-auto flex justify-center">
+                  <LoaderV2 class="text-text-weak" />
+                </div>
+              }
+            >
+              <div class="mt-30 mx-auto flex flex-col items-center gap-3">
+                <Icon name="folder-add-left" size="large" />
+                <div class="flex flex-col gap-1 items-center justify-center">
+                  <div class="text-14-medium text-text-strong">{language.t("projects.empty.title")}</div>
+                  <div class="text-12-regular text-text-weak">{language.t("projects.empty.description")}</div>
+                </div>
               </div>
-            </div>
+            </Show>
           }
         >
           <ul class="flex flex-col gap-1">
