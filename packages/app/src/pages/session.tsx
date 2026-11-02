@@ -45,7 +45,7 @@ import { showToast } from "@/utils/toast"
 import { base64Encode, checksum } from "@opencode-ai/core/util/encode"
 import { useLocation, useNavigate, useParams, useSearchParams } from "@solidjs/router"
 import { NewSessionView, SessionHeader } from "@/components/session"
-import { ErrorPage } from "@/pages/error"
+import { ErrorPage, NotFoundPage } from "@/pages/error"
 import { isNotFoundError } from "@/pages/error-description"
 import { useGlobal } from "@/context/global"
 import { CommentsProvider, useComments } from "@/context/comments"
@@ -241,8 +241,7 @@ function SessionErrorFallback(props: { error: unknown; sessionID?: string; serve
     if (!props.sessionID) return
     tabs.removeSessionTab({ server: props.serverKey ?? server.key, sessionId: props.sessionID })
   }
-  // Another user's session is answered as a plain 404: shown the same way.
-  if (isCurrentSessionNotFoundError(props.error, props.sessionID) || isNotFoundError(props.error)) {
+  if (isCurrentSessionNotFoundError(props.error, props.sessionID)) {
     return (
       <div class="flex-1 min-h-0 overflow-hidden">
         <div class="h-full px-6 pb-42 -mt-4 flex flex-col items-center justify-center text-center gap-4">
@@ -269,6 +268,8 @@ function SessionErrorFallback(props: { error: unknown; sessionID?: string; serve
       </div>
     )
   }
+  // Another user's session (or anything else the server answers 404 for).
+  if (isNotFoundError(props.error)) return <NotFoundPage inline />
   return <ErrorPage error={props.error} />
 }
 
