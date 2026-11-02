@@ -3,6 +3,10 @@ import { dict as en } from "./en"
 type Keys = keyof typeof en
 
 export const dict = {
+  "error.page.notFound.title": "Nicht gefunden",
+  "error.page.notFound.description":
+    "Dieses Projekt oder diese Sitzung existiert nicht, oder Sie haben keinen Zugriff darauf.",
+  "error.page.notFound.action": "Zu den Projekten",
   "publish.title": "Im Internet veröffentlichen",
   "publish.button": "Veröffentlichen",
   "publish.deploy.description":
@@ -771,7 +775,7 @@ export const dict = {
   "session.panel.reviewAndFiles": "Überprüfung und Dateien",
   "session.error.notFound": "Diese Sitzung wurde nicht gefunden",
   "session.error.notFound.description":
-    "Dieser Tab verweist auf eine Sitzung, die auf diesem Server nicht mehr existiert.",
+    "Dieser Tab verweist auf eine Sitzung, die auf diesem Server nicht existiert oder auf die Sie keinen Zugriff haben.",
   "session.error.notFound.closeTab": "Tab schließen",
   "session.error.serverConnection": "Verbindung zu diesem Server nicht möglich",
   "session.review.filesChanged": "Git",
@@ -1298,7 +1302,8 @@ export const dict = {
   "auth.marketing.title": "Erstelle, entwickle und veröffentliche deine",
   "auth.marketing.title-accent": "Websites, Software und Apps",
   "auth.marketing.title-tail": "– mit OMAI.",
-  "auth.marketing.subtitle": "Die moderne Entwicklungsplattform für deine Ideen. Schnell, flexibel und ohne komplizierte Einrichtung.",
+  "auth.marketing.subtitle":
+    "Die moderne Entwicklungsplattform für deine Ideen. Schnell, flexibel und ohne komplizierte Einrichtung.",
   "auth.login.password.show": "Passwort anzeigen",
   "auth.login.password.hide": "Passwort verbergen",
   "session.prompt.disclaimer": "O M A I + ist KI und kann Fehler machen. Bitte überprüfen Sie die Antworten.",

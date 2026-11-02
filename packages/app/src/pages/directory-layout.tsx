@@ -2,7 +2,16 @@ import { DataProvider } from "@opencode-ai/session-ui/context"
 import { showToast } from "@/utils/toast"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { useLocation, useNavigate, useParams } from "@solidjs/router"
-import { type Accessor, createEffect, createMemo, createResource, onCleanup, type ParentProps, Show } from "solid-js"
+import {
+  type Accessor,
+  createEffect,
+  createMemo,
+  createResource,
+  createSignal,
+  onCleanup,
+  type ParentProps,
+  Show,
+} from "solid-js"
 import { LoaderV2 } from "@opencode-ai/ui/v2/loader-v2"
 import { BrandLogo } from "@/components/brand-logo"
 import { useLanguage } from "@/context/language"
@@ -15,6 +24,9 @@ import type { ServerConnection } from "@/context/server"
 import { sessionHref } from "@/utils/session-route"
 import { useServerSync } from "@/context/server-sync"
 import { usePreviewLifecycle } from "@/context/preview-lifecycle"
+import { useSDK } from "@/context/sdk"
+import { NotFoundPage } from "./error"
+import { isNotFoundError } from "./error-description"
 
 export function DirectoryDataProvider(
   props: ParentProps<{
@@ -29,6 +41,7 @@ export function DirectoryDataProvider(
   const sync = useSync()
   const language = useLanguage()
   const serverSync = useServerSync()
+  const sdk = useSDK()
   const directory = () => (typeof props.directory === "function" ? props.directory() : props.directory)
   const slug = createMemo(() => base64Encode(directory()))
   const href = (sessionID: string) => {
@@ -64,27 +77,46 @@ export function DirectoryDataProvider(
   // Start preview dev server when a directory is opened
   usePreviewLifecycle(directory)
 
+  // Another user's project answers every request with 404, which the loaders
+  // retry and then swallow, leaving a page that never finishes. One direct
+  // request tells it apart; a folder nobody owns yet is provisioned, not 404.
+  const [foreign, setForeign] = createSignal(false)
+  createEffect(() => {
+    const dir = directory()
+    setForeign(false)
+    void sdk()
+      .client.path.get({ directory: dir })
+      .then(
+        () => undefined,
+        (error: unknown) => {
+          if (dir === directory()) setForeign(isNotFoundError(error))
+        },
+      )
+  })
+
   return (
-    <Show when={directory()} keyed>
-      {(directory) => (
-        <div class="relative h-full w-full">
-          <DataProvider
-            data={sync().data}
-            directory={directory}
-            onNavigateToSession={(sessionID: string) => navigate(href(sessionID))}
-            onSessionHref={href}
-          >
-            <LocalProvider>{props.children}</LocalProvider>
-          </DataProvider>
-          <Show when={sync().status === "loading"}>
-            <div class="absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-surface-base/85 backdrop-blur-sm">
-              <BrandLogo size="large" class="animate-pulse" />
-              <LoaderV2 class="text-text-weak" width={24} height={24} />
-              <span class="text-13-regular text-text-weak">Starting project…</span>
-            </div>
-          </Show>
-        </div>
-      )}
+    <Show when={!foreign()} fallback={<NotFoundPage inline />}>
+      <Show when={directory()} keyed>
+        {(directory) => (
+          <div class="relative h-full w-full">
+            <DataProvider
+              data={sync().data}
+              directory={directory}
+              onNavigateToSession={(sessionID: string) => navigate(href(sessionID))}
+              onSessionHref={href}
+            >
+              <LocalProvider>{props.children}</LocalProvider>
+            </DataProvider>
+            <Show when={sync().status === "loading"}>
+              <div class="absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-surface-base/85 backdrop-blur-sm">
+                <BrandLogo size="large" class="animate-pulse" />
+                <LoaderV2 class="text-text-weak" width={24} height={24} />
+                <span class="text-13-regular text-text-weak">Starting project…</span>
+              </div>
+            </Show>
+          </div>
+        )}
+      </Show>
     </Show>
   )
 }

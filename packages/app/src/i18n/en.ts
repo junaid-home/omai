@@ -557,6 +557,9 @@ export const dict = {
   "toast.update.action.notYet": "Not yet",
 
   "error.page.title": "Something went wrong",
+  "error.page.notFound.title": "Not found",
+  "error.page.notFound.description": "This project or session doesn't exist, or you don't have access to it.",
+  "error.page.notFound.action": "Go to projects",
   "error.page.description": "An error occurred while loading the application.",
   "error.page.description.localServerStartup": "An error occurred while starting the local server.",
   "error.page.details.label": "Error Details",
@@ -661,7 +664,8 @@ export const dict = {
   "session.tab.unknown": "Unknown Session",
   "session.panel.reviewAndFiles": "Review and files",
   "session.error.notFound": "This session cannot be found",
-  "session.error.notFound.description": "This tab points to a session that no longer exists on this server.",
+  "session.error.notFound.description":
+    "This tab points to a session that doesn't exist on this server, or that you don't have access to.",
   "session.error.notFound.closeTab": "Close Tab",
   "session.error.serverConnection": "Can't connect to this server",
   "session.review.filesChanged": "Git",

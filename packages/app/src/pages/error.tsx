@@ -4,7 +4,7 @@ import { Component, onMount, Show } from "solid-js"
 import { usePlatform } from "@/context/platform"
 import { useLanguage } from "@/context/language"
 import { BrandLogo } from "@/components/brand-logo"
-import { errorDescriptionKey } from "./error-description"
+import { errorDescriptionKey, isNotFoundError } from "./error-description"
 
 export type InitError = {
   name: string
@@ -216,7 +216,38 @@ interface ErrorPageProps {
   error: unknown
 }
 
-export const ErrorPage: Component<ErrorPageProps> = (props) => {
+export const ErrorPage: Component<ErrorPageProps> = (props) => (
+  <Show when={!isNotFoundError(props.error)} fallback={<NotFoundPage />}>
+    <FatalErrorPage error={props.error} />
+  </Show>
+)
+
+/** `inline` fills the surrounding panel instead of the whole window. */
+export function NotFoundPage(props: { inline?: boolean }) {
+  const language = useLanguage()
+  return (
+    <div
+      class="relative flex-1 min-h-0 flex flex-col items-center justify-center font-sans"
+      classList={{ "h-screen w-screen": !props.inline, "h-full w-full": props.inline }}
+      data-tauri-drag-region
+    >
+      <div class="w-2/3 max-w-2xl flex flex-col items-center justify-center gap-6">
+        <BrandLogo size="extra-large" class="opacity-70 shrink-0" />
+        <div class="flex flex-col items-center gap-2 text-center">
+          <p class="text-3xl font-medium text-text-weak">404</p>
+          <h1 class="text-lg font-medium text-text-strong">{language.t("error.page.notFound.title")}</h1>
+          <p class="text-sm text-text-weak">{language.t("error.page.notFound.description")}</p>
+        </div>
+        {/* A full load: the failed route's state is not carried over. */}
+        <Button size="large" onClick={() => window.location.assign("/projects")}>
+          {language.t("error.page.notFound.action")}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+const FatalErrorPage: Component<ErrorPageProps> = (props) => {
   const platform = usePlatform()
   const language = useLanguage()
   const formattedError = () => formatError(props.error, language.t)
@@ -267,7 +298,9 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
           />
         </details>
         <Show when={platform.version}>
-          {(version) => <p class="text-xs text-text-weak">{language.t("error.page.version", { version: version() })}</p>}
+          {(version) => (
+            <p class="text-xs text-text-weak">{language.t("error.page.version", { version: version() })}</p>
+          )}
         </Show>
       </div>
     </div>
