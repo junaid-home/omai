@@ -497,6 +497,11 @@ export const layer = Layer.effect(
     }).pipe(Effect.catchCause((cause) => Effect.logWarning("reserve VM refill failed", { error: message(cause) })))
 
     const refillReserves = Effect.suspend(() => {
+      // Reserves belong to the deployed control plane alone. A local `serve`
+      // on the production database created them with its own Northflank
+      // token, and deleted the deployed one's as idle: it never sees those
+      // users' requests, so to it every user is inactive.
+      if (process.env["OPENCODE_PROVISION_RECONCILE"] !== "true") return Effect.void
       refill.again = true
       return fork(
         RESERVE_REFILL,

@@ -566,9 +566,11 @@ describe("control-plane provisioner", () => {
     // Most cases follow a single reserve; the per-user count has its own cases.
     beforeEach(() => {
       process.env.OPENCODE_RESERVE_PER_USER = "1"
+      process.env.OPENCODE_PROVISION_RECONCILE = "true"
     })
 
     afterEach(() => {
+      delete process.env.OPENCODE_PROVISION_RECONCILE
       delete process.env.OPENCODE_VM_PROJECTS_ROOT
       delete process.env.OPENCODE_RESERVE_IDLE_MS
       delete process.env.OPENCODE_RESERVE_MAX
@@ -630,6 +632,28 @@ describe("control-plane provisioner", () => {
           // A reserve is never set up as a project.
           expect(ctx.vm.state.created).toEqual([])
           expect(reserve.directory).not.toBe(ctx.directory)
+        }),
+      { git: true },
+    )
+
+    it.instance(
+      "a server that is not the deployed control plane never creates reserves",
+      () =>
+        Effect.gen(function* () {
+          const ctx = yield* setupReserve()
+          const provisioner = yield* Provisioner.Service
+          const workspace = yield* Workspace.Service
+          delete process.env.OPENCODE_PROVISION_RECONCILE
+
+          // A laptop's `serve` on the production database sees a user arrive.
+          yield* provisioner.touch(user("laptop"))
+          yield* provisioner.reconcile
+          yield* Effect.sleep("300 millis")
+
+          expect(ctx.calls.create).toBe(0)
+          expect(
+            (yield* workspace.all()).filter((row) => ProvisionState.read(row.extra)?.kind === "reserve"),
+          ).toHaveLength(0)
         }),
       { git: true },
     )
