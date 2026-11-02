@@ -162,17 +162,16 @@ export const layer = Layer.effect(
           const readyAt = provision?.updatedAt ?? 0
           const fresh = () => Date.now() - Math.max(activity.get(id) ?? bootedAt, readyAt) < idle
           if (fresh()) return
-          if (!(yield* workspace.isSyncing(id))) {
-            phases.set(id, "STOPPED")
-            return
-          }
+          // With no event stream from a VM, it is normally one this process
+          // paused. One resumed elsewhere (by an earlier control plane before a
+          // restart, or Northflank rescheduling it) has no stream either, and
+          // skipping it left it running for days: until this process has paused
+          // a VM itself, it is probed and paused like any other.
+          if (phases.get(id) === "STOPPED" && !(yield* workspace.isSyncing(id))) return
           yield* lock(id).withPermits(1)(
             Effect.gen(function* () {
               if (fresh()) return
-              if (!(yield* workspace.isSyncing(id))) {
-                phases.set(id, "STOPPED")
-                return
-              }
+              if (phases.get(id) === "STOPPED" && !(yield* workspace.isSyncing(id))) return
               // A current VM pushes its busy report on every heartbeat; only an
               // older image, or a stream gone quiet, is asked directly.
               const report = WorkspaceBusy.latest(id) ?? (yield* probe(space))

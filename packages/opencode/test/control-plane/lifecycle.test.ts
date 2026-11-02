@@ -264,6 +264,39 @@ describe("control-plane lifecycle", () => {
     ),
   )
 
+  it.live("sweep pauses an idle VM it has no event stream from, once", () =>
+    withEnv(
+      { OPENCODE_WORKSPACE_IDLE_MS: "0", OPENCODE_WORKSPACE_SWEEP_MS: "100000", OPENCODE_PROVISION_RECONCILE: "true" },
+      Effect.gen(function* () {
+        const probes = yield* Ref.make(0)
+        const stops = yield* Ref.make(0)
+        registerAdapter(projectID, "sweep-unsynced-test", {
+          ...adapter,
+          busy: async () => {
+            Effect.runSync(Ref.update(probes, (count) => count + 1))
+            return { busy: false, reasons: [] }
+          },
+          stop: async () => Effect.runSync(Ref.update(stops, (count) => count + 1)),
+        })
+        // Resumed before this control plane started: running, but nobody has
+        // opened it since, so no sync stream exists.
+        const orphan: Workspace.Info = { ...space, id: WorkspaceV2.ID.ascending(), type: "sweep-unsynced-test" }
+        const lifecycle = yield* lifecycleWith(
+          fakeWorkspace({ all: () => Effect.succeed([orphan]), isSyncing: () => Effect.succeed(false) }),
+        )
+
+        yield* lifecycle.sweep
+        expect(yield* Ref.get(probes)).toBe(1)
+        expect(yield* Ref.get(stops)).toBe(1)
+
+        // Once paused here, it is not probed or paused again.
+        yield* lifecycle.sweep
+        expect(yield* Ref.get(probes)).toBe(1)
+        expect(yield* Ref.get(stops)).toBe(1)
+      }),
+    ),
+  )
+
   it.live("a process that does not own VM management never suspends VMs", () =>
     withEnv(
       { OPENCODE_WORKSPACE_IDLE_MS: "0", OPENCODE_WORKSPACE_SWEEP_MS: "100000", OPENCODE_PROVISION_RECONCILE: "false" },
