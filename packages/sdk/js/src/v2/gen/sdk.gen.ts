@@ -166,6 +166,10 @@ import type {
   GlobalPreviewAuditResponses,
   GlobalPreviewHeartbeatErrors,
   GlobalPreviewHeartbeatResponses,
+  GlobalPreviewPdfErrors,
+  GlobalPreviewPdfResponses,
+  GlobalPreviewReportErrors,
+  GlobalPreviewReportResponses,
   GlobalPreviewStartErrors,
   GlobalPreviewStartResponses,
   GlobalPreviewStaticErrors,
@@ -1943,6 +1947,106 @@ export class Preview extends HeyApiClient {
     )
     return (options?.client ?? this.client).post<GlobalPreviewAuditResponses, GlobalPreviewAuditErrors, ThrowOnError>({
       url: "/global/preview/audit",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Run a website audit
+   *
+   * Audit the project's running preview, or the website at `url`, with Google Lighthouse and the own technical checks, and return the report.
+   */
+  public report<ThrowOnError extends boolean = false>(
+    parameters?: {
+      query_directory?: string
+      workspace?: string
+      body_directory?: string
+      formFactor?: "mobile" | "desktop"
+      url?: string
+      locale?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            {
+              in: "query",
+              key: "query_directory",
+              map: "directory",
+            },
+            { in: "query", key: "workspace" },
+            {
+              in: "body",
+              key: "body_directory",
+              map: "directory",
+            },
+            { in: "body", key: "formFactor" },
+            { in: "body", key: "url" },
+            { in: "body", key: "locale" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<GlobalPreviewReportResponses, GlobalPreviewReportErrors, ThrowOnError>(
+      {
+        url: "/global/preview/report",
+        ...options,
+        ...params,
+        headers: {
+          "Content-Type": "application/json",
+          ...options?.headers,
+          ...params.headers,
+        },
+      },
+    )
+  }
+
+  /**
+   * Print a website audit report to PDF
+   *
+   * Print the report page the app wrote, in the user's language, to PDF with headless Chrome.
+   */
+  public pdf<ThrowOnError extends boolean = false>(
+    parameters?: {
+      query_directory?: string
+      workspace?: string
+      body_directory?: string
+      html?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            {
+              in: "query",
+              key: "query_directory",
+              map: "directory",
+            },
+            { in: "query", key: "workspace" },
+            {
+              in: "body",
+              key: "body_directory",
+              map: "directory",
+            },
+            { in: "body", key: "html" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<GlobalPreviewPdfResponses, GlobalPreviewPdfErrors, ThrowOnError>({
+      url: "/global/preview/pdf",
       ...options,
       ...params,
       headers: {

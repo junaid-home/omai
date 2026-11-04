@@ -15,6 +15,7 @@ import { Context, Effect, Layer, Option } from "effect"
 import { HttpBody, HttpClient, HttpClientRequest, HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { mkdtemp, readFile, readdir, realpath, stat } from "node:fs/promises"
+import { createServer, type Server } from "node:http"
 import os from "node:os"
 import path from "node:path"
 import JSZip from "jszip"
@@ -43,6 +44,7 @@ import { Session } from "../../src/session/session"
 import { testEffect } from "../lib/effect"
 import { tmpdirScoped } from "../fixture/fixture"
 import { Workspace } from "@/control-plane/workspace"
+import { findChrome } from "@/preview/audit/chrome"
 
 // The global file and preview endpoints sit behind workspace routing; these
 // tests exercise the control plane itself, so requests stay local.
@@ -224,4 +226,120 @@ describe("global HttpApi", () => {
       expect(entries.filter((entry) => entry !== ".git").sort()).toEqual(["README.md", "src"])
     }),
   )
+
+  it.live("website report requires a directory", () =>
+    Effect.gen(function* () {
+      const response = yield* HttpClientRequest.post(GlobalPaths.previewReport).pipe(
+        HttpClientRequest.setBody(HttpBody.jsonUnsafe({})),
+        HttpClient.execute,
+      )
+
+      expect(response.status).toBe(400)
+      expect(yield* response.json).toMatchObject({ success: false })
+    }),
+  )
+
+  it.live("website report of the preview asks for a running preview", () =>
+    Effect.gen(function* () {
+      const dir = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "opencode-seo-preview-")))
+      const response = yield* HttpClientRequest.post(GlobalPaths.previewReport).pipe(
+        HttpClientRequest.setBody(HttpBody.jsonUnsafe({ directory: dir })),
+        HttpClient.execute,
+      )
+
+      expect(response.status).toBe(400)
+      expect(yield* response.json).toEqual({ success: false, error: "Start the preview before running an audit." })
+    }),
+  )
+
+  it.live("website report rejects an address that is not a website", () =>
+    Effect.gen(function* () {
+      const dir = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "opencode-seo-url-")))
+      const response = yield* HttpClientRequest.post(GlobalPaths.previewReport).pipe(
+        HttpClientRequest.setBody(HttpBody.jsonUnsafe({ directory: dir, url: "not a site" })),
+        HttpClient.execute,
+      )
+
+      expect(response.status).toBe(400)
+      expect(yield* response.json).toMatchObject({ success: false, error: "Enter a website address, like example.com." })
+    }),
+  )
+
+  it.live(
+    "website report audits a site and reports its technical facts and findings",
+    () =>
+      Effect.gen(function* () {
+        const dir = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "opencode-seo-site-")))
+        const site = yield* Effect.acquireRelease(
+          Effect.promise(
+            () =>
+              new Promise<Server>((resolve) => {
+                const server = createServer((req, res) => {
+                  if (req.url !== "/") {
+                    res.writeHead(404)
+                    res.end()
+                    return
+                  }
+                  res.writeHead(200, { "content-type": "text/html", server: "test" })
+                  res.end("<html><head><title>Test site</title></head><body><a href=\"/gone\">x</a></body></html>")
+                })
+                server.listen(0, "127.0.0.1", () => resolve(server))
+              }),
+          ),
+          (server) => Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve()))),
+        )
+        const address = site.address()
+        const url = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}/`
+        const response = yield* HttpClientRequest.post(GlobalPaths.previewReport).pipe(
+          HttpClientRequest.setBody(HttpBody.jsonUnsafe({ directory: dir, url, formFactor: "desktop", locale: "de" })),
+          HttpClient.execute,
+        )
+        // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
+        const body = (yield* response.json) as {
+          success: boolean
+          report?: { url: string; preview: boolean; formFactor: string; technical?: { status: number; title?: string }; checks: { id: string }[] }
+        }
+
+        expect(response.status).toBe(200)
+        expect(body.success).toBe(true)
+        expect(body.report).toMatchObject({ url, preview: false, formFactor: "desktop" })
+        expect(body.report?.technical).toMatchObject({ status: 200, title: "Test site" })
+        expect(body.report?.checks.map((check) => check.id)).toEqual(expect.arrayContaining(["broken-links", "no-https"]))
+      }).pipe(Effect.scoped),
+    { timeout: 180_000 },
+  )
+
+  it.live("report PDF requires the report page", () =>
+    Effect.gen(function* () {
+      const dir = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "opencode-seo-pdf-")))
+      const response = yield* HttpClientRequest.post(GlobalPaths.previewPdf).pipe(
+        HttpClientRequest.setBody(HttpBody.jsonUnsafe({ directory: dir })),
+        HttpClient.execute,
+      )
+
+      expect(response.status).toBe(400)
+      expect(yield* response.json).toEqual({ success: false, error: "No report provided" })
+    }),
+  )
+
+  // Printing needs a Chrome on the machine; without one only the request checks above run.
+  ;(findChrome() ? it.live : it.live.skip)(
+    "report PDF prints the page with Chrome",
+    () =>
+      Effect.gen(function* () {
+        const dir = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "opencode-seo-pdf-")))
+        const response = yield* HttpClientRequest.post(GlobalPaths.previewPdf).pipe(
+          HttpClientRequest.setBody(HttpBody.jsonUnsafe({ directory: dir, html: "<h1>Website audit</h1>" })),
+          HttpClient.execute,
+        )
+        // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
+        const body = (yield* response.json) as { success: boolean; base64?: string }
+
+        expect(response.status).toBe(200)
+        expect(body.success).toBe(true)
+        expect(Buffer.from(body.base64 ?? "", "base64").subarray(0, 5).toString()).toBe("%PDF-")
+      }),
+    { timeout: 90_000 },
+  )
 })
+

@@ -99,6 +99,83 @@ const LighthouseAuditResult = Schema.Struct({
   ),
 })
 
+const AuditFinding = Schema.Struct({
+  id: Schema.String,
+  title: Schema.String,
+  display: Schema.String,
+  score: Schema.NullOr(Schema.Number),
+})
+
+const AuditReport = Schema.Struct({
+  id: Schema.String,
+  url: Schema.String,
+  preview: Schema.Boolean,
+  formFactor: Schema.Union([Schema.Literal("mobile"), Schema.Literal("desktop")]),
+  locale: Schema.String,
+  createdAt: Schema.Number,
+  score: Schema.Number,
+  lighthouse: Schema.optional(
+    Schema.Struct({
+      url: Schema.String,
+      fetchTime: Schema.String,
+      categories: Schema.Struct({
+        performance: Schema.NullOr(Schema.Number),
+        accessibility: Schema.NullOr(Schema.Number),
+        bestPractices: Schema.NullOr(Schema.Number),
+        seo: Schema.NullOr(Schema.Number),
+        agentic: Schema.NullOr(Schema.Number),
+      }),
+      metrics: Schema.Struct({
+        fcp: Schema.NullOr(Schema.String),
+        lcp: Schema.NullOr(Schema.String),
+        tbt: Schema.NullOr(Schema.String),
+        cls: Schema.NullOr(Schema.String),
+        si: Schema.NullOr(Schema.String),
+      }),
+      failed: Schema.Array(AuditFinding),
+      agentic: Schema.NullOr(Schema.Struct({ passed: Schema.Number, total: Schema.Number })),
+    }),
+  ),
+  lighthouseError: Schema.optional(Schema.String),
+  technical: Schema.optional(
+    Schema.Struct({
+      status: Schema.Number,
+      loadTime: Schema.Number,
+      ttfb: Schema.Number,
+      size: Schema.Number,
+      https: Schema.Boolean,
+      certificateDays: Schema.optional(Schema.Number),
+      server: Schema.optional(Schema.String),
+      cms: Schema.optional(Schema.String),
+      country: Schema.optional(Schema.String),
+      links: Schema.Number,
+      title: Schema.optional(Schema.String),
+    }),
+  ),
+  technicalError: Schema.optional(Schema.String),
+  checks: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      group: Schema.Union([
+        Schema.Literal("reachability"),
+        Schema.Literal("geo"),
+        Schema.Literal("agentic"),
+        Schema.Literal("design"),
+        Schema.Literal("technical"),
+      ]),
+      severity: Schema.Union([
+        Schema.Literal("critical"),
+        Schema.Literal("high"),
+        Schema.Literal("medium"),
+        Schema.Literal("low"),
+        Schema.Literal("optional"),
+        Schema.Literal("info"),
+      ]),
+      values: Schema.optional(Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Number]))),
+    }),
+  ),
+})
+
 const GlobalUpgradeResult = Schema.Union([
   Schema.Struct({
     success: Schema.Literal(true),
@@ -123,6 +200,8 @@ export const GlobalPaths = {
   previewStatus: "/global/preview/status",
   previewHeartbeat: "/global/preview/heartbeat",
   previewAudit: "/global/preview/audit",
+  previewReport: "/global/preview/report",
+  previewPdf: "/global/preview/pdf",
 } as const
 
 export const GlobalApi = HttpApi.make("global").add(
@@ -297,6 +376,46 @@ export const GlobalApi = HttpApi.make("global").add(
           summary: "Audit the preview with Google Lighthouse",
           description:
             "Run Google Lighthouse against the project's running preview dev server and return category scores, metrics and failed audits.",
+        }),
+      ),
+      HttpApiEndpoint.post("previewReport", GlobalPaths.previewReport, {
+        query: WorkspaceRoutingQuery,
+        payload: Schema.Struct({
+          directory: Schema.String,
+          formFactor: Schema.optional(Schema.Union([Schema.Literal("mobile"), Schema.Literal("desktop")])),
+          url: Schema.optional(Schema.String),
+          locale: Schema.optional(Schema.String),
+        }),
+        success: Schema.Struct({
+          success: Schema.Boolean,
+          report: Schema.optional(AuditReport),
+          error: Schema.optional(Schema.String),
+        }),
+      })
+        .middleware(WorkspaceRoutingMiddleware)
+        .annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.preview.report",
+          summary: "Run a website audit",
+          description:
+            "Audit the project's running preview, or the website at `url`, with Google Lighthouse and the own technical checks, and return the report.",
+        }),
+      ),
+      HttpApiEndpoint.post("previewPdf", GlobalPaths.previewPdf, {
+        query: WorkspaceRoutingQuery,
+        payload: Schema.Struct({ directory: Schema.String, html: Schema.String }),
+        success: Schema.Struct({
+          success: Schema.Boolean,
+          base64: Schema.optional(Schema.String),
+          error: Schema.optional(Schema.String),
+        }),
+      })
+        .middleware(WorkspaceRoutingMiddleware)
+        .annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.preview.pdf",
+          summary: "Print a website audit report to PDF",
+          description: "Print the report page the app wrote, in the user's language, to PDF with headless Chrome.",
         }),
       ),
     )

@@ -46,6 +46,7 @@ import {
 import { captureAndStoreThumbnail } from "@/preview/capture"
 import { ThumbnailStore } from "@/preview/thumbnail-store"
 import { auditPreview } from "@/preview/lighthouse"
+import { auditReport, normalizeSite, reportPdf } from "@/preview/audit/report"
 import { ProjectArchive } from "@/server/project-archive"
 import { Project } from "@/project/project"
 
@@ -535,6 +536,88 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
               { status: 400 },
             )
           return HttpServerResponse.jsonUnsafe({ success: true, result: audit.result })
+        }),
+      )
+      .handleRaw(
+        "previewReport",
+        Effect.fn("GlobalHttpApi.previewReport")(function* (ctx: { request: HttpServerRequest.HttpServerRequest }) {
+          // Raw route, like previewAudit: the payload schema above documents the body; this reads it as sent.
+          // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
+          const body = yield* Effect.orDie(ctx.request.json) as Effect.Effect<{
+            directory?: string
+            formFactor?: "mobile" | "desktop"
+            url?: string
+            locale?: string
+          }>
+          const directory = body?.directory
+          if (!directory)
+            return HttpServerResponse.jsonUnsafe({ success: false, error: "No directory provided" }, { status: 400 })
+          const safePath = yield* Effect.tryPromise(() => CentralStorage.resolveWorkspace(directory)).pipe(
+            Effect.option,
+          )
+          if (safePath._tag === "None") return HttpServerResponse.empty({ status: 403 })
+          const formFactor = body.formFactor === "desktop" ? "desktop" : "mobile"
+          const report = yield* Effect.tryPromise({
+            try: () => {
+              // A named site is audited as it is; otherwise the project's preview, which the app starts first.
+              if (body.url?.trim())
+                return auditReport({
+                  url: normalizeSite(body.url),
+                  preview: false,
+                  formFactor,
+                  locale: body.locale,
+                  cwd: safePath.value,
+                })
+              const status = getDevServerStatus(safePath.value)
+              if (!status.running || !status.port) throw new Error("Start the preview before running an audit.")
+              return auditReport({
+                url: `http://127.0.0.1:${status.port}/`,
+                preview: true,
+                formFactor,
+                locale: body.locale,
+                cwd: safePath.value,
+              })
+            },
+            catch: (err) => err,
+          }).pipe(
+            Effect.match({
+              onSuccess: (value) => ({ ok: true as const, value }),
+              onFailure: (err) => ({ ok: false as const, error: err }),
+            }),
+          )
+          if (!report.ok)
+            return HttpServerResponse.jsonUnsafe(
+              { success: false, error: report.error instanceof Error ? report.error.message : "The audit could not be run." },
+              { status: 400 },
+            )
+          return HttpServerResponse.jsonUnsafe({ success: true, report: report.value })
+        }),
+      )
+      .handleRaw(
+        "previewPdf",
+        Effect.fn("GlobalHttpApi.previewPdf")(function* (ctx: { request: HttpServerRequest.HttpServerRequest }) {
+          // Raw route, like previewAudit: the payload schema above documents the body; this reads it as sent.
+          // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
+          const body = yield* Effect.orDie(ctx.request.json) as Effect.Effect<{ directory?: string; html?: string }>
+          if (!body?.directory || !body.html)
+            return HttpServerResponse.jsonUnsafe({ success: false, error: "No report provided" }, { status: 400 })
+          const safePath = yield* Effect.tryPromise(() => CentralStorage.resolveWorkspace(body.directory!)).pipe(
+            Effect.option,
+          )
+          if (safePath._tag === "None") return HttpServerResponse.empty({ status: 403 })
+          const html = body.html
+          const pdf = yield* Effect.tryPromise({ try: () => reportPdf(html), catch: (err) => err }).pipe(
+            Effect.match({
+              onSuccess: (base64) => ({ ok: true as const, base64 }),
+              onFailure: (err) => ({ ok: false as const, error: err }),
+            }),
+          )
+          if (!pdf.ok)
+            return HttpServerResponse.jsonUnsafe(
+              { success: false, error: pdf.error instanceof Error ? pdf.error.message : "The PDF could not be made." },
+              { status: 400 },
+            )
+          return HttpServerResponse.jsonUnsafe({ success: true, base64: pdf.base64 })
         }),
       )
   }),

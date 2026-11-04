@@ -7816,6 +7816,137 @@ export type GlobalPreviewAuditResponses = {
 
 export type GlobalPreviewAuditResponse = GlobalPreviewAuditResponses[keyof GlobalPreviewAuditResponses]
 
+export type GlobalPreviewReportData = {
+  body?: {
+    directory: string
+    formFactor?: "mobile" | "desktop"
+    url?: string
+    locale?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/global/preview/report"
+}
+
+export type GlobalPreviewReportErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalPreviewReportError = GlobalPreviewReportErrors[keyof GlobalPreviewReportErrors]
+
+export type GlobalPreviewReportResponses = {
+  /**
+   * Success
+   */
+  200: {
+    success: boolean
+    report?: {
+      id: string
+      url: string
+      preview: boolean
+      formFactor: "mobile" | "desktop"
+      locale: string
+      createdAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      score: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      lighthouse?: {
+        url: string
+        fetchTime: string
+        categories: {
+          performance: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          accessibility: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          bestPractices: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          seo: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          agentic: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        }
+        metrics: {
+          fcp: string
+          lcp: string
+          tbt: string
+          cls: string
+          si: string
+        }
+        failed: Array<{
+          id: string
+          title: string
+          display: string
+          score: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        }>
+        agentic: {
+          passed: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          total: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        }
+      }
+      lighthouseError?: string
+      technical?: {
+        status: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        loadTime: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        ttfb: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        size: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        https: boolean
+        certificateDays?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        server?: string
+        cms?: string
+        country?: string
+        links: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        title?: string
+      }
+      technicalError?: string
+      checks: Array<{
+        id: string
+        group: "reachability" | "geo" | "agentic" | "design" | "technical"
+        severity: "critical" | "high" | "medium" | "low" | "optional" | "info"
+        values?: {
+          [key: string]: string | number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        }
+      }>
+    }
+    error?: string
+  }
+}
+
+export type GlobalPreviewReportResponse = GlobalPreviewReportResponses[keyof GlobalPreviewReportResponses]
+
+export type GlobalPreviewPdfData = {
+  body?: {
+    directory: string
+    html: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/global/preview/pdf"
+}
+
+export type GlobalPreviewPdfErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalPreviewPdfError = GlobalPreviewPdfErrors[keyof GlobalPreviewPdfErrors]
+
+export type GlobalPreviewPdfResponses = {
+  /**
+   * Success
+   */
+  200: {
+    success: boolean
+    base64?: string
+    error?: string
+  }
+}
+
+export type GlobalPreviewPdfResponse = GlobalPreviewPdfResponses[keyof GlobalPreviewPdfResponses]
+
 export type AuthSignupData = {
   body?: {
     username: string
