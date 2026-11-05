@@ -935,13 +935,16 @@ export default function Page() {
     if (reviewMode() === "checkpoint") return !checkpointDiffQuery.isLoading
     return true
   })
+  // Review diffs stay out of the full-page overlay: their query only starts when
+  // the Git tab is first opened, and the review panel renders its own loading state.
   createEffect(() => {
     const msgsNotReady = !messagesReady()
-    const reviewNotReady = !reviewReady()
     const promptNotReady = !prompt.ready()
     const rendering = store.deferRender
-    global.sessionLoading.set(!!params.id && (msgsNotReady || reviewNotReady || promptNotReady || rendering))
+    global.sessionLoading.set(!!params.id && (msgsNotReady || promptNotReady || rendering))
   })
+  // The overlay lives in the layout, which outlives this page: never leave it stuck on.
+  onCleanup(() => global.sessionLoading.set(false))
   const loadReviewDiff = async (file: string, version?: number): Promise<RenderDiff | undefined> => {
     if (reviewMode() === "checkpoint") {
       const diff = reviewDiffs().find((item) => item.file === file)
